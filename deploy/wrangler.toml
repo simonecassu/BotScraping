@@ -1,0 +1,9 @@
+# Configurazione del ponte Telegram → GitHub per Cloudflare Workers.
+# Il deploy avviene dal workflow GitHub ".github/workflows/ponte.yml" (nessun editor da usare).
+name = "pokebot-bridge"
+main = "cloudflare-worker.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[vars]
+GITHUB_REPO = "simonecassu/BotScraping"

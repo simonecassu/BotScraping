@@ -45,20 +45,23 @@ GitHub disattiva i workflow pianificati dopo 60 giorni senza attività sul repos
 
 Senza ponte il bot legge i comandi solo quando gira (ogni 20 minuti). Con il ponte, gratuito su Cloudflare Workers,
 **ogni messaggio al bot avvia subito il workflow**: il ponte risponde "Ricevuto" e il bot risponde entro un minuto.
-Configurazione una volta sola, tutta da telefono:
+Lo pubblica GitHub Actions al posto tuo: devi solo inserire tre codici nei secret del repository.
 
-1. **Token GitHub**: <https://github.com/settings/personal-access-tokens/new> → nome a piacere, scadenza la più lunga,
-   *Repository access* → **Only select repositories** → `BotScraping`, *Repository permissions* → **Contents: Read and write**
-   → **Generate token** → copia il token (inizia con `github_pat_`).
-2. **Worker**: <https://dash.cloudflare.com> (account gratuito) → **Workers & Pages** → **Create** → *Start with Hello World* →
-   **Deploy** → **Edit code** → cancella tutto e incolla il contenuto di `deploy/cloudflare-worker.js` → **Deploy**.
-3. **Variabili**: nel Worker → **Settings** → **Variables and Secrets** → **Add**, tipo *Secret*:
-   `TELEGRAM_BOT_TOKEN` (token di @BotFather) e `GITHUB_TOKEN` (token del punto 1) → **Deploy**.
-4. **Attivazione**: apri in Safari l'indirizzo del Worker seguito da `/setup`
-   (es. `https://pokebot.<tuo-account>.workers.dev/setup`). Deve comparire "✅ Ponte attivo".
+1. **Token GitHub** (permette al ponte di avviare il bot): <https://github.com/settings/personal-access-tokens/new> →
+   nome a piacere, scadenza la più lunga, *Repository access* → **Only select repositories** → `BotScraping`,
+   *Repository permissions* → **Contents: Read and write** → **Generate token** → copia (inizia con `github_pat_`).
+2. **Token Cloudflare** (account gratuito su <https://dash.cloudflare.com>): <https://dash.cloudflare.com/profile/api-tokens> →
+   **Create Token** → modello **Edit Cloudflare Workers** → **Use template** → **Continue to summary** → **Create Token** → copia.
+3. **Account ID Cloudflare**: nella pagina **Workers & Pages**, colonna di destra, voce *Account ID* (è anche il codice
+   lungo nell'indirizzo `dash.cloudflare.com/<account-id>/...`).
+4. **Secret su GitHub**: <https://github.com/simonecassu/BotScraping/settings/secrets/actions> → **New repository secret**, tre volte:
+   `BRIDGE_GITHUB_TOKEN` (punto 1), `CLOUDFLARE_API_TOKEN` (punto 2), `CLOUDFLARE_ACCOUNT_ID` (punto 3).
+5. **Pubblica**: <https://github.com/simonecassu/BotScraping/actions/workflows/ponte.yml> → **Run workflow**.
+   Alla fine il log mostra "Ponte attivo" e l'indirizzo del worker.
 
-`/status` mostra lo stato del ponte, `/reset` lo disattiva (si torna alla lettura dei comandi a ogni giro).
-Con il ponte attivo, se mandi più comandi in pochi secondi mettili in **un solo messaggio, uno per riga**.
+L'indirizzo del worker mostra lo stato del ponte; aggiungendo `/reset` lo disattivi (si torna alla lettura dei comandi
+a ogni giro). Con il ponte attivo, se mandi più comandi in pochi secondi mettili in **un solo messaggio, uno per riga**.
+Il file del worker è `deploy/cloudflare-worker.js`, la sua configurazione `deploy/wrangler.toml`.
 
 ## Avvio rapido su PC
 
@@ -144,4 +147,4 @@ Struttura: `pokebot/cards.py` (set e indice), `pokebot/matcher.py` (riconoscimen
 `pokebot/scrapers/` (un modulo per marketplace), `pokebot/search.py` (ciclo di ricerca), `pokebot/notifier.py`
 (Telegram), `pokebot/telegram_bot.py` (comandi Telegram), `pokebot/scheduler.py` (esecuzione periodica),
 `pokebot/web/` (interfaccia Flask), `.github/workflows/bot.yml` (esecuzione su GitHub Actions),
-`deploy/cloudflare-worker.js` (ponte Telegram → GitHub).
+`deploy/cloudflare-worker.js` + `deploy/wrangler.toml` (ponte Telegram → GitHub), `.github/workflows/ponte.yml` (ne fa il deploy).

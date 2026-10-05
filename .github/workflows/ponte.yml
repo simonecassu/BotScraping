@@ -1,0 +1,60 @@
+# Pubblica il ponte Telegram → GitHub su Cloudflare Workers e lo attiva, senza toccare l'editor di Cloudflare.
+# Secret necessari (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   token Cloudflare creato con il modello "Edit Cloudflare Workers"
+#   CLOUDFLARE_ACCOUNT_ID  Account ID (pagina Workers & Pages, colonna di destra)
+#   BRIDGE_GITHUB_TOKEN    fine-grained token GitHub con "Contents: Read and write" su questo repository
+#   TELEGRAM_BOT_TOKEN     già presente per il bot
+name: Ponte Telegram
+
+on:
+  workflow_dispatch:
+
+jobs:
+  pubblica:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: deploy
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Controlla i secret
+        env:
+          BRIDGE_GITHUB_TOKEN: ${{ secrets.BRIDGE_GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          manca=""
+          for n in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID BRIDGE_GITHUB_TOKEN TELEGRAM_BOT_TOKEN; do
+            [ -n "${!n}" ] || manca="$manca $n"
+          done
+          if [ -n "$manca" ]; then echo "::error::Secret mancanti:$manca"; exit 1; fi
+
+      - name: Pubblica il worker
+        run: npx --yes wrangler@4 deploy 2>&1 | tee deploy.log
+
+      - name: Imposta le chiavi del worker
+        env:
+          BRIDGE_GITHUB_TOKEN: ${{ secrets.BRIDGE_GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          printf '%s' "$TELEGRAM_BOT_TOKEN" | npx --yes wrangler@4 secret put TELEGRAM_BOT_TOKEN
+          printf '%s' "$BRIDGE_GITHUB_TOKEN" | npx --yes wrangler@4 secret put GITHUB_TOKEN
+
+      - name: Attiva il ponte su Telegram
+        run: |
+          url=$(grep -o 'https://[A-Za-z0-9.-]*workers\.dev' deploy.log | head -1)
+          if [ -z "$url" ]; then echo "::error::Indirizzo del worker non trovato nel log"; exit 1; fi
+          echo "Indirizzo del ponte: $url"
+          sleep 5
+          out=$(curl -sS "$url/setup")
+          echo "$out" | sed 's/<[^>]*>//g' | grep -v '^\s*$'
+          echo "$out" | grep -q "Ponte attivo" || { echo "::error::Attivazione fallita, vedi sopra"; exit 1; }
+          echo "::notice::Ponte attivo su $url — ogni messaggio al bot avvia subito la ricerca"
