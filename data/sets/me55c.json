@@ -1,0 +1,286 @@
+{
+ "id": "me55c",
+ "name": "30th Celebration: Classic Collection",
+ "name_it": "Classic Collection (30° anniversario)",
+ "printed_total": null,
+ "total": 30,
+ "release": "2026-09-16",
+ "context_keywords": [
+  "classic collection",
+  "classic",
+  "classica",
+  "collezione classica"
+ ],
+ "cards": [
+  {
+   "id": "me55c-58",
+   "number": "58",
+   "name": "Pikachu",
+   "rarity": "Common",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-58/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-58/large"
+  },
+  {
+   "id": "me55c-4",
+   "number": "4",
+   "name": "Charizard",
+   "rarity": "Rare Holo",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-4/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-4/large"
+  },
+  {
+   "id": "me55c-18",
+   "number": "18",
+   "name": "Misty",
+   "rarity": "Rare Holo",
+   "supertype": "Trainer",
+   "image": "https://images.scrydex.com/pokemon/me55c-18/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-18/large"
+  },
+  {
+   "id": "me55c-69",
+   "number": "69",
+   "name": "Erika's Jigglypuff",
+   "rarity": "Common",
+   "supertype": "Trainer",
+   "image": "https://images.scrydex.com/pokemon/me55c-69/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-69/large"
+  },
+  {
+   "id": "me55c-25",
+   "number": "25",
+   "name": "Sneasel",
+   "rarity": "Rare",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-25/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-25/large"
+  },
+  {
+   "id": "me55c-106",
+   "number": "106",
+   "name": "Shining Celebi",
+   "rarity": "Rare Secret",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-106/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-106/large"
+  },
+  {
+   "id": "me55c-149",
+   "number": "149",
+   "name": "Lugia",
+   "rarity": "Rare Secret",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-149/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-149/large"
+  },
+  {
+   "id": "me55c-5",
+   "number": "5",
+   "name": "Delcatty",
+   "rarity": "Rare Holo",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-5/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-5/large"
+  },
+  {
+   "id": "me55c-19",
+   "number": "19",
+   "name": "Dark Tyranitar",
+   "rarity": "Rare",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-19/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-19/large"
+  },
+  {
+   "id": "me55c-108",
+   "number": "108",
+   "name": "Scizor ex",
+   "rarity": "Rare Holo ex",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-108/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-108/large"
+  },
+  {
+   "id": "me55c-11",
+   "number": "11",
+   "name": "Metagross",
+   "rarity": "Rare Holo",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-11/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-11/large"
+  },
+  {
+   "id": "me55c-106p",
+   "number": "106",
+   "name": "Palkia LV.X",
+   "rarity": "Rare Holo LV.X",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-106p/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-106p/large"
+  },
+  {
+   "id": "me55c-43",
+   "number": "43",
+   "name": "Uxie",
+   "rarity": "Rare",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-43/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-43/large"
+  },
+  {
+   "id": "me55c-47",
+   "number": "47",
+   "name": "Crobat G",
+   "rarity": "Uncommon",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-47/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-47/large"
+  },
+  {
+   "id": "me55c-94",
+   "number": "94",
+   "name": "Gengar",
+   "rarity": "Rare Prime",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-94/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-94/large"
+  },
+  {
+   "id": "me55c-99",
+   "number": "99",
+   "name": "Darkrai & Cresselia LEGEND",
+   "rarity": "LEGEND",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-99/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-99/large"
+  },
+  {
+   "id": "me55c-100",
+   "number": "100",
+   "name": "Darkrai & Cresselia LEGEND",
+   "rarity": "LEGEND",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-100/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-100/large"
+  },
+  {
+   "id": "me55c-101",
+   "number": "101",
+   "name": "N",
+   "rarity": "Rare Ultra",
+   "supertype": "Trainer",
+   "image": "https://images.scrydex.com/pokemon/me55c-101/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-101/large"
+  },
+  {
+   "id": "me55c-85",
+   "number": "85",
+   "name": "Rayquaza-EX",
+   "rarity": "Rare Holo EX",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-85/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-85/large"
+  },
+  {
+   "id": "me55c-11g",
+   "number": "11",
+   "name": "Genesect-EX",
+   "rarity": "Rare Holo EX",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-11g/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-11g/large"
+  },
+  {
+   "id": "me55c-106m",
+   "number": "106",
+   "name": "M Gardevoir-EX",
+   "rarity": "Rare Holo EX",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-106m/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-106m/large"
+  },
+  {
+   "id": "me55c-41",
+   "number": "41",
+   "name": "Greninja BREAK",
+   "rarity": "Rare BREAK",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-41/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-41/large"
+  },
+  {
+   "id": "me55c-89",
+   "number": "89",
+   "name": "Solgaleo-GX",
+   "rarity": "Rare Holo GX",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-89/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-89/large"
+  },
+  {
+   "id": "me55c-57",
+   "number": "57",
+   "name": "Buzzwole-GX",
+   "rarity": "Rare Holo GX",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-57/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-57/large"
+  },
+  {
+   "id": "me55c-33",
+   "number": "33",
+   "name": "Pikachu & Zekrom-GX",
+   "rarity": "Rare Holo GX",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-33/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-33/large"
+  },
+  {
+   "id": "me55c-138",
+   "number": "138",
+   "name": "Zacian V",
+   "rarity": "Holo Rare V",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-138/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-138/large"
+  },
+  {
+   "id": "me55c-50",
+   "number": "50",
+   "name": "Raikou",
+   "rarity": "Amazing Rare",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-50/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-50/large"
+  },
+  {
+   "id": "me55c-114",
+   "number": "114",
+   "name": "Mew VMAX",
+   "rarity": "Holo Rare VMAX",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-114/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-114/large"
+  },
+  {
+   "id": "me55c-123",
+   "number": "123",
+   "name": "Arceus VSTAR",
+   "rarity": "Holo Rare VSTAR",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-123/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-123/large"
+  },
+  {
+   "id": "me55c-203",
+   "number": "203",
+   "name": "Magikarp",
+   "rarity": "Illustration Rare",
+   "supertype": "Pokémon",
+   "image": "https://images.scrydex.com/pokemon/me55c-203/small",
+   "image_large": "https://images.scrydex.com/pokemon/me55c-203/large"
+  }
+ ]
+}

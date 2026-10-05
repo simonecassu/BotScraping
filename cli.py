@@ -1,0 +1,73 @@
+"""Strumenti da riga di comando.
+
+  python cli.py cerca            esegue un ciclo di ricerca e invia le notifiche
+  python cli.py cerca --dry-run  come sopra ma senza inviare su Telegram
+  python cli.py test-telegram    invia un messaggio di prova
+  python cli.py mancanti         elenca le carte selezionate come mancanti
+  python cli.py analizza "titolo annuncio" ["descrizione"]   mostra come il bot classifica un testo
+"""
+from __future__ import annotations
+
+import argparse
+import logging
+import sys
+
+from pokebot.cards import load_sets
+from pokebot.db import Database
+from pokebot.matcher import Matcher
+from pokebot.notifier import TelegramNotifier
+from pokebot.search import run_search
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(description="PokéBot 30th")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("cerca", help="esegui un ciclo di ricerca")
+    s.add_argument("--dry-run", action="store_true", help="non inviare notifiche")
+    s.add_argument("-v", "--verbose", action="store_true")
+    sub.add_parser("test-telegram", help="invia un messaggio di prova")
+    sub.add_parser("mancanti", help="elenca le carte mancanti")
+    a = sub.add_parser("analizza", help="classifica un testo di annuncio")
+    a.add_argument("titolo")
+    a.add_argument("descrizione", nargs="?", default="")
+    a.add_argument("--asta", action="store_true")
+    args = p.parse_args(argv)
+
+    logging.basicConfig(level=logging.DEBUG if getattr(args, "verbose", False) else logging.INFO,
+                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    index = load_sets()
+    db = Database()
+
+    if args.cmd == "cerca":
+        rep = run_search(index, db, dry_run=args.dry_run)
+        print(f"Query: {rep.queries} · annunci: {rep.listings} (nuovi {rep.new_listings}) · match: {rep.matches} · notifiche: {rep.notified}")
+        for k, v in rep.errors.items():
+            print(f"  errore {k}: {v}")
+        return 0
+    if args.cmd == "test-telegram":
+        ok = TelegramNotifier().test_message()
+        print("Inviato." if ok else "Invio fallito: controlla TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID.")
+        return 0 if ok else 1
+    if args.cmd == "mancanti":
+        wanted = db.wanted_ids()
+        for c in index.all_cards():
+            if c.id in wanted:
+                print(f"{c.label:40s} {c.rarity}")
+        print(f"\n{len(wanted)} carte mancanti su {len(index.by_id)}")
+        return 0
+    if args.cmd == "analizza":
+        settings = db.get_settings()
+        m = Matcher(index, settings["set_keywords"])
+        res = m.analyze(args.titolo, args.descrizione, db.wanted_ids(), float(settings["lot_min_ratio"]),
+                        bool(settings["notify_unverifiable_lots"]), args.asta)
+        print(f"tipo: {res.kind}  notifica: {res.notify}  motivo: {res.reason}")
+        for r in res.refs:
+            print(f"  riconosciuta: {r.card.label} ({r.via})")
+        for g in res.ambiguous:
+            print(f"  ambigua '{g.name}': {', '.join(c.label for c in g.candidates)}")
+        return 0
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
