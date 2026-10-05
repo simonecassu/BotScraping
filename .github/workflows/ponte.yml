@@ -53,8 +53,17 @@ jobs:
           url=$(grep -o 'https://[A-Za-z0-9.-]*workers\.dev' deploy.log | head -1)
           if [ -z "$url" ]; then echo "::error::Indirizzo del worker non trovato nel log"; exit 1; fi
           echo "Indirizzo del ponte: $url"
-          sleep 5
-          out=$(curl -sS "$url/setup")
+          # le chiavi appena caricate impiegano qualche secondo a propagarsi: riprova fino a 2 minuti
+          for i in $(seq 1 12); do
+            sleep 10
+            out=$(curl -sS "$url/setup" || true)
+            if echo "$out" | grep -q "Ponte attivo"; then
+              echo "$out" | sed 's/<[^>]*>//g' | grep -v '^\s*$'
+              echo "::notice::Ponte attivo su $url — ogni messaggio al bot avvia subito la ricerca"
+              exit 0
+            fi
+            echo "tentativo $i: non ancora pronto"
+          done
           echo "$out" | sed 's/<[^>]*>//g' | grep -v '^\s*$'
-          echo "$out" | grep -q "Ponte attivo" || { echo "::error::Attivazione fallita, vedi sopra"; exit 1; }
-          echo "::notice::Ponte attivo su $url — ogni messaggio al bot avvia subito la ricerca"
+          echo "::error::Attivazione fallita, vedi sopra"
+          exit 1
