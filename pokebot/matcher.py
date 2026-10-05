@@ -17,6 +17,7 @@ EXCLUDE_PATTERNS: list[tuple[str, str]] = [
     (r"\b(bust[ae]|bustin[ae]|booster|box|etb|elite trainer|display|blister|tin|pacchett[oi]|sigillat[oaei]|sealed|collection box|premium collection)\b",
      "prodotto sigillato"),
     (r"\b(sleeve|sleeves|toploader|raccoglitor[ei]|album|binder|playmat|deck box|portamazzo|portacarte)\b", "accessorio"),
+    (r"\b(no singola|non singola|mystery|mistery|misterios[oaie]|random|a sorpresa|pacchetto sorpresa)\b", "mystery box / non è la carta singola"),
 ]
 _EXCLUDE_RE = [(re.compile(p), why) for p, why in EXCLUDE_PATTERNS]
 

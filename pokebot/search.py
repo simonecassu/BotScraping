@@ -236,13 +236,22 @@ def _notify_pending(pending: list, notifier: TelegramNotifier, db: Database, rep
 
     # 🔥 affari: prezzo molto sotto la mediana storica della carta -> avviso immediato, fuori dai gruppi
     deals: set[str] = set()
-    if deal_pct > 0 and pending:
+    max_deals = int(settings.get("max_deals_per_run", 3) or 0)
+    if deal_pct > 0 and pending and max_deals > 0:
         history = db.list_found()
+        candidates = []
         for lst, result in pending:
-            if result.kind != "single" or not result.wanted or lst.price is None:
+            if result.kind != "single" or not result.wanted or lst.price is None or lst.price < 1:
                 continue
             median = pstats.median_for_deal(history, result.wanted[0].id)
-            if median and lst.price <= median * deal_pct / 100.0:
+            # sotto il 25% della mediana è quasi sempre un errore di riconoscimento o un'inserzione sospetta
+            if median and median * 0.25 <= lst.price <= median * deal_pct / 100.0:
+                candidates.append((lst.price / median, lst, result, median))
+        candidates.sort(key=lambda t: t[0])
+        if len(candidates) > max_deals:
+            log.info("Affari trovati: %d, inviati solo i %d migliori", len(candidates), max_deals)
+        for _, lst, result, median in candidates[:max_deals]:
+            if True:
                 sent = False if dry_run else notifier.notify_deal(lst, result, median, images)
                 deals.add(lst.key)
                 report.deals += int(sent)
@@ -253,9 +262,31 @@ def _notify_pending(pending: list, notifier: TelegramNotifier, db: Database, rep
                 log.info("AFFARE [%s] %s %.2f € (mediana %.2f)", lst.source, lst.title[:60], lst.price, median)
 
     rest = [(lst, res) for lst, res in pending if lst.key not in deals]
+    # tetto ai messaggi per giro: oltre il limite si registra nello storico senza inviare (anti-valanga)
+    max_msgs = int(settings.get("max_messages_per_run", 10) or 0)
+    overflow_note = None
+    if max_msgs > 0 and rest:
+        from .notifier import group_matches
+        groups = group_matches(rest)
+        if len(groups) > max_msgs:
+            keep_keys = {lst.key for _, _, members in groups[:max_msgs] for lst, _ in members}
+            skipped_groups = groups[max_msgs:]
+            overflow = [(lst, res) for lst, res in rest if lst.key not in keep_keys]
+            rest = [(lst, res) for lst, res in rest if lst.key in keep_keys]
+            for lst, result in overflow:
+                db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),
+                             lst.location, result.kind, result.matched_payload, result.ratio, False, image=lst.image)
+                db.mark_seen(lst.key, notified=False)
+            names = ", ".join(t.replace("🃏 ", "").replace("📦 ", "").replace("❔ ", "") for _, t, _ in skipped_groups[:12])
+            overflow_note = (f"⚠️ Giro insolitamente ricco: {len(groups)} carte con novità, inviate le prime {max_msgs}. "
+                             f"Le altre ({len(overflow)} annunci) sono nello storico: {names}" + (" …" if len(skipped_groups) > 12 else "") +
+                             "\nUsa /storico o /cerca <carta>.")
+            log.info("Tetto messaggi: %d gruppi su %d inviati, %d annunci solo nello storico", max_msgs, len(groups), len(overflow))
     outcomes = [False] * len(rest)
     if rest and not dry_run:
         outcomes = notifier.notify_many(rest, max_per_card=max_per_card, images=images)
+    if overflow_note and not dry_run:
+        notifier.send(overflow_note, disable_preview=True)
     for (lst, result), sent in zip(rest, outcomes):
         report.notified += int(sent)
         db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),

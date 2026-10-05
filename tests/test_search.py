@@ -195,3 +195,40 @@ def test_search_card_targeted(index):
     assert items[1][1].kind == "lot"
     assert any("131/128" in q for q in scraper.queries)
     assert {f["listing_key"] for f in db.list_found()} == {"fake:a", "fake:b", "fake:e"}
+
+
+def test_message_cap_per_run(index):
+    db = make_db()
+    ids = [f"me55-{n}" for n in range(129, 145)]  # 16 carte diverse
+    db.set_wanted_bulk(ids, True)
+    db.save_settings({"generic_queries": ["x"], "per_card_queries": False, "max_messages_per_run": 5, "deal_pct": 0})
+    listings = []
+    for n in range(129, 145):
+        c = index.by_id[f"me55-{n}"]
+        listings.append(Listing("fake", str(n), f"{c.name} {n}/128 30th", f"https://x/{n}", price=10, price_text="10 €"))
+    notifier = FakeNotifier()
+    rep = run_search(index, db, notifier=notifier, scrapers={"fake": FakeScraper(listings)})
+    assert rep.matches == 16 and rep.notified == 5
+    assert any("insolitamente ricco" in t for t in notifier.texts)
+    found = db.list_found()
+    assert len(found) == 16 and sum(1 for f in found if f["notified"]) == 5
+    # tutti segnati come visti: al giro dopo niente ripetizioni
+    rep2 = run_search(index, db, notifier=FakeNotifier(), scrapers={"fake": FakeScraper(listings)})
+    assert rep2.new_listings == 0
+
+
+def test_deal_cap_and_suspicious(index):
+    db = make_db()
+    db.set_wanted_bulk(["me55-131"], True)
+    db.save_settings({"generic_queries": ["x"], "per_card_queries": False, "deal_pct": 60, "max_deals_per_run": 1})
+    _found_history(db, "me55-131", "Lapras 131/128", [20, 22, 18, 25, 21])  # mediana 21
+    listings = [
+        Listing("fake", "a", "Lapras 131/128 30th", "https://x/a", price=11, price_text="11 €"),   # 52%
+        Listing("fake", "b", "Lapras 131/128 30th", "https://x/b", price=9, price_text="9 €"),     # 43% -> il migliore
+        Listing("fake", "c", "Lapras 131/128 30th", "https://x/c", price=2, price_text="2 €"),     # <25%: sospetto, no affare
+        Listing("fake", "d", "Lapras 131/128 30th mystery box", "https://x/d", price=3, price_text="3 €"),  # escluso
+    ]
+    notifier = FakeNotifier()
+    rep = run_search(index, db, notifier=notifier, scrapers={"fake": FakeScraper(listings)})
+    assert rep.deals == 1 and [l.listing_id for l, _ in notifier.deals] == ["b"]
+    assert rep.matches == 3  # la mystery box è scartata del tutto

@@ -42,6 +42,10 @@ def test_settings_commands(index):
     assert s["lot_min_ratio"] == 0.6 and s["max_price"] == 80 and s["sources"] == ["vinted", "ebay"]
     assert h.handle("/cerca").run_search
     assert "sconosciuto" in h.handle("/boh").text
+    db.mark_seen("x:1")
+    assert "conferma" in h.handle("/resetvisti").text and db.is_seen("x:1")
+    h.handle("/resetvisti conferma")
+    assert not db.is_seen("x:1")
     assert "/mancanti" in h.handle("/aiuto").text
 
 

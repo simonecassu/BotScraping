@@ -81,7 +81,7 @@ MENU_COMMANDS = [
     ("prezzo", "Prezzo massimo in euro: /prezzo 100 (0 = nessun limite)"),
     ("fonti", "Marketplace da usare: /fonti wallapop vinted ebay"),
     ("lingua", "Solo carte italiane (/lingua ita) oppure tutte le lingue (/lingua tutte)"),
-    ("resetvisti", "Rinotifica anche gli annunci gia' visti"),
+    ("resetvisti", "ATTENZIONE: rinotifica tutti gli annunci gia' visti (chiede conferma)"),
     ("aiuto", "Elenco dei comandi"),
 ]
 
@@ -257,8 +257,12 @@ class CommandHandler:
                 return self._search_cards(args)
             return Reply("🔎 Ok, cerco adesso.", run_search=True)
         if cmd == "/resetvisti":
+            if args.strip().lower() != "conferma":
+                return Reply("⚠️ Questo rinotifica <b>tutti</b> gli annunci già visti (possono essere centinaia).\n"
+                             "Se sei sicuro scrivi <code>/resetvisti conferma</code>.")
             self.db.forget_seen()
-            return Reply("♻️ Memoria azzerata: al prossimo ciclo rinotifico anche gli annunci già visti.")
+            return Reply("♻️ Memoria azzerata: al prossimo ciclo rinotifico anche gli annunci già visti "
+                         "(al massimo 10 carte per giro, il resto finisce nello storico).")
         return Reply("Comando sconosciuto. /aiuto per l'elenco.")
 
     # ------------------------------------------------------------------
