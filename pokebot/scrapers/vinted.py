@@ -10,6 +10,7 @@ from .base import BaseScraper, Listing, ScraperError, parse_price
 
 BASE_URL = "https://www.vinted.it"
 API_URL = f"{BASE_URL}/api/v2/catalog/items"
+REFRESH_URL = f"{BASE_URL}/web/api/auth/refresh"
 
 BROWSER_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -37,11 +38,24 @@ class VintedScraper(BaseScraper):
             try:
                 resp = self.session.get(BASE_URL + "/", timeout=config.HTTP_TIMEOUT, headers=BROWSER_HEADERS)
                 self.home_status = resp.status_code
+                if not self._has_session_cookie():
+                    # la home non rilascia più access_token_web direttamente: lo fa l'endpoint di refresh
+                    self._throttle()
+                    r2 = self.session.post(REFRESH_URL, timeout=config.HTTP_TIMEOUT,
+                                           headers={**BROWSER_HEADERS, "Accept": "application/json, text/plain, */*",
+                                                    "Referer": BASE_URL + "/", "Origin": BASE_URL,
+                                                    "X-Requested-With": "XMLHttpRequest", "Sec-Fetch-Mode": "cors",
+                                                    "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Dest": "empty"})
+                    self.refresh_status = r2.status_code
             except requests.RequestException as exc:
                 raise ScraperError(f"Vinted: errore di rete: {exc}") from exc
 
+    refresh_status: int | None = None
+
     def _diag(self) -> str:
-        return f"home HTTP {self.home_status}, cookie sessione: {'sì' if self._has_session_cookie() else 'no'}"
+        names = sorted({c.name for c in self.session.cookies if "vinted" in (c.domain or "")})
+        return (f"home HTTP {self.home_status}, refresh HTTP {self.refresh_status}, "
+                f"cookie sessione: {'sì' if self._has_session_cookie() else 'no'}, cookie: {', '.join(names) or 'nessuno'}")
 
     def _has_session_cookie(self) -> bool:
         return any(c.name == "access_token_web" and "vinted" in (c.domain or "") for c in self.session.cookies)

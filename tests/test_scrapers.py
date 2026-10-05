@@ -136,9 +136,15 @@ def test_vinted_fetches_cookies_then_searches(monkeypatch):
             return Resp({"items": [{"id": 1, "title": "Lapras 131/128", "url": "/items/1", "price": {"amount": "5"}}]})
         return Resp({})
 
+    def fake_post(url, **kw):
+        calls.append(url)
+        return Resp({})
+
     s = VintedScraper()
     s.min_delay = s.max_delay = 0
     monkeypatch.setattr(s.session, "get", fake_get)
+    monkeypatch.setattr(s.session, "post", fake_post)
     out = s.search("lapras")
-    assert calls[0].rstrip("/") == "https://www.vinted.it" and "/api/v2/catalog/items" in calls[1]
+    assert calls[0].rstrip("/") == "https://www.vinted.it"
+    assert "/web/api/auth/refresh" in calls[1] and "/api/v2/catalog/items" in calls[2]
     assert len(out) == 1 and out[0].url == "https://www.vinted.it/items/1"
