@@ -85,6 +85,16 @@ class TelegramClient:
             raise requests.RequestException(f"getMe: {data.get('description', resp.status_code)}")
         return data["result"].get("username", "?")
 
+    def webhook_info(self) -> dict:
+        resp = requests.get(f"{self.base}/getWebhookInfo", timeout=config.HTTP_TIMEOUT)
+        data = resp.json()
+        return data.get("result", {}) if data.get("ok") else {}
+
+    def delete_webhook(self) -> bool:
+        """Se un webhook è attivo, getUpdates non funziona: lo rimuove senza perdere i messaggi in coda."""
+        resp = requests.post(f"{self.base}/deleteWebhook", json={"drop_pending_updates": False}, timeout=config.HTTP_TIMEOUT)
+        return resp.status_code == 200 and bool(resp.json().get("ok"))
+
     def get_updates(self, offset: int | None, timeout: int = 0) -> list[dict]:
         params = {"timeout": timeout, "allowed_updates": json.dumps(["message"])}
         if offset is not None:
@@ -334,17 +344,27 @@ class TelegramCommands:
             return False
         self.ensure_menu()
         offset = self.db.get_kv("telegram_offset")
+        info: dict = {}
+        if timeout == 0:  # esecuzione singola (GitHub Actions): diagnostica nel log
+            try:
+                info = self.client.webhook_info()
+                if info.get("url"):
+                    log.warning("Telegram: webhook attivo su %s, lo rimuovo per poter leggere i messaggi", info["url"])
+                    self.client.delete_webhook()
+            except (requests.RequestException, ValueError) as exc:
+                log.warning("Telegram getWebhookInfo: %s", exc)
         try:
             updates = self.client.get_updates(offset, timeout=timeout)
         except requests.RequestException as exc:
             log.warning("Telegram getUpdates: %s", exc)
             return False
-        if timeout == 0:  # esecuzione singola (GitHub Actions): lascia traccia nel log
+        if timeout == 0:
             try:
                 me = self.client.get_me()
             except (requests.RequestException, ValueError, KeyError) as exc:
                 me = f"? ({exc})"
-            log.info("Telegram: bot @%s, %d messaggi nuovi (offset %s)", me, len(updates), offset)
+            log.info("Telegram: bot @%s, %d messaggi nuovi (offset %s), in coda su Telegram: %s, ultimo errore webhook: %s",
+                     me, len(updates), offset, info.get("pending_update_count", "?"), info.get("last_error_message", "-"))
         want_search = False
         for upd in updates:
             self.db.set_kv("telegram_offset", int(upd["update_id"]) + 1)

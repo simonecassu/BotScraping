@@ -68,6 +68,12 @@ class FakeClient:
     def get_me(self):
         return "fakebot"
 
+    def webhook_info(self):
+        return {"url": "", "pending_update_count": len(self.updates)}
+
+    def delete_webhook(self):
+        return True
+
     def get_updates(self, offset, timeout=0):
         return [u for u in self.updates if offset is None or u["update_id"] >= offset]
 
