@@ -54,8 +54,36 @@ class TelegramNotifier:
     def notify_listing(self, listing: Listing, result: MatchResult) -> bool:
         return self.send(format_listing(listing, result))
 
+    def notify_many(self, items: list[tuple[Listing, MatchResult]], detailed_up_to: int = 5, per_message: int = 8) -> list[bool]:
+        """Pochi risultati: un messaggio dettagliato ciascuno. Tanti: riepiloghi compatti da `per_message` annunci."""
+        if len(items) <= detailed_up_to:
+            return [self.notify_listing(lst, res) for lst, res in items]
+        outcomes: list[bool] = []
+        total = len(items)
+        for start in range(0, total, per_message):
+            chunk = items[start:start + per_message]
+            head = f"📬 <b>{total} annunci trovati</b> · {start + 1}–{start + len(chunk)}"
+            ok = self.send(head + "\n\n" + "\n\n".join(format_listing_compact(lst, res) for lst, res in chunk))
+            outcomes.extend([ok] * len(chunk))
+        return outcomes
+
     def test_message(self) -> bool:
         return self.send("✅ PokéBot 30th collegato: riceverai qui gli annunci delle carte mancanti.", True)
+
+
+def format_listing_compact(listing: Listing, result: MatchResult) -> str:
+    esc = html.escape
+    src = SOURCE_LABELS.get(listing.source, listing.source)
+    kind = "📦" if result.kind == "lot" else "🃏"
+    cards = ", ".join(c.label for c in (result.wanted or result.possible_wanted)[:3])
+    if len(result.wanted or result.possible_wanted) > 3:
+        cards += ", …"
+    if result.kind == "lot" and result.total_cards:
+        cards += f" ({result.wanted_count}/{result.total_cards})"
+    price = esc(listing.price_text or (f"{listing.price:.2f} €" if listing.price is not None else "prezzo n.d."))
+    verify = " ⚠️" if (result.possible_wanted and not result.wanted) else ""
+    return (f'{kind} <a href="{esc(listing.url, quote=True)}">{esc(listing.title[:70])}</a>\n'
+            f'   💶 {price} · {esc(src)}{verify}\n   ✅ {esc(cards)}')
 
 
 def format_listing(listing: Listing, result: MatchResult) -> str:

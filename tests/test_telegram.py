@@ -143,3 +143,24 @@ def test_webhook_active_skips_polling(index):
     tc = TelegramCommands(index, db, client=client)
     assert tc.poll_once() is False
     assert client.sent == [] and db.get_kv("telegram_offset") is None
+
+
+def test_notify_many_groups_when_too_many(index, monkeypatch):
+    from pokebot import config
+    from pokebot.matcher import Matcher
+    from pokebot.notifier import TelegramNotifier
+    from pokebot.scrapers.base import Listing
+
+    n = TelegramNotifier(token="t", chat_id="1")
+    sent = []
+    monkeypatch.setattr(n, "send", lambda text, disable_preview=False: sent.append(text) or True)
+    m = Matcher(index, config.DEFAULT_SETTINGS["set_keywords"])
+    items = []
+    for i in range(12):
+        lst = Listing("vinted", str(i), f"Hisuian Zorua 145/128 n.{i} <b>", f"https://v/{i}?a=1&b=2", price=10 + i, price_text=f"{10 + i} €")
+        items.append((lst, m.analyze(lst.title, "", {"me55-145"})))
+    assert n.notify_many(items) == [True] * 12
+    assert len(sent) == 2 and "12 annunci trovati" in sent[0] and "9–12" in sent[1]
+    assert "&lt;b&gt;" in sent[0] and "a=1&amp;b=2" in sent[0]
+    sent.clear()
+    assert n.notify_many(items[:3]) == [True] * 3 and len(sent) == 3

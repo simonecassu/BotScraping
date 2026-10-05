@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 
 from .cards import CardIndex
 from .db import Database
-from .matcher import Matcher
+from .matcher import Matcher, MatchResult
 from .notifier import TelegramNotifier
 from .scrapers import SCRAPERS, Listing, ScraperError
 
@@ -81,6 +81,7 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
     queries = build_queries(index, wanted, settings, db)
     report.queries = len(queries)
     seen_this_run: set[str] = set()
+    pending: list[tuple[Listing, "MatchResult"]] = []  # match da notificare a fine ciclo (raggruppati se tanti)
 
     for name, scraper in scrapers.items():
         for q in queries:
@@ -100,8 +101,9 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
                     continue
                 seen_this_run.add(lst.key)
                 report.new_listings += 1
-                _handle_listing(lst, matcher, wanted, lot_ratio, max_price, unverifiable, db, notifier, report, dry_run)
+                _handle_listing(lst, matcher, wanted, lot_ratio, max_price, unverifiable, db, report, pending)
 
+    _notify_pending(pending, notifier, db, report, dry_run)
     report.finished_at = time.time()
     db.finish_run(run_id, report.listings, report.matches, report.errors)
     log.info("Ciclo completato: %d query, %d annunci (%d nuovi), %d match, %d notifiche",
@@ -112,8 +114,7 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
 
 
 def _handle_listing(lst: Listing, matcher: Matcher, wanted: set[str], lot_ratio: float, max_price: float,
-                    unverifiable: bool, db: Database, notifier: TelegramNotifier, report: RunReport,
-                    dry_run: bool) -> None:
+                    unverifiable: bool, db: Database, report: RunReport, pending: list) -> None:
     result = matcher.analyze(lst.title, lst.description, wanted, lot_ratio, unverifiable, lst.is_auction)
     if not result.notify:
         db.mark_seen(lst.key)
@@ -127,11 +128,16 @@ def _handle_listing(lst: Listing, matcher: Matcher, wanted: set[str], lot_ratio:
         log.info("Oltre il prezzo massimo [%s] %s (%s)", lst.source, lst.title, lst.price_text)
         return
     report.matches += 1
-    sent = False
-    if not dry_run:
-        sent = notifier.notify_listing(lst, result)
-    report.notified += int(sent)
-    db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),
-                 lst.location, result.kind, result.matched_payload, result.ratio, sent)
-    db.mark_seen(lst.key, notified=sent)
+    pending.append((lst, result))
     log.info("MATCH [%s] %s -> %s", lst.source, lst.title, result.reason)
+
+
+def _notify_pending(pending: list, notifier: TelegramNotifier, db: Database, report: RunReport, dry_run: bool) -> None:
+    outcomes = [False] * len(pending)
+    if pending and not dry_run:
+        outcomes = notifier.notify_many(pending)
+    for (lst, result), sent in zip(pending, outcomes):
+        report.notified += int(sent)
+        db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),
+                     lst.location, result.kind, result.matched_payload, result.ratio, sent)
+        db.mark_seen(lst.key, notified=sent)

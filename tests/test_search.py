@@ -31,6 +31,9 @@ class FakeNotifier:
         self.sent.append((listing, result))
         return True
 
+    def notify_many(self, items, detailed_up_to=5, per_message=8):
+        return [self.notify_listing(l, r) for l, r in items]
+
 
 def make_db():
     return Database(os.path.join(tempfile.mkdtemp(), "t.db"))

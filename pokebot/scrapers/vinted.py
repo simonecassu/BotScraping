@@ -63,8 +63,12 @@ class VintedScraper(BaseScraper):
     def _has_session_cookie(self) -> bool:
         return any(c.name == "access_token_web" and "vinted" in (c.domain or "") for c in self.session.cookies)
 
+    api_missing = False  # dopo un 404 dell'API JSON si passa direttamente alla pagina HTML
+
     def search(self, query: str, limit: int = 60) -> list[Listing]:
         self._ensure_cookies()
+        if self.api_missing:
+            return self._search_html(query, limit, "API non disponibile")
         params = {
             "search_text": query,
             "order": "newest_first",
@@ -79,6 +83,7 @@ class VintedScraper(BaseScraper):
         except ScraperError as exc:
             if "404" in str(exc):
                 # l'API JSON non risponde più a questo indirizzo: leggi la pagina di ricerca
+                self.api_missing = True
                 return self._search_html(query, limit, str(exc))
             if any(code in str(exc) for code in ("401", "403")):
                 self._ensure_cookies(force=True)
@@ -107,6 +112,9 @@ class VintedScraper(BaseScraper):
 
     # ------------------------------------------------------------------
     _PRICE_IN_TITLE = re.compile(r"(?:prezzo|price)\s*:\s*(€?\s*\d{1,5}(?:[.,]\d{1,2})?\s*€?)", re.IGNORECASE)
+    _ANY_PRICE = re.compile(r"\d{1,5}(?:[.,]\d{1,2})?\s*€|€\s*\d{1,5}(?:[.,]\d{1,2})?")
+    # il "title" dei link Vinted è "Titolo, Brand: X, Condizioni: Y, 15.00 €, 16.45 €" (il secondo prezzo include la protezione acquisti)
+    _TITLE_META = re.compile(r",\s*(brand|marca|condizioni|condizione|condition|taglia|size|prezzo|price)\s*:", re.IGNORECASE)
 
     @classmethod
     def parse_html(cls, html: str) -> list[Listing]:
@@ -126,15 +134,17 @@ class VintedScraper(BaseScraper):
             if not raw_title:
                 continue
             seen.add(item_id)
-            title = raw_title.split(", prezzo", 1)[0].split(", price", 1)[0].strip()
+            meta = cls._TITLE_META.search(raw_title)
+            title = (raw_title[: meta.start()] if meta else raw_title).strip(" ,")
+            title = cls._ANY_PRICE.split(title)[0].strip(" ,-") or title
             price_text = ""
-            pm = cls._PRICE_IN_TITLE.search(raw_title)
+            pm = cls._PRICE_IN_TITLE.search(raw_title) or cls._ANY_PRICE.search(raw_title)
             if pm:
-                price_text = pm.group(1).strip()
+                price_text = (pm.group(1) if pm.lastindex else pm.group(0)).strip()
             else:
                 card = a.find_parent(attrs={"data-testid": re.compile("grid-item|item-card|product")}) or a.parent
                 txt = card.get_text(" ", strip=True) if card else ""
-                pm2 = re.search(r"\d{1,5}(?:[.,]\d{2})?\s*€|€\s*\d{1,5}(?:[.,]\d{2})?", txt)
+                pm2 = cls._ANY_PRICE.search(txt)
                 price_text = pm2.group(0) if pm2 else ""
             url = href if href.startswith("http") else BASE_URL + href
             img = a.find("img")
