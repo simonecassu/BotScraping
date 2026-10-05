@@ -20,6 +20,8 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 EBAY_CLIENT_ID = os.getenv("EBAY_CLIENT_ID", "").strip()
 EBAY_CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET", "").strip()
 
+TIMEZONE = os.getenv("POKEBOT_TIMEZONE", "Europe/Rome")
+
 WEB_HOST = os.getenv("POKEBOT_HOST", "0.0.0.0")
 WEB_PORT = int(os.getenv("POKEBOT_PORT", "8080"))
 WEB_SECRET = os.getenv("POKEBOT_SECRET", "pokebot-dev-secret")
@@ -38,6 +40,10 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "max_price": 0,  # 0 = nessun limite
     "max_per_card": 5,  # per ogni carta, quanti annunci (i più economici) inviare per ciclo
     "language": "ita",  # "ita" scarta gli annunci dichiaratamente in altre lingue (FR/EN/DE/ES/JP); "tutte" accetta tutto
+    "deal_pct": 60,  # avviso 🔥 se il prezzo è sotto questa % della mediana storica della carta (0 = spento)
+    "images": True,  # immagine della carta nei messaggi raggruppati
+    "paused": False,  # in pausa: cerca e accumula, non notifica
+    "quiet_hours": None,  # es. [23, 8]: dalle 23 alle 8 accumula e manda tutto al mattino
     "sources": ["wallapop", "vinted", "ebay"],
     "set_keywords": [
         "30th celebration",

@@ -41,6 +41,11 @@ HELP = """<b>Comandi</b>
 /lista – tutte le carte del set con i numeri  ·  /lista classic – la Classic Collection
 /stato – ultimo ciclo, errori, impostazioni
 /storico – cartelle per carta: tutti gli annunci trovati finora, divisi per eBay / Vinted / Wallapop
+/prezzi 145 – min / mediana / max visti per la carta, per marketplace · /prezzi – quanto costa finire il set
+/progresso – avanzamento del set, mancanti per rarità, stima di spesa
+/affari 60 – avviso 🔥 immediato se un prezzo è sotto il 60% della mediana storica · /affari off
+/pausa · /riprendi – sospendi/riattiva le notifiche (il bot accumula) · /notte 23 8 – ore silenziose
+/esporta – file Excel con checklist, storico e prezzi · /immagini on|off – foto della carta nei messaggi
 /soglia 50 – % minima di carte mancanti perché un lotto venga segnalato
 /prezzo 100 – prezzo massimo in € (0 = nessun limite)
 /fonti wallapop vinted ebay – quali marketplace usare
@@ -52,7 +57,7 @@ Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
-MENU_VERSION = 5
+MENU_VERSION = 6
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -60,6 +65,14 @@ MENU_COMMANDS = [
     ("lista", "Tutte le carte con i numeri (/lista classic per la Classic)"),
     ("stato", "Ultimo giro, errori, impostazioni"),
     ("storico", "Cartelle per carta con tutti gli annunci trovati, divisi per marketplace"),
+    ("prezzi", "Prezzi visti per una carta (/prezzi 145) o costo per finire il set (/prezzi)"),
+    ("progresso", "Avanzamento del set, mancanti per rarita', stima di spesa"),
+    ("affari", "Avviso immediato se un prezzo e' sotto la % della mediana: /affari 60, /affari off"),
+    ("pausa", "Sospende le notifiche (continua a cercare e accumula)"),
+    ("riprendi", "Riattiva le notifiche e invia quanto accumulato"),
+    ("notte", "Ore silenziose: /notte 23 8 (accumula e invia al mattino), /notte off"),
+    ("esporta", "File Excel con checklist, storico annunci e prezzi"),
+    ("immagini", "Immagine della carta nei messaggi: /immagini on | off"),
     ("cerca", "Cerca subito"),
     ("intervallo", "Ogni quanti minuti cercare: /intervallo 20"),
     ("max", "Quanti annunci (i piu' economici) per carta in ogni giro: /max 5"),
@@ -77,6 +90,7 @@ class Reply:
     text: str
     run_search: bool = False
     buttons: list[list[tuple[str, str]]] | None = None  # righe di pulsanti (etichetta, comando)
+    document: tuple[str, bytes] | None = None  # (nome file, contenuto) da inviare come allegato
 
 
 @dataclass
@@ -124,6 +138,10 @@ class TelegramClient:
                 payload["reply_markup"] = {"inline_keyboard": [[{"text": lbl, "callback_data": data[:64]} for lbl, data in row]
                                                                for row in buttons]}
             requests.post(f"{self.base}/sendMessage", json=payload, timeout=config.HTTP_TIMEOUT)
+
+    def send_document(self, chat_id: str | int, filename: str, content: bytes, caption: str = "") -> None:
+        requests.post(f"{self.base}/sendDocument", data={"chat_id": chat_id, "caption": caption[:1024]},
+                      files={"document": (filename, content)}, timeout=config.HTTP_TIMEOUT * 2)
 
     def answer_callback(self, callback_id: str) -> None:
         try:
@@ -185,6 +203,31 @@ class CommandHandler:
             return Reply(self._fmt_status())
         if cmd in ("/storico", "/cartelle", "/trovati"):
             return self._history(args)
+        if cmd in ("/prezzi", "/prezzo_carta"):
+            return self._prices(args)
+        if cmd in ("/progresso", "/avanzamento"):
+            return self._progress()
+        if cmd in ("/affari", "/affare"):
+            return self._deals(args)
+        if cmd in ("/pausa", "/stop"):
+            self.db.save_settings({"paused": True})
+            return Reply("⏸ Notifiche in pausa. Continuo a cercare e accumulo: con /riprendi ti mando tutto in un colpo.")
+        if cmd in ("/riprendi", "/play", "/riparti"):
+            self.db.save_settings({"paused": False})
+            return Reply("▶️ Notifiche riattivate. Se c'è qualcosa in coda, arriva tra pochi secondi.")
+        if cmd in ("/notte", "/silenzio"):
+            return self._quiet(args)
+        if cmd in ("/esporta", "/export", "/excel"):
+            return self._export()
+        if cmd in ("/immagini", "/foto"):
+            a = args.strip().lower()
+            if a in ("on", "si", "sì", "attiva"):
+                self.db.save_settings({"images": True})
+                return Reply("🖼 Immagine della carta attiva nei messaggi.")
+            if a in ("off", "no", "disattiva"):
+                self.db.save_settings({"images": False})
+                return Reply("🖼 Immagini disattivate: solo testo.")
+            return Reply("Usa <code>/immagini on</code> oppure <code>/immagini off</code>.")
         if cmd == "/soglia":
             return self._set_number(args, "lot_min_ratio", lambda v: min(1.0, max(0.0, v / 100)),
                                     lambda v: f"Soglia lotti: {v * 100:.0f}% di carte mancanti.")
@@ -301,6 +344,108 @@ class CommandHandler:
         return Reply("⚙️ Fonti attive: " + ", ".join(chosen))
 
     # ------------------------------------------------------------------
+    def _prices(self, args: str) -> Reply:
+        from . import stats as pstats
+        rows = self.db.list_found()
+        arg = args.strip().lower()
+        if arg:
+            card = self.index.by_code.get(arg) or self.index.by_id.get(arg)
+            if not card:
+                return Reply("Carta non riconosciuta: usa il numero (es. <code>/prezzi 145</code>) o il codice c1..c30.")
+            cp = pstats.card_prices(rows, card)
+            if not cp.overall.n:
+                return Reply(f"<b>{html.escape(card.label)}</b>\nNessun prezzo visto finora per questa carta.")
+            lines = [f"💶 <b>{html.escape(card.label)}</b> · {cp.overall.n} annunci visti",
+                     f"Minimo <b>{pstats.fmt_eur(cp.overall.min)}</b> · mediana {pstats.fmt_eur(cp.overall.median)} · massimo {pstats.fmt_eur(cp.overall.max)}"]
+            for src in pstats.SOURCE_ORDER:
+                st = cp.by_source.get(src)
+                if st and st.n:
+                    lines.append(f"• {pstats.SOURCE_LABELS[src]}: min {pstats.fmt_eur(st.min)} · mediana {pstats.fmt_eur(st.median)} · {st.n} annunci")
+            if cp.recent_median is not None and cp.older_median:
+                delta = 100.0 * (cp.recent_median - cp.older_median) / cp.older_median
+                arrow = "📈" if delta > 5 else "📉" if delta < -5 else "➡️"
+                lines.append(f"{arrow} Ultimi 7 giorni: mediana {pstats.fmt_eur(cp.recent_median)} ({delta:+.0f}% rispetto a prima)")
+            return Reply("\n".join(lines), buttons=[[("📂 Storico", f"/storico {self.index.code_of[card.id]}")]])
+        comp = pstats.completion(self.index, self.db.wanted_ids(), rows)
+        if not comp.missing:
+            return Reply("🎉 Nessuna carta mancante: set completo!")
+        lines = [f"💶 <b>Per finire il set</b> ({comp.missing} carte mancanti)",
+                 f"Ai prezzi <b>minimi</b> visti: <b>{pstats.fmt_eur(comp.cost_min)}</b> · ai prezzi mediani: {pstats.fmt_eur(comp.cost_median)}",
+                 f"Stima su {comp.priced} carte con prezzi visti" + (f"; {len(comp.unpriced)} ancora senza prezzo" if comp.unpriced else "")]
+        priced = []
+        for c in sorted((c for c in self.index.by_id.values() if c.id in self.db.wanted_ids()), key=lambda c: c.sort_key):
+            st = pstats.card_prices(rows, c).overall
+            if st.n:
+                priced.append((st.min, c))
+        priced.sort(key=lambda t: -t[0])
+        if priced:
+            lines.append("\nLe più care (minimo visto):")
+            lines += [f"• {html.escape(c.label)}: {pstats.fmt_eur(m)}" for m, c in priced[:8]]
+        if comp.unpriced:
+            lines.append("\nSenza prezzo: " + html.escape(", ".join(self.index.code_of[c.id] for c in comp.unpriced[:30]))
+                         + (" …" if len(comp.unpriced) > 30 else ""))
+        return Reply("\n".join(lines))
+
+    def _progress(self) -> Reply:
+        from . import stats as pstats
+        comp = pstats.completion(self.index, self.db.wanted_ids(), self.db.list_found())
+        filled = round(comp.percent / 10)
+        bar = "🟩" * filled + "⬜" * (10 - filled)
+        lines = [f"📊 <b>Progresso set</b>: {comp.owned}/{comp.total} carte ({comp.percent:.0f}%)", bar]
+        if comp.missing:
+            lines.append(f"\nMancano {comp.missing}:")
+            order = ["Common", "Uncommon", "Rare", "Double Rare", "Pikachu Rare", "Illustration Rare",
+                     "Special Illustration Rare", "Futuristic Rare"]
+            keys = [k for k in order if k in comp.by_rarity] + sorted(k for k in comp.by_rarity if k not in order)
+            for k in keys:
+                m, t = comp.by_rarity[k]
+                if m:
+                    lines.append(f"• {html.escape(k)}: {m}/{t}")
+            if comp.priced:
+                lines.append(f"\n💶 Stima per finire: <b>{pstats.fmt_eur(comp.cost_min)}</b> ai minimi visti"
+                             f" ({comp.priced} carte con prezzo" + (f", {len(comp.unpriced)} senza" if comp.unpriced else "") + ")")
+        else:
+            lines.append("🎉 Set completo!")
+        return Reply("\n".join(lines), buttons=[[("💶 Prezzi", "/prezzi"), ("🃏 Mancanti", "/mancanti")]])
+
+    def _deals(self, args: str) -> Reply:
+        a = args.strip().lower().replace("%", "")
+        if a in ("off", "no", "0"):
+            self.db.save_settings({"deal_pct": 0})
+            return Reply("🔥 Avvisi affare disattivati.")
+        if not a:
+            cur = int(self.db.get_settings().get("deal_pct", 60) or 0)
+            return Reply(f"🔥 Avviso affare: {'spento' if not cur else f'sotto il {cur}% della mediana storica'}.\n"
+                         "Imposta con <code>/affari 60</code> oppure spegni con <code>/affari off</code>.")
+        try:
+            v = max(10, min(95, int(float(a))))
+        except ValueError:
+            return Reply("Serve una percentuale, es. <code>/affari 60</code>, oppure <code>/affari off</code>.")
+        self.db.save_settings({"deal_pct": v})
+        return Reply(f"🔥 Avviso affare attivo: ti scrivo subito se una carta mancante esce sotto il {v}% della sua mediana storica "
+                     "(servono almeno 4 prezzi visti per quella carta).")
+
+    def _quiet(self, args: str) -> Reply:
+        a = args.strip().lower()
+        if a in ("off", "no"):
+            self.db.save_settings({"quiet_hours": None})
+            return Reply("🌙 Ore silenziose disattivate.")
+        parts = re.findall(r"\d{1,2}", a)
+        if len(parts) != 2:
+            cur = self.db.get_settings().get("quiet_hours")
+            desc = f"dalle {cur[0]} alle {cur[1]}" if cur else "nessuna"
+            return Reply(f"🌙 Ore silenziose: {desc}.\nImposta con <code>/notte 23 8</code> (accumula e manda al mattino) o <code>/notte off</code>.")
+        start, end = int(parts[0]) % 24, int(parts[1]) % 24
+        self.db.save_settings({"quiet_hours": [start, end]})
+        return Reply(f"🌙 Dalle {start}:00 alle {end}:00 non ti disturbo: accumulo e ti mando tutto al primo giro dopo le {end}:00.")
+
+    def _export(self) -> Reply:
+        from .export import build_workbook
+        content = build_workbook(self.index, self.db)
+        name = time.strftime("pokebot_%Y%m%d_%H%M.xlsx")
+        return Reply("📎 Ecco il file Excel: checklist, storico annunci e prezzi.", document=(name, content))
+
+    # ------------------------------------------------------------------
     SOURCE_ORDER = ["ebay", "vinted", "wallapop"]
     SOURCE_LABELS = {"ebay": "eBay.it", "vinted": "Vinted", "wallapop": "Wallapop"}
 
@@ -415,7 +560,15 @@ class CommandHandler:
         runs = self.db.last_runs(1)
         max_price = s["max_price"]
         price_txt = "nessuno" if not max_price else f"{max_price:g} €"
-        lines = [f"🃏 Mancanti: <b>{len(self.db.wanted_ids())}</b>/{len(self.index.by_id)}",
+        qh = s.get("quiet_hours")
+        flags = []
+        if s.get("paused"):
+            flags.append("⏸ in pausa")
+        if qh:
+            flags.append(f"🌙 notte {qh[0]}-{qh[1]}")
+        flags.append(f"🔥 affari {'off' if not s.get('deal_pct') else str(int(s['deal_pct'])) + '%'}")
+        flags.append(f"🖼 immagini {'on' if s.get('images', True) else 'off'}")
+        lines = [f"🃏 Mancanti: <b>{len(self.db.wanted_ids())}</b>/{len(self.index.by_id)} · " + " · ".join(flags),
                  f"⚙️ Ricerca ogni {int(s['interval_minutes'])} min · max {int(s.get('max_per_card', 5))} annunci per carta · "
                  f"soglia lotti {s['lot_min_ratio'] * 100:.0f}% · prezzo max {price_txt} · lingua: {s.get('language', 'ita')} · "
                  f"fonti: {', '.join(s['sources'])}"]
@@ -505,11 +658,16 @@ class TelegramCommands:
                 continue
             reply = self.handler.handle(text)
             want_search = want_search or reply.run_search
-            try:
-                self.client.send(chat_id, reply.text, reply.buttons)
-            except requests.RequestException as exc:
-                log.warning("Telegram sendMessage: %s", exc)
+            self._deliver(chat_id, reply)
         return want_search
+
+    def _deliver(self, chat_id: str, reply: Reply) -> None:
+        try:
+            self.client.send(chat_id, reply.text, reply.buttons)
+            if reply.document:
+                self.client.send_document(chat_id, reply.document[0], reply.document[1])
+        except requests.RequestException as exc:
+            log.warning("Telegram invio: %s", exc)
 
     def handle_payload(self, payload: dict | None) -> bool:
         """Comando arrivato tramite repository_dispatch (ponte Telegram → GitHub). True se chiede /cerca."""
@@ -523,10 +681,7 @@ class TelegramCommands:
             log.warning("Comando via ponte ignorato da chat non autorizzata %s", chat_id)
             return False
         reply = self.handler.handle(text)
-        try:
-            self.client.send(chat_id, reply.text, reply.buttons)
-        except requests.RequestException as exc:
-            log.warning("Telegram sendMessage: %s", exc)
+        self._deliver(chat_id, reply)
         return reply.run_search
 
     def _authorized(self, chat_id: str, text: str) -> bool:

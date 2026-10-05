@@ -54,7 +54,32 @@ class TelegramNotifier:
     def notify_listing(self, listing: Listing, result: MatchResult) -> bool:
         return self.send(format_listing(listing, result))
 
-    def notify_many(self, items: list[tuple[Listing, MatchResult]], max_per_card: int = 5) -> list[bool]:
+    def send_photo(self, photo_url: str, caption: str) -> bool:
+        """Foto con didascalia (max 1024 caratteri); False se Telegram rifiuta (si ripiega sul testo)."""
+        if not self.configured or not photo_url:
+            return False
+        url = f"https://api.telegram.org/bot{self.token}/sendPhoto"
+        payload = {"chat_id": self.chat_id, "photo": photo_url, "caption": caption[:1024], "parse_mode": "HTML"}
+        try:
+            resp = requests.post(url, json=payload, timeout=config.HTTP_TIMEOUT)
+        except requests.RequestException as exc:
+            log.warning("Telegram sendPhoto: %s", exc)
+            return False
+        if resp.status_code != 200:
+            log.info("Telegram sendPhoto rifiutata (%s), invio come testo", resp.status_code)
+            return False
+        return True
+
+    def send_with_image(self, text: str, image_url: str | None, images: bool) -> bool:
+        """Testo con immagine della carta se abilitata; se il testo è lungo, prima la foto poi il testo."""
+        if images and image_url:
+            if len(text) <= 1024 and self.send_photo(image_url, text):
+                return True
+            if len(text) > 1024 and self.send_photo(image_url, text.split("\n", 1)[0]):
+                return self.send(text, disable_preview=True)
+        return self.send(text, disable_preview=True)
+
+    def notify_many(self, items: list[tuple[Listing, MatchResult]], max_per_card: int = 5, images: bool = True) -> list[bool]:
         """Un messaggio per carta con i `max_per_card` annunci più economici del ciclo; i lotti a parte.
 
         Restituisce, per ogni elemento di `items`, True se è stato inviato.
@@ -64,9 +89,24 @@ class TelegramNotifier:
         for key, title, members in groups:
             chosen = members[: max(1, max_per_card)]
             text = format_group(title, chosen, len(members))
-            if self.send(text, disable_preview=True):
+            image = None
+            if key != "lot" and not key.startswith("maybe:"):
+                card = chosen[0][1].wanted[0] if chosen[0][1].wanted else None
+                image = card.image if card else None
+            if self.send_with_image(text, image, images):
                 sent_keys.update(lst.key for lst, _ in chosen)
         return [lst.key in sent_keys for lst, _ in items]
+
+    def notify_deal(self, listing: Listing, result: MatchResult, median: float, images: bool = True) -> bool:
+        """Avviso immediato 🔥 per un prezzo molto sotto la mediana storica."""
+        card = result.wanted[0]
+        pct = 100.0 * (listing.price or 0) / median if median else 0
+        esc = html.escape
+        text = (f"🔥 <b>AFFARE</b> · {esc(card.label)}\n"
+                f"<b>{esc(listing.price_text or f'{listing.price:.2f} €')}</b> · {esc(SOURCE_LABELS.get(listing.source, listing.source))}"
+                f" · {pct:.0f}% della mediana ({median:.2f} €)\n"
+                f'<a href="{esc(listing.url, quote=True)}">{esc(listing.title[:80])}</a>')
+        return self.send_with_image(text, card.image, images)
 
     def test_message(self) -> bool:
         return self.send("✅ PokéBot 30th collegato: riceverai qui gli annunci delle carte mancanti.", True)

@@ -5,6 +5,11 @@ import logging
 import time
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from . import config
+from . import stats as pstats
 
 from .cards import CardIndex
 from .db import Database
@@ -24,6 +29,8 @@ class RunReport:
     new_listings: int = 0
     matches: int = 0
     notified: int = 0
+    deals: int = 0
+    queued: int = 0
     errors: dict[str, str] = field(default_factory=dict)
     wanted_count: int = 0
     skipped: Counter = field(default_factory=Counter)
@@ -73,6 +80,9 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
     max_per_card = int(settings.get("max_per_card", 5) or 5)
     language = str(settings.get("language", "ita") or "ita")
     notifier = notifier or TelegramNotifier.from_db(db)
+    suppressed = notifications_suppressed(settings)
+    if not suppressed:
+        flush_queued(db, notifier, settings)
 
     if scrapers is None:
         scrapers = {}
@@ -116,12 +126,12 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
             # qualche query è riuscita: l'errore è parziale, non bloccante
             report.errors[name] = "parziale: " + report.errors[name]
 
-    _notify_pending(pending, notifier, db, report, dry_run, max_per_card)
+    _notify_pending(pending, notifier, db, report, dry_run, max_per_card, settings, suppressed)
     report.finished_at = time.time()
     db.finish_run(run_id, report.listings, report.matches, report.errors, dict(report.per_source))
-    log.info("Ciclo completato: %d query, %d annunci (%d nuovi), %d match, %d notifiche · per fonte: %s",
-             report.queries, report.listings, report.new_listings, report.matches, report.notified,
-             ", ".join(f"{k} {v}" for k, v in report.per_source.items()) or "-")
+    log.info("Ciclo completato: %d query, %d annunci (%d nuovi), %d match, %d notifiche, %d affari, %d in coda · per fonte: %s",
+             report.queries, report.listings, report.new_listings, report.matches, report.notified, report.deals,
+             report.queued, ", ".join(f"{k} {v}" for k, v in report.per_source.items()) or "-")
     if report.skipped:
         log.info("Scartati: " + "; ".join(f"{n} × {why}" for why, n in report.skipped.most_common()))
     return report
@@ -146,13 +156,108 @@ def _handle_listing(lst: Listing, matcher: Matcher, wanted: set[str], lot_ratio:
     log.info("MATCH [%s] %s -> %s", lst.source, lst.title, result.reason)
 
 
+def notifications_suppressed(settings: dict) -> bool:
+    """True se siamo in pausa o nelle ore notturne: si accumula e si invia dopo."""
+    if settings.get("paused"):
+        return True
+    qh = settings.get("quiet_hours")
+    if qh and len(qh) == 2:
+        start, end = int(qh[0]), int(qh[1])
+        hour = datetime.now(ZoneInfo(config.TIMEZONE)).hour
+        if start == end:
+            return False
+        if start < end:
+            return start <= hour < end
+        return hour >= start or hour < end
+    return False
+
+
+def _row_to_pair(row: dict, index_by_id: dict | None = None) -> tuple[Listing, MatchResult]:
+    """Ricostruisce annuncio e risultato da una riga della tabella found (per inviare la coda)."""
+    from .cards import Card  # noqa: F401 - solo per i type hint
+    from .scrapers.base import parse_price
+    lst = Listing(row["source"], row["listing_key"].split(":", 1)[-1], row["title"], row["url"],
+                  price=parse_price(row.get("price")), price_text=row.get("price") or "", location=row.get("location") or "")
+    wanted = []
+    possible = []
+    for m in row["matched"]:
+        card = (index_by_id or {}).get(m["id"])
+        if card is None:
+            continue
+        (wanted if m.get("sure", True) else possible).append(card)
+    res = MatchResult(row["kind"], True, "dalla coda", wanted=wanted, possible_wanted=possible,
+                      total_cards=len(wanted) + len(possible), wanted_count=len(wanted), ratio=row.get("ratio"))
+    return lst, res
+
+
+def flush_queued(db: Database, notifier: TelegramNotifier, settings: dict, index_by_id: dict | None = None) -> int:
+    """Invia gli annunci accumulati durante la pausa o la notte, raggruppati per carta."""
+    rows = db.queued_found()
+    if not rows:
+        return 0
+    if index_by_id is None:
+        from .cards import load_sets
+        index_by_id = load_sets().by_id
+    pairs = []
+    ids = []
+    for r in rows:
+        lst, res = _row_to_pair(r, index_by_id)
+        if not (res.wanted or res.possible_wanted) and r["kind"] != "lot":
+            db.mark_sent([r["id"]], False)
+            continue
+        pairs.append((lst, res))
+        ids.append(r["id"])
+    if not pairs:
+        return 0
+    notifier.send(f"🌅 <b>Accumulati durante la pausa: {len(pairs)} annunci</b>", disable_preview=True)
+    outcomes = notifier.notify_many(pairs, max_per_card=int(settings.get("max_per_card", 5) or 5),
+                                    images=bool(settings.get("images", True)))
+    for row_id, sent in zip(ids, outcomes):
+        db.mark_sent([row_id], sent)
+    log.info("Coda inviata: %d annunci", len(pairs))
+    return len(pairs)
+
+
 def _notify_pending(pending: list, notifier: TelegramNotifier, db: Database, report: RunReport, dry_run: bool,
-                    max_per_card: int = 5) -> None:
-    outcomes = [False] * len(pending)
-    if pending and not dry_run:
-        outcomes = notifier.notify_many(pending, max_per_card=max_per_card)
-    for (lst, result), sent in zip(pending, outcomes):
+                    max_per_card: int = 5, settings: dict | None = None, suppressed: bool = False) -> None:
+    settings = settings or {}
+    images = bool(settings.get("images", True))
+    deal_pct = float(settings.get("deal_pct", 60) or 0)
+
+    if suppressed:
+        for lst, result in pending:
+            report.queued += 1
+            db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),
+                         lst.location, result.kind, result.matched_payload, result.ratio, False, queued=True, image=lst.image)
+            db.mark_seen(lst.key, notified=False)
+        if pending:
+            log.info("Notifiche sospese (pausa/notte): %d annunci in coda", len(pending))
+        return
+
+    # 🔥 affari: prezzo molto sotto la mediana storica della carta -> avviso immediato, fuori dai gruppi
+    deals: set[str] = set()
+    if deal_pct > 0 and pending:
+        history = db.list_found()
+        for lst, result in pending:
+            if result.kind != "single" or not result.wanted or lst.price is None:
+                continue
+            median = pstats.median_for_deal(history, result.wanted[0].id)
+            if median and lst.price <= median * deal_pct / 100.0:
+                sent = False if dry_run else notifier.notify_deal(lst, result, median, images)
+                deals.add(lst.key)
+                report.deals += int(sent)
+                report.notified += int(sent)
+                db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or f"{lst.price:.2f} €", lst.location,
+                             result.kind, result.matched_payload, result.ratio, sent, image=lst.image, deal=True)
+                db.mark_seen(lst.key, notified=sent)
+                log.info("AFFARE [%s] %s %.2f € (mediana %.2f)", lst.source, lst.title[:60], lst.price, median)
+
+    rest = [(lst, res) for lst, res in pending if lst.key not in deals]
+    outcomes = [False] * len(rest)
+    if rest and not dry_run:
+        outcomes = notifier.notify_many(rest, max_per_card=max_per_card, images=images)
+    for (lst, result), sent in zip(rest, outcomes):
         report.notified += int(sent)
         db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),
-                     lst.location, result.kind, result.matched_payload, result.ratio, sent)
+                     lst.location, result.kind, result.matched_payload, result.ratio, sent, image=lst.image)
         db.mark_seen(lst.key, notified=sent)

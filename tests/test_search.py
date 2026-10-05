@@ -31,8 +31,17 @@ class FakeNotifier:
         self.sent.append((listing, result))
         return True
 
-    def notify_many(self, items, max_per_card=5):
+    def notify_many(self, items, max_per_card=5, images=True):
         return [self.notify_listing(l, r) for l, r in items]
+
+    def notify_deal(self, listing, result, median, images=True):
+        self.sent.append((listing, result))
+        self.deals = getattr(self, "deals", []) + [(listing, median)]
+        return True
+
+    def send(self, text, disable_preview=False):
+        self.texts = getattr(self, "texts", []) + [text]
+        return True
 
 
 def make_db():
@@ -111,3 +120,58 @@ def test_source_error_tolerance(index):
     s2 = Flaky(fail_on={1, 2, 3})
     rep2 = run_search(index, db2, notifier=FakeNotifier(), scrapers={"fake": s2})
     assert len(s2.queries) == 3 and not rep2.errors["fake"].startswith("parziale")
+
+
+def _found_history(db, card_id, label, prices, source="vinted"):
+    for i, p in enumerate(prices):
+        db.add_found(f"{source}:h{i}", source, f"{label} storico {i}", f"https://h/{i}", f"{p:.2f} €", "", "single",
+                     [{"id": card_id, "label": label, "sure": True}], 1.0, True)
+
+
+def test_deal_alert_and_grouping(index):
+    db = make_db()
+    db.set_wanted_bulk(["me55-131"], True)
+    db.save_settings({"generic_queries": ["x"], "per_card_queries": False, "deal_pct": 60})
+    _found_history(db, "me55-131", "Lapras 131/128", [20, 22, 18, 25, 21])  # mediana 21
+    listings = [
+        Listing("fake", "cheap", "Lapras 131/128 30th", "https://x/1", price=9, price_text="9 €"),      # 43% -> affare
+        Listing("fake", "normal", "Lapras 131/128 30th ITA", "https://x/2", price=19, price_text="19 €"),
+    ]
+    notifier = FakeNotifier()
+    rep = run_search(index, db, notifier=notifier, scrapers={"fake": FakeScraper(listings)})
+    assert rep.deals == 1 and rep.matches == 2 and rep.notified == 2
+    assert [l.listing_id for l, _ in notifier.deals] == ["cheap"]
+    found = {f["listing_key"]: f for f in db.list_found()}
+    assert found["fake:cheap"]["deal"] == 1 and found["fake:normal"]["deal"] == 0
+
+
+def test_pause_queues_and_resume_flushes(index):
+    from pokebot.search import flush_queued
+    db = make_db()
+    db.set_wanted_bulk(["me55-131"], True)
+    db.save_settings({"generic_queries": ["x"], "per_card_queries": False, "paused": True})
+    notifier = FakeNotifier()
+    rep = run_search(index, db, notifier=notifier, scrapers={"fake": FakeScraper([
+        Listing("fake", "1", "Lapras 131/128 30th", "https://x/1", price=10, price_text="10 €")])})
+    assert rep.queued == 1 and rep.notified == 0 and notifier.sent == []
+    assert len(db.queued_found()) == 1
+    db.save_settings({"paused": False})
+    n = flush_queued(db, notifier, db.get_settings(), index.by_id)
+    assert n == 1 and len(notifier.sent) == 1 and db.queued_found() == []
+    assert db.list_found()[0]["notified"] == 1 and any("Accumulati" in t for t in notifier.texts)
+
+
+def test_quiet_hours(monkeypatch):
+    from pokebot import search
+    from datetime import datetime
+
+    class FakeDT(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 10, 5, 23, 30, tzinfo=tz)
+
+    monkeypatch.setattr(search, "datetime", FakeDT)
+    assert search.notifications_suppressed({"quiet_hours": [23, 8]})
+    assert not search.notifications_suppressed({"quiet_hours": [8, 20]})
+    assert search.notifications_suppressed({"paused": True})
+    assert not search.notifications_suppressed({})

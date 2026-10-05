@@ -62,10 +62,14 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
             conn.executescript(SCHEMA)
-            try:
-                conn.execute("ALTER TABLE runs ADD COLUMN per_source TEXT")
-            except sqlite3.OperationalError:
-                pass  # colonna già presente
+            for stmt in ("ALTER TABLE runs ADD COLUMN per_source TEXT",
+                         "ALTER TABLE found ADD COLUMN queued INTEGER NOT NULL DEFAULT 0",
+                         "ALTER TABLE found ADD COLUMN image TEXT",
+                         "ALTER TABLE found ADD COLUMN deal INTEGER NOT NULL DEFAULT 0"):
+                try:
+                    conn.execute(stmt)
+                except sqlite3.OperationalError:
+                    pass  # colonna già presente
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -169,15 +173,32 @@ class Database:
 
     def add_found(self, listing_key: str, source: str, title: str, url: str, price: str | None,
                   location: str | None, kind: str, matched: list[dict], ratio: float | None,
-                  notified: bool) -> int:
+                  notified: bool, queued: bool = False, image: str | None = None, deal: bool = False) -> int:
         with self.connect() as c:
             cur = c.execute(
-                "INSERT INTO found(listing_key, source, title, url, price, location, kind, matched, ratio, notified, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO found(listing_key, source, title, url, price, location, kind, matched, ratio, notified, "
+                "created_at, queued, image, deal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (listing_key, source, title, url, price, location, kind, json.dumps(matched, ensure_ascii=False),
-                 ratio, int(notified), time.time()),
+                 ratio, int(notified), time.time(), int(queued), image, int(deal)),
             )
             return int(cur.lastrowid)
+
+    def queued_found(self) -> list[dict]:
+        """Annunci trovati durante la pausa / le ore notturne, non ancora inviati."""
+        with self.connect() as c:
+            rows = c.execute("SELECT * FROM found WHERE queued = 1 ORDER BY created_at").fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["matched"] = json.loads(d["matched"])
+            out.append(d)
+        return out
+
+    def mark_sent(self, ids: list[int], sent: bool) -> None:
+        if not ids:
+            return
+        with self.connect() as c:
+            c.executemany("UPDATE found SET queued = 0, notified = ? WHERE id = ?", [(int(sent), i) for i in ids])
 
     def list_found(self, limit: int = 2000) -> list[dict]:
         with self.connect() as c:

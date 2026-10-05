@@ -81,6 +81,9 @@ class FakeClient:
         self.sent.append((str(chat_id), text))
         self.last_buttons = buttons
 
+    def send_document(self, chat_id, filename, content, caption=""):
+        self.documents = getattr(self, "documents", []) + [(filename, len(content))]
+
     def answer_callback(self, callback_id):
         self.answered = callback_id
 
@@ -235,3 +238,59 @@ def test_language_command_and_status_counts(index):
     db.finish_run(run_id, 10, 1, {}, {"ebay": 6, "vinted": 4})
     st = h.handle("/stato").text
     assert "lingua: ita" in st and "eBay.it 6" in st and "Vinted 4" in st
+
+
+def _hist(db, card_id, label, prices, source="vinted", key="h"):
+    for i, p in enumerate(prices):
+        db.add_found(f"{source}:{key}{i}", source, f"{label} {i}", f"https://h/{i}", f"{p:.2f} €", "", "single",
+                     [{"id": card_id, "label": label, "sure": True}], 1.0, True)
+
+
+def test_prices_progress_and_settings_commands(index):
+    db, h = make(index)
+    db.set_wanted_bulk(["me55-131", "me55-145"], True)
+    _hist(db, "me55-131", "Lapras 131/128", [20, 10, 30], "vinted", "v")
+    _hist(db, "me55-131", "Lapras 131/128", [15], "ebay", "e")
+    r = h.handle("/prezzi 131")
+    assert "Lapras 131/128" in r.text and "Minimo <b>10,00 €</b>" in r.text and "mediana 17,50 €" in r.text
+    assert "eBay.it: min 15,00 €" in r.text and "Vinted: min 10,00 €" in r.text
+    assert "Nessun prezzo" in h.handle("/prezzi 145").text
+    tot = h.handle("/prezzi").text
+    assert "2 carte mancanti" in tot and "<b>10,00 €</b>" in tot and "1 ancora senza prezzo" in tot
+    prog = h.handle("/progresso").text
+    assert "189/191" in prog and "🟩" in prog and "Illustration Rare: 2/19" in prog and "10,00 €" in prog
+    assert "60%" in h.handle("/affari").text
+    h.handle("/affari 50")
+    assert db.get_settings()["deal_pct"] == 50
+    h.handle("/affari off")
+    assert db.get_settings()["deal_pct"] == 0
+    h.handle("/pausa")
+    assert db.get_settings()["paused"] is True
+    h.handle("/riprendi")
+    assert db.get_settings()["paused"] is False
+    h.handle("/notte 23 8")
+    assert db.get_settings()["quiet_hours"] == [23, 8]
+    h.handle("/notte off")
+    assert db.get_settings()["quiet_hours"] is None
+    h.handle("/immagini off")
+    assert db.get_settings()["images"] is False
+    st = h.handle("/stato").text
+    assert "affari off" in st and "immagini off" in st
+
+
+def test_export_sends_document(index):
+    db = Database(os.path.join(tempfile.mkdtemp(), "t.db"))
+    db.set_kv("telegram_chat_id", "42")
+    db.set_wanted_bulk(["me55-131"], True)
+    _hist(db, "me55-131", "Lapras 131/128", [12], "vinted", "x")
+    client = FakeClient([{"update_id": 1, "message": {"chat": {"id": 42}, "text": "/esporta"}}])
+    tc = TelegramCommands(index, db, client=client)
+    tc.poll_once()
+    assert client.documents and client.documents[0][0].endswith(".xlsx") and client.documents[0][1] > 5000
+    # il file è un xlsx valido con i tre fogli
+    from openpyxl import load_workbook
+    import io
+    from pokebot.export import build_workbook
+    wb = load_workbook(io.BytesIO(build_workbook(index, db)))
+    assert wb.sheetnames == ["Checklist", "Annunci", "Prezzi"]
+    assert wb["Checklist"].max_row == 192 and wb["Annunci"].max_row == 2

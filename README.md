@@ -37,6 +37,12 @@ Il bot gira ogni 20 minuti sui server di GitHub e si comanda **solo da Telegram*
 | `/soglia 50` · `/prezzo 100` · `/fonti wallapop vinted ebay` | soglia lotti, prezzo massimo, marketplace |
 | `/intervallo 20` | ogni quanti minuti fare la ricerca automatica |
 | `/lingua ita` · `/lingua tutte` | scarta gli annunci in francese/inglese/altre lingue (default) oppure accetta tutto |
+| `/prezzi 145` · `/prezzi` | prezzi visti per una carta (min/mediana/max per marketplace, tendenza) · quanto costa finire il set |
+| `/progresso` | avanzamento del set, mancanti per rarità, stima di spesa |
+| `/affari 60` · `/affari off` | avviso 🔥 immediato se una carta mancante esce sotto il 60 % della sua mediana storica |
+| `/pausa` · `/riprendi` · `/notte 23 8` | sospende le notifiche (il bot accumula e invia tutto al ritorno) · ore silenziose |
+| `/esporta` | file Excel con checklist, storico annunci e prezzi |
+| `/immagini on` · `off` | immagine della carta nei messaggi raggruppati |
 | `/cerca` · `/resetvisti` | ricerca immediata · rinotifica gli annunci già visti |
 
 Lo stato (carte mancanti, annunci già visti) è salvato nel branch `bot-state`.
