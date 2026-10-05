@@ -12,7 +12,7 @@ from .scrapers.base import Listing
 
 log = logging.getLogger(__name__)
 
-SOURCE_LABELS = {"subito": "Subito.it", "vinted": "Vinted", "ebay": "eBay.it"}
+SOURCE_LABELS = {"wallapop": "Wallapop", "vinted": "Vinted", "ebay": "eBay.it"}
 
 
 class TelegramNotifier:

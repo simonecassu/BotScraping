@@ -13,7 +13,7 @@
   </fieldset>
   <fieldset>
     <legend>Marketplace</legend>
-    <label class="chk"><input type="checkbox" name="sources" value="subito" {{ 'checked' if 'subito' in s.sources }}> Subito.it</label>
+    <label class="chk"><input type="checkbox" name="sources" value="wallapop" {{ 'checked' if 'wallapop' in s.sources }}> Wallapop</label>
     <label class="chk"><input type="checkbox" name="sources" value="vinted" {{ 'checked' if 'vinted' in s.sources }}> Vinted</label>
     <label class="chk"><input type="checkbox" name="sources" value="ebay" {{ 'checked' if 'ebay' in s.sources }}> eBay.it {% if ebay_api %}<small>(API ufficiale)</small>{% else %}<small>(scraping pagina; per l'API imposta EBAY_CLIENT_ID/SECRET)</small>{% endif %}</label>
   </fieldset>

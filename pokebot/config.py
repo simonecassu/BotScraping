@@ -36,7 +36,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "interval_minutes": 15,
     "lot_min_ratio": 0.5,
     "max_price": 0,  # 0 = nessun limite
-    "sources": ["subito", "vinted", "ebay"],
+    "sources": ["wallapop", "vinted", "ebay"],
     "set_keywords": [
         "30th celebration",
         "30th",

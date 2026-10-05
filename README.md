@@ -1,6 +1,6 @@
 # PokéBot 30th — bot per completare il master set *Pokémon 30th Celebration*
 
-Cerca in automatico su **Subito.it, Vinted ed eBay.it** le carte che ti mancano del set
+Cerca in automatico su **Wallapop, Vinted ed eBay.it** le carte che ti mancano del set
 **30th Celebration** (161 carte, numerazione `/128`) e della sottoserie **Classic Collection** (30 carte),
 e ti manda su **Telegram** il link di ogni annuncio utile.
 
@@ -72,7 +72,7 @@ Nomi alternativi (es. nome italiano di un Allenatore) si aggiungono in `data/ali
 
 | Fonte | Metodo | Note |
 |---|---|---|
-| Subito.it | API JSON del sito (`hades.subito.it`) | solo annunci in vendita, ordinati per data |
+| Wallapop | API JSON del sito (`api.wallapop.com`) | ordinati per data, filtrati sull'Italia; esclusi riservati/venduti |
 | Vinted | API catalogo con sessione anonima | può richiedere qualche secondo tra le richieste |
 | eBay.it | **API Browse ufficiale** se imposti `EBAY_CLIENT_ID/SECRET`, altrimenti pagina di ricerca | solo *Compralo Subito*, solo venditori in Italia (opzione) |
 
