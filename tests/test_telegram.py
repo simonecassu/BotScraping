@@ -145,7 +145,7 @@ def test_webhook_active_skips_polling(index):
     assert client.sent == [] and db.get_kv("telegram_offset") is None
 
 
-def test_notify_many_groups_when_too_many(index, monkeypatch):
+def test_notify_many_one_message_per_card_cheapest_first(index, monkeypatch):
     from pokebot import config
     from pokebot.matcher import Matcher
     from pokebot.notifier import TelegramNotifier
@@ -155,12 +155,29 @@ def test_notify_many_groups_when_too_many(index, monkeypatch):
     sent = []
     monkeypatch.setattr(n, "send", lambda text, disable_preview=False: sent.append(text) or True)
     m = Matcher(index, config.DEFAULT_SETTINGS["set_keywords"])
+    wanted = {"me55-145", "me55-131", "me55-130"}
     items = []
-    for i in range(12):
-        lst = Listing("vinted", str(i), f"Hisuian Zorua 145/128 n.{i} <b>", f"https://v/{i}?a=1&b=2", price=10 + i, price_text=f"{10 + i} €")
-        items.append((lst, m.analyze(lst.title, "", {"me55-145"})))
-    assert n.notify_many(items) == [True] * 12
-    assert len(sent) == 2 and "12 annunci trovati" in sent[0] and "9–12" in sent[1]
-    assert "&lt;b&gt;" in sent[0] and "a=1&amp;b=2" in sent[0]
-    sent.clear()
-    assert n.notify_many(items[:3]) == [True] * 3 and len(sent) == 3
+    for i in range(12):  # 12 Zorua a prezzi decrescenti: 21, 20, ... 10
+        lst = Listing("vinted", f"z{i}", f"Hisuian Zorua 145/128 n.{i} <b>", f"https://v/{i}?a=1&b=2", price=21 - i, price_text=f"{21 - i} €")
+        items.append((lst, m.analyze(lst.title, "", wanted)))
+    lap = Listing("wallapop", "l1", "Lapras 131/128 30th", "https://w/1", price=None)
+    items.append((lap, m.analyze(lap.title, "", wanted)))
+    lot = Listing("wallapop", "lot1", "Lotto 30th Lapras 131/128 e Moltres 130/128", "https://w/2", price=30, price_text="30 €")
+    items.append((lot, m.analyze(lot.title, "", wanted)))
+
+    outcomes = n.notify_many(items, max_per_card=5)
+    assert len(sent) == 3  # Zorua, Lapras, Lotti
+    zorua = next(t for t in sent if "Hisuian Zorua 145/128" in t and "5 più economici su 12" in t)
+    assert zorua.index("10 €") < zorua.index("11 €") < zorua.index("14 €") and "15 €" not in zorua
+    assert "&lt;b&gt;" in zorua and "a=1&amp;b=2" in zorua
+    assert any("Lapras 131/128" in t and "prezzo n.d." in t for t in sent)
+    assert any("Lotti" in t and "(2/2)" in t for t in sent)
+    # inviati: i 5 Zorua più economici (indici 7..11), Lapras, lotto
+    assert outcomes == [False] * 7 + [True] * 5 + [True, True]
+
+
+def test_max_command(index):
+    db, h = make(index)
+    h.handle("/max 3")
+    assert db.get_settings()["max_per_card"] == 3
+    assert "max 3 annunci" in h.handle("/stato").text

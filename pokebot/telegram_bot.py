@@ -44,12 +44,13 @@ HELP = """<b>Comandi</b>
 /prezzo 100 – prezzo massimo in € (0 = nessun limite)
 /fonti wallapop vinted ebay – quali marketplace usare
 /intervallo 20 – ogni quanti minuti fare la ricerca
+/max 5 – per ogni carta, quanti annunci (i più economici) ricevere a ogni giro
 /cerca – ricerca immediata  ·  /resetvisti – rinotifica anche gli annunci già visti
 Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
-MENU_VERSION = 2
+MENU_VERSION = 3
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -58,6 +59,7 @@ MENU_COMMANDS = [
     ("stato", "Ultimo giro, errori, impostazioni"),
     ("cerca", "Cerca subito"),
     ("intervallo", "Ogni quanti minuti cercare: /intervallo 20"),
+    ("max", "Quanti annunci (i piu' economici) per carta in ogni giro: /max 5"),
     ("soglia", "Percentuale minima di carte mancanti nei lotti: /soglia 50"),
     ("prezzo", "Prezzo massimo in euro: /prezzo 100 (0 = nessun limite)"),
     ("fonti", "Marketplace da usare: /fonti wallapop vinted ebay"),
@@ -173,6 +175,9 @@ class CommandHandler:
         if cmd == "/prezzo":
             return self._set_number(args, "max_price", lambda v: max(0.0, v),
                                     lambda v: f"Prezzo massimo: {'nessun limite' if not v else f'{v:g} €'}.")
+        if cmd in ("/max", "/massimo"):
+            return self._set_number(args, "max_per_card", lambda v: max(1, min(20, int(v))),
+                                    lambda v: f"Per ogni carta ricevi al massimo {v} annunci (i più economici) per giro.")
         if cmd == "/intervallo":
             return self._set_number(args, "interval_minutes", lambda v: max(5, int(v)),
                                     lambda v: f"Ricerca ogni {v} minuti.")
@@ -311,8 +316,8 @@ class CommandHandler:
         max_price = s["max_price"]
         price_txt = "nessuno" if not max_price else f"{max_price:g} €"
         lines = [f"🃏 Mancanti: <b>{len(self.db.wanted_ids())}</b>/{len(self.index.by_id)}",
-                 f"⚙️ Ricerca ogni {int(s['interval_minutes'])} min · soglia lotti {s['lot_min_ratio'] * 100:.0f}% · "
-                 f"prezzo max {price_txt} · fonti: {', '.join(s['sources'])}"]
+                 f"⚙️ Ricerca ogni {int(s['interval_minutes'])} min · max {int(s.get('max_per_card', 5))} annunci per carta · "
+                 f"soglia lotti {s['lot_min_ratio'] * 100:.0f}% · prezzo max {price_txt} · fonti: {', '.join(s['sources'])}"]
         if runs:
             r = runs[0]
             when = time.strftime("%d/%m %H:%M", time.localtime(r["started_at"]))

@@ -36,6 +36,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "interval_minutes": 20,
     "lot_min_ratio": 0.5,
     "max_price": 0,  # 0 = nessun limite
+    "max_per_card": 5,  # per ogni carta, quanti annunci (i più economici) inviare per ciclo
     "sources": ["wallapop", "vinted", "ebay"],
     "set_keywords": [
         "30th celebration",

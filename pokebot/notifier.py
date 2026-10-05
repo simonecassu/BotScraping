@@ -54,21 +54,63 @@ class TelegramNotifier:
     def notify_listing(self, listing: Listing, result: MatchResult) -> bool:
         return self.send(format_listing(listing, result))
 
-    def notify_many(self, items: list[tuple[Listing, MatchResult]], detailed_up_to: int = 5, per_message: int = 8) -> list[bool]:
-        """Pochi risultati: un messaggio dettagliato ciascuno. Tanti: riepiloghi compatti da `per_message` annunci."""
-        if len(items) <= detailed_up_to:
-            return [self.notify_listing(lst, res) for lst, res in items]
-        outcomes: list[bool] = []
-        total = len(items)
-        for start in range(0, total, per_message):
-            chunk = items[start:start + per_message]
-            head = f"📬 <b>{total} annunci trovati</b> · {start + 1}–{start + len(chunk)}"
-            ok = self.send(head + "\n\n" + "\n\n".join(format_listing_compact(lst, res) for lst, res in chunk))
-            outcomes.extend([ok] * len(chunk))
-        return outcomes
+    def notify_many(self, items: list[tuple[Listing, MatchResult]], max_per_card: int = 5) -> list[bool]:
+        """Un messaggio per carta con i `max_per_card` annunci più economici del ciclo; i lotti a parte.
+
+        Restituisce, per ogni elemento di `items`, True se è stato inviato.
+        """
+        groups = group_matches(items)
+        sent_keys: set[str] = set()
+        for key, title, members in groups:
+            chosen = members[: max(1, max_per_card)]
+            text = format_group(title, chosen, len(members))
+            if self.send(text, disable_preview=True):
+                sent_keys.update(lst.key for lst, _ in chosen)
+        return [lst.key in sent_keys for lst, _ in items]
 
     def test_message(self) -> bool:
         return self.send("✅ PokéBot 30th collegato: riceverai qui gli annunci delle carte mancanti.", True)
+
+
+def _price_key(listing: Listing) -> float:
+    return listing.price if listing.price is not None else float("inf")
+
+
+def group_matches(items: list[tuple[Listing, MatchResult]]) -> list[tuple[str, str, list[tuple[Listing, MatchResult]]]]:
+    """Raggruppa per carta (singole) o in "Lotti"; ogni gruppo ordinato dal più economico."""
+    groups: dict[str, tuple[str, list]] = {}
+    for lst, res in items:
+        if res.kind == "lot":
+            key, title = "lot", "📦 Lotti con carte mancanti"
+        elif res.wanted:
+            key, title = res.wanted[0].id, f"🃏 {res.wanted[0].label}"
+        else:  # nome senza numero: possibile una delle versioni mancanti
+            name = res.possible_wanted[0].name if res.possible_wanted else lst.title[:40]
+            key, title = f"maybe:{name}", f"❔ {name} (numero non indicato, da verificare)"
+        groups.setdefault(key, (title, []))[1].append((lst, res))
+    out = []
+    for key, (title, members) in groups.items():
+        members.sort(key=lambda pair: _price_key(pair[0]))
+        out.append((key, title, members))
+    # prima le carte singole (per numero), poi i lotti
+    out.sort(key=lambda g: (g[0] == "lot", g[1]))
+    return out
+
+
+def format_group(title: str, chosen: list[tuple[Listing, MatchResult]], total: int) -> str:
+    esc = html.escape
+    sub = f"{len(chosen)} più economici su {total} trovati oggi" if total > len(chosen) else f"{total} trovat{'o' if total == 1 else 'i'} oggi"
+    lines = [f"<b>{esc(title)}</b> · {sub}"]
+    for i, (lst, res) in enumerate(chosen, start=1):
+        src = SOURCE_LABELS.get(lst.source, lst.source)
+        price = esc(lst.price_text or (f"{lst.price:.2f} €" if lst.price is not None else "prezzo n.d."))
+        extra = ""
+        if res.kind == "lot":
+            cards = ", ".join(c.label for c in res.wanted[:3]) + (", …" if len(res.wanted) > 3 else "")
+            extra = f"\n    ✅ {esc(cards)} ({res.wanted_count}/{res.total_cards})"
+        loc = f" · {esc(lst.location)}" if lst.location else ""
+        lines.append(f'{i}. <b>{price}</b> · {esc(src)}{loc}\n    <a href="{esc(lst.url, quote=True)}">{esc(lst.title[:70])}</a>{extra}')
+    return "\n".join(lines)
 
 
 def format_listing_compact(listing: Listing, result: MatchResult) -> str:

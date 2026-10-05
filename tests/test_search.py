@@ -31,7 +31,7 @@ class FakeNotifier:
         self.sent.append((listing, result))
         return True
 
-    def notify_many(self, items, detailed_up_to=5, per_message=8):
+    def notify_many(self, items, max_per_card=5):
         return [self.notify_listing(l, r) for l, r in items]
 
 

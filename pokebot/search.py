@@ -69,6 +69,7 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
     max_price = float(settings.get("max_price", 0) or 0)
     only_italy = bool(settings.get("only_italy", True))
     unverifiable = bool(settings.get("notify_unverifiable_lots", False))
+    max_per_card = int(settings.get("max_per_card", 5) or 5)
     notifier = notifier or TelegramNotifier.from_db(db)
 
     if scrapers is None:
@@ -103,7 +104,7 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
                 report.new_listings += 1
                 _handle_listing(lst, matcher, wanted, lot_ratio, max_price, unverifiable, db, report, pending)
 
-    _notify_pending(pending, notifier, db, report, dry_run)
+    _notify_pending(pending, notifier, db, report, dry_run, max_per_card)
     report.finished_at = time.time()
     db.finish_run(run_id, report.listings, report.matches, report.errors)
     log.info("Ciclo completato: %d query, %d annunci (%d nuovi), %d match, %d notifiche",
@@ -132,10 +133,11 @@ def _handle_listing(lst: Listing, matcher: Matcher, wanted: set[str], lot_ratio:
     log.info("MATCH [%s] %s -> %s", lst.source, lst.title, result.reason)
 
 
-def _notify_pending(pending: list, notifier: TelegramNotifier, db: Database, report: RunReport, dry_run: bool) -> None:
+def _notify_pending(pending: list, notifier: TelegramNotifier, db: Database, report: RunReport, dry_run: bool,
+                    max_per_card: int = 5) -> None:
     outcomes = [False] * len(pending)
     if pending and not dry_run:
-        outcomes = notifier.notify_many(pending)
+        outcomes = notifier.notify_many(pending, max_per_card=max_per_card)
     for (lst, result), sent in zip(pending, outcomes):
         report.notified += int(sent)
         db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),
