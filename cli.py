@@ -37,6 +37,8 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("titolo")
     a.add_argument("descrizione", nargs="?", default="")
     a.add_argument("--asta", action="store_true")
+    ej = sub.add_parser("export-json", help="scrive il riepilogo JSON per la Mini App")
+    ej.add_argument("path")
     ac = sub.add_parser("actions", help="comandi Telegram + ricerca + pulizia (per GitHub Actions / cron)")
     ac.add_argument("--force", action="store_true", help="cerca anche se l'intervallo non è ancora passato")
     args = p.parse_args(argv)
@@ -77,6 +79,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Query: {rep.queries} · annunci: {rep.listings} (nuovi {rep.new_listings}) · match: {rep.matches} · notifiche: {rep.notified}")
         for k, v in rep.errors.items():
             print(f"  errore {k}: {v}")
+        return 0
+    if args.cmd == "export-json":
+        from pokebot.webapp_export import write_state
+        write_state(index, db, args.path)
+        print(f"Stato scritto in {args.path}")
         return 0
     if args.cmd == "test-telegram":
         ok = TelegramNotifier().test_message()

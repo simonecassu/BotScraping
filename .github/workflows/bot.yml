@@ -65,8 +65,9 @@ jobs:
         run: |
           test -f data/pokebot.db || exit 0
           rm -rf /tmp/state && mkdir -p /tmp/state && cp data/pokebot.db /tmp/state/
+          python cli.py export-json /tmp/state/state.json || echo "export JSON fallito (non bloccante)"
           cd /tmp/state
           git init -q -b bot-state
-          git -c user.name=pokebot -c user.email=pokebot@users.noreply.github.com add pokebot.db
+          git -c user.name=pokebot -c user.email=pokebot@users.noreply.github.com add .
           git -c user.name=pokebot -c user.email=pokebot@users.noreply.github.com commit -q -m "stato bot $(date -u +%Y-%m-%dT%H:%MZ)"
           git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" bot-state

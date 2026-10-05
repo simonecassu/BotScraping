@@ -9,7 +9,8 @@
 //   TELEGRAM_CHAT_ID    (facoltativo) accetta solo questa chat
 //
 // Dopo il deploy apri UNA volta in Safari:  https://<indirizzo-del-worker>/setup
-// Il worker registra da solo il webhook su Telegram. Apri /status per controllare, /reset per tornare alla modalità base.
+// Il worker registra da solo il webhook su Telegram e il pulsante "App" (Mini App servita su /app).
+// Apri /status per controllare, /reset per tornare alla modalità base.
 
 const DEFAULT_REPO = "simonecassu/BotScraping";
 
@@ -18,6 +19,49 @@ async function secretFor(env) {
   const data = new TextEncoder().encode("pokebot-webhook:" + env.TELEGRAM_BOT_TOKEN);
   const hash = await crypto.subtle.digest("SHA-256", data);
   return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 40);
+}
+
+const STATE_URL = (env) => `https://raw.githubusercontent.com/${env.GITHUB_REPO || DEFAULT_REPO}/bot-state/state.json`;
+
+async function hmac(keyBytes, message) {
+  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message)));
+}
+
+function hex(bytes) {
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Verifica la firma di Telegram sui dati della Mini App; restituisce l'utente o null.
+async function verifyInitData(env, initData) {
+  if (!initData) return null;
+  const params = new URLSearchParams(initData);
+  const hash = params.get("hash");
+  if (!hash) return null;
+  params.delete("hash");
+  const dataCheck = [...params.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("\n");
+  const secret = await hmac(new TextEncoder().encode("WebAppData"), env.TELEGRAM_BOT_TOKEN);
+  const expected = hex(await hmac(secret, dataCheck));
+  if (expected !== hash) return null;
+  const authDate = Number(params.get("auth_date") || 0);
+  if (!authDate || Date.now() / 1000 - authDate > 86400) return null; // dati più vecchi di un giorno
+  try {
+    return JSON.parse(params.get("user") || "null");
+  } catch {
+    return null;
+  }
+}
+
+async function ownerChatId(env) {
+  if (env.TELEGRAM_CHAT_ID) return String(env.TELEGRAM_CHAT_ID);
+  try {
+    const r = await fetch(STATE_URL(env) + "?t=" + Date.now(), { cf: { cacheTtl: 0 } });
+    if (r.ok) {
+      const st = await r.json();
+      if (st.owner_chat_id) return String(st.owner_chat_id);
+    }
+  } catch {}
+  return "";
 }
 
 async function telegram(env, method, body) {
@@ -57,6 +101,34 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // Mini App: pagina statica
+    if (url.pathname === "/app" || url.pathname.startsWith("/app/")) {
+      const path = url.pathname === "/app" || url.pathname === "/app/" ? "/index.html" : url.pathname.slice(4);
+      return env.ASSETS.fetch(new Request(new URL(path, url.origin), request));
+    }
+    // Mini App: stato (sempre fresco, aggira la cache del CDN di GitHub)
+    if (url.pathname === "/api/state") {
+      const r = await fetch(STATE_URL(env) + "?t=" + Date.now(), { cf: { cacheTtl: 0 } });
+      return new Response(r.body, { status: r.status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+    }
+    // Mini App: comando (solo dal proprietario, firmato da Telegram)
+    if (url.pathname === "/api/cmd" && request.method === "POST") {
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return Response.json({ ok: false, error: "richiesta non valida" }, { status: 400 });
+      }
+      const user = await verifyInitData(env, body.initData);
+      if (!user) return Response.json({ ok: false, error: "non autenticato" }, { status: 401 });
+      const owner = await ownerChatId(env);
+      if (!owner || String(user.id) !== owner) return Response.json({ ok: false, error: "non sei il proprietario del bot" }, { status: 403 });
+      const text = String(body.text || "").trim().slice(0, 4000);
+      if (!text.startsWith("/")) return Response.json({ ok: false, error: "comando non valido" }, { status: 400 });
+      const gh = await dispatch(env, { event_type: "telegram", client_payload: { chat_id: owner, text } });
+      return Response.json({ ok: gh.status === 204, status: gh.status });
+    }
+
     if (request.method === "GET") {
       if (!env.TELEGRAM_BOT_TOKEN || !env.GITHUB_TOKEN) {
         return page("⚠️ Mancano le variabili", "<p>Imposta <code>TELEGRAM_BOT_TOKEN</code> e <code>GITHUB_TOKEN</code> in Settings → Variables and Secrets, poi riapri questa pagina.</p>");
@@ -67,6 +139,10 @@ export default {
           secret_token: await secretFor(env),
           allowed_updates: ["message", "callback_query"],
           drop_pending_updates: false,
+        });
+        // pulsante "App" accanto alla chat che apre la Mini App
+        await telegram(env, "setChatMenuButton", {
+          menu_button: { type: "web_app", text: "App", web_app: { url: `${url.origin}/app` } },
         });
         return page(res.ok ? "✅ Ponte attivo" : "❌ Errore",
           res.ok

@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PokéBot 30th</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{
+  --bg:var(--tg-theme-bg-color,#0f1115);--sec:var(--tg-theme-secondary-bg-color,#181b22);--txt:var(--tg-theme-text-color,#e8e8ea);
+  --hint:var(--tg-theme-hint-color,#9aa0ad);--link:var(--tg-theme-link-color,#3b6ef2);--btn:var(--tg-theme-button-color,#3b6ef2);
+  --btnt:var(--tg-theme-button-text-color,#fff);--acc:#ffcb05;--ok:#2fbf71;--warn:#f0a030;--bad:#e5484d;--line:rgba(128,128,128,.25)
+}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.4 -apple-system,system-ui,Segoe UI,Roboto,sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:10px 12px 0;border-bottom:1px solid var(--line)}
+.title{display:flex;align-items:center;gap:8px;font-weight:800;font-size:17px}.title small{color:var(--hint);font-weight:400;font-size:12px;margin-left:auto}
+nav{display:flex;gap:4px;margin-top:8px;overflow-x:auto}nav button{flex:1;padding:9px 6px;border:0;border-bottom:2px solid transparent;background:none;color:var(--hint);font-size:14px;white-space:nowrap}
+nav button.on{color:var(--txt);border-color:var(--acc);font-weight:700}
+main{padding:12px;padding-bottom:40px}.hidden{display:none}
+.card-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+input[type=search],select,input[type=number]{padding:9px 10px;border-radius:10px;border:1px solid var(--line);background:var(--sec);color:var(--txt);font-size:15px}
+input[type=search]{flex:1;min-width:150px}
+.pill{font-size:12px;padding:4px 9px;border-radius:999px;background:var(--sec);color:var(--hint)}.pill.on{color:var(--txt);outline:1px solid var(--acc)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
+.c{position:relative;background:var(--sec);border-radius:10px;padding:5px;border:2px solid transparent}
+.c.miss{border-color:var(--acc)}.c img{width:100%;aspect-ratio:245/342;object-fit:cover;border-radius:6px;background:#0008;display:block}
+.c:not(.miss) img{filter:grayscale(.8) brightness(.65)}.c .n{font-size:11px;color:var(--hint);margin-top:4px}.c .nm{font-size:12px;font-weight:600;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.c .tag{position:absolute;top:8px;left:8px;background:var(--acc);color:#111;font-size:10px;font-weight:800;padding:2px 6px;border-radius:6px}
+.c.pending{opacity:.55}
+h2{font-size:17px;margin:14px 0 8px}h3{font-size:14px;color:var(--hint);margin:12px 0 6px;font-weight:600}
+.folder{background:var(--sec);border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.folder .hd{display:flex;align-items:center;gap:10px}.folder .hd img{width:34px;height:48px;object-fit:cover;border-radius:4px}
+.folder .hd b{flex:1}.folder .hd .cnt{color:var(--hint);font-size:13px}
+.lst{display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--line);align-items:center}
+.lst img,.lst .ph{width:56px;height:56px;border-radius:8px;object-fit:cover;background:#0006;flex:none;display:flex;align-items:center;justify-content:center;color:var(--hint);font-size:11px}
+.lst .t{flex:1;min-width:0}.lst .t .ti{font-size:13px;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.lst .t .mt{font-size:12px;color:var(--hint);margin-top:3px}.lst .pr{font-weight:800;white-space:nowrap}.lst .deal{color:var(--warn)}
+.bar{height:12px;border-radius:6px;background:var(--sec);overflow:hidden}.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--ok),var(--acc))}
+.kpi{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}.kpi div{background:var(--sec);border-radius:12px;padding:10px}.kpi b{display:block;font-size:20px}.kpi span{font-size:12px;color:var(--hint)}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 4px;border-bottom:1px solid var(--line);text-align:left}th{color:var(--hint);font-weight:600}td.r,th.r{text-align:right}
+.set{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}.set label{flex:1}.set small{display:block;color:var(--hint);font-size:12px}
+.sw{width:50px;height:30px;border-radius:15px;background:var(--line);position:relative;border:0;flex:none}.sw.on{background:var(--ok)}.sw::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:12px;background:#fff;transition:left .15s}.sw.on::after{left:23px}
+.btn{padding:9px 14px;border-radius:10px;border:0;background:var(--btn);color:var(--btnt);font-weight:700;font-size:14px}.btn.sec{background:var(--sec);color:var(--txt)}
+.toast{position:fixed;left:12px;right:12px;bottom:14px;background:#222c;color:#fff;padding:10px 14px;border-radius:12px;font-size:14px;backdrop-filter:blur(8px);z-index:9;opacity:0;transition:opacity .2s;pointer-events:none}.toast.show{opacity:1}
+.hint{color:var(--hint);font-size:13px}.err{color:var(--bad)}
+a{color:var(--link);text-decoration:none}
+</style>
+</head>
+<body>
+<header>
+  <div class="title">⚡ PokéBot 30th <small id="upd">…</small></div>
+  <nav>
+    <button data-tab="check" class="on">Checklist</button>
+    <button data-tab="found">Trovati</button>
+    <button data-tab="prices">Prezzi</button>
+    <button data-tab="settings">Impostazioni</button>
+  </nav>
+</header>
+<main>
+  <section id="tab-check">
+    <div class="card-row">
+      <input id="q" type="search" placeholder="Cerca nome o numero…">
+      <select id="rar"><option value="">Tutte le rarità</option></select>
+    </div>
+    <div class="card-row" id="setpills"></div>
+    <p class="hint">Tocca una carta per segnarla <b>mancante</b> (bordo giallo) o <b>presa</b>. Ogni tocco diventa un comando per il bot.</p>
+    <div id="grid" class="grid"></div>
+  </section>
+
+  <section id="tab-found" class="hidden">
+    <div class="card-row"><input id="qf" type="search" placeholder="Filtra per carta…"><span class="pill" id="fcount"></span></div>
+    <div id="folders"></div>
+  </section>
+
+  <section id="tab-prices" class="hidden">
+    <div id="progress"></div>
+    <h2>Quanto manca</h2>
+    <div id="cost"></div>
+    <h2>Prezzi per carta</h2>
+    <p class="hint">Minimo, mediana e massimo degli annunci visti. Tocca una riga per aprire la cartella.</p>
+    <table id="ptable"><thead><tr><th>Carta</th><th class="r">Min</th><th class="r">Mediana</th><th class="r">Max</th><th class="r">N</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <section id="tab-settings" class="hidden">
+    <div id="settings"></div>
+    <h2>Azioni</h2>
+    <div class="card-row">
+      <button class="btn" data-cmd="/cerca">🔎 Cerca ora</button>
+      <button class="btn sec" data-cmd="/esporta">📎 Excel</button>
+      <button class="btn sec" data-cmd="/stato">ℹ️ Stato</button>
+    </div>
+    <p class="hint" id="lastrun"></p>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const eur = (v) => v == null ? "n.d." : v.toLocaleString("it-IT", { style: "currency", currency: "EUR" });
+const SRC = { ebay: "eBay.it", vinted: "Vinted", wallapop: "Wallapop" };
+let state = null, cards = [], byId = {}, wanted = new Set(), pending = new Set(), filterSet = "";
+
+function toast(msg, ms = 2200) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), ms); }
+function openLink(u) { if (tg && tg.openLink) tg.openLink(u); else window.open(u, "_blank"); }
+
+async function sendCmd(text) {
+  if (!tg || !tg.initData) { toast("Apri la pagina da Telegram per inviare comandi"); return false; }
+  try {
+    const r = await fetch("/api/cmd", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: tg.initData, text }) });
+    const d = await r.json();
+    if (!d.ok) { toast("Errore: " + (d.error || d.status)); return false; }
+    return true;
+  } catch (e) { toast("Rete non disponibile"); return false; }
+}
+
+async function load() {
+  try {
+    const r = await fetch("/api/state?t=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status);
+    state = await r.json();
+  } catch (e) {
+    $("#upd").textContent = "stato non disponibile";
+    $("#grid").innerHTML = '<p class="err">Il bot non ha ancora pubblicato lo stato. Riprova tra un minuto.</p>';
+    return;
+  }
+  cards = state.sets.flatMap((s) => s.cards.map((c) => ({ ...c, set: s.id, setName: s.name, printed: s.printed_total })));
+  byId = Object.fromEntries(cards.map((c) => [c.id, c]));
+  wanted = new Set(state.wanted);
+  const d = new Date(state.generated_at * 1000);
+  $("#upd").textContent = "aggiornato " + d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+  renderAll();
+}
+
+function renderAll() { renderChecklist(); renderFound(); renderPrices(); renderSettings(); }
+
+/* ---------- Checklist ---------- */
+function renderChecklist() {
+  const rar = $("#rar");
+  if (rar.options.length <= 1) [...new Set(cards.map((c) => c.rarity))].sort().forEach((r) => rar.insertAdjacentHTML("beforeend", `<option>${esc(r)}</option>`));
+  const pills = $("#setpills");
+  pills.innerHTML = state.sets.map((s) => {
+    const miss = s.cards.filter((c) => wanted.has(c.id)).length;
+    return `<span class="pill ${filterSet === s.id ? "on" : ""}" data-set="${s.id}">${esc(s.name)} · ${miss}/${s.cards.length} mancanti</span>`;
+  }).join("") + `<span class="pill">Mancanti <b>${wanted.size}</b>/${cards.length}</span>`;
+  pills.querySelectorAll("[data-set]").forEach((p) => p.onclick = () => { filterSet = filterSet === p.dataset.set ? "" : p.dataset.set; renderChecklist(); });
+  const q = $("#q").value.trim().toLowerCase(), rv = rar.value;
+  const list = cards.filter((c) => (!filterSet || c.set === filterSet) && (!rv || c.rarity === rv) &&
+    (!q || c.name.toLowerCase().includes(q) || c.number.toLowerCase().includes(q) || c.code.includes(q)));
+  $("#grid").innerHTML = list.map((c) => `
+    <div class="c ${wanted.has(c.id) ? "miss" : ""} ${pending.has(c.id) ? "pending" : ""}" data-id="${c.id}">
+      ${wanted.has(c.id) ? '<span class="tag">MANCA</span>' : ""}
+      <img loading="lazy" src="${esc(c.image)}" alt="">
+      <div class="n">${c.printed ? "#" + esc(c.number) + "/" + c.printed : esc(c.code) + " · #" + esc(c.number)}</div>
+      <div class="nm">${esc(c.name)}</div>
+    </div>`).join("");
+  $("#grid").querySelectorAll(".c").forEach((el) => el.onclick = () => toggle(el.dataset.id));
+}
+async function toggle(id) {
+  const c = byId[id]; const willWant = !wanted.has(id);
+  pending.add(id); renderChecklist();
+  const ok = await sendCmd((willWant ? "/aggiungi " : "/rimuovi ") + c.code);
+  pending.delete(id);
+  if (ok) { willWant ? wanted.add(id) : wanted.delete(id); toast((willWant ? "Segnata mancante: " : "Segnata presa: ") + c.name); }
+  renderChecklist();
+}
+$("#q").oninput = renderChecklist; $("#rar").onchange = renderChecklist;
+
+/* ---------- Trovati ---------- */
+function renderFound() {
+  const q = $("#qf").value.trim().toLowerCase();
+  const groups = {};
+  let lots = [];
+  for (const f of state.found) {
+    if (f.kind === "lot") { lots.push(f); continue; }
+    for (const id of (f.sure.length ? f.sure : f.cards)) (groups[id] ||= []).push(f);
+  }
+  const ids = Object.keys(groups).filter((id) => byId[id]).sort((a, b) => cards.indexOf(byId[a]) - cards.indexOf(byId[b]))
+    .filter((id) => !q || byId[id].name.toLowerCase().includes(q) || byId[id].number.includes(q));
+  $("#fcount").textContent = state.found.length + " annunci";
+  const folder = (title, img, items, key) => {
+    const bySrc = {};
+    items.forEach((f) => (bySrc[f.source] ||= []).push(f));
+    const body = ["ebay", "vinted", "wallapop"].filter((s) => bySrc[s]).map((s) => `<h3>${SRC[s]} (${bySrc[s].length})</h3>` +
+      bySrc[s].sort((a, b) => (a.price_num ?? 1e9) - (b.price_num ?? 1e9)).slice(0, 25).map((f) => `
+        <div class="lst" data-url="${esc(f.url)}">
+          ${f.image ? `<img loading="lazy" src="${esc(f.image)}" alt="">` : '<div class="ph">foto n.d.</div>'}
+          <div class="t"><div class="ti">${f.deal ? "🔥 " : ""}${esc(f.title)}</div>
+            <div class="mt">${new Date(f.ts * 1000).toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit" })}${f.location ? " · " + esc(f.location) : ""}${f.kind === "lot" ? " · 📦 lotto" : ""}${f.notified ? "" : " · non inviato"}</div></div>
+          <div class="pr ${f.deal ? "deal" : ""}">${esc(f.price || "n.d.")}</div>
+        </div>`).join("")).join("");
+    return `<div class="folder" data-key="${key}"><div class="hd">${img ? `<img src="${esc(img)}" alt="">` : ""}<b>${esc(title)}</b><span class="cnt">${items.length} ›</span></div><div class="bd hidden">${body}</div></div>`;
+  };
+  let html = ids.map((id) => { const c = byId[id]; return folder(c.printed ? `${c.name} ${c.number}/${c.printed}` : `${c.name} (Classic)`, c.image, groups[id], id); }).join("");
+  if (lots.length && !q) html += folder("📦 Lotti con carte mancanti", "", lots, "lot");
+  $("#folders").innerHTML = html || '<p class="hint">Nessun annuncio trovato finora.</p>';
+  $("#folders").querySelectorAll(".folder .hd").forEach((hd) => hd.onclick = () => hd.nextElementSibling.classList.toggle("hidden"));
+  $("#folders").querySelectorAll(".lst").forEach((el) => el.onclick = () => openLink(el.dataset.url));
+}
+$("#qf").oninput = renderFound;
+function openFolder(id) { showTab("found"); $("#qf").value = ""; renderFound(); const f = $(`.folder[data-key="${id}"]`); if (f) { f.querySelector(".bd").classList.remove("hidden"); f.scrollIntoView({ behavior: "smooth" }); } }
+
+/* ---------- Prezzi / progresso ---------- */
+function renderPrices() {
+  const c = state.completion, p = state.prices;
+  $("#progress").innerHTML = `
+    <h2>Progresso set</h2>
+    <div class="bar"><i style="width:${c.percent.toFixed(0)}%"></i></div>
+    <div class="kpi">
+      <div><b>${c.owned}/${c.total}</b><span>carte possedute (${c.percent.toFixed(0)}%)</span></div>
+      <div><b>${c.missing}</b><span>mancanti</span></div>
+    </div>
+    ${Object.entries(c.by_rarity).filter(([, v]) => v[0] > 0).map(([k, v]) => `<div class="set"><label>${esc(k)}</label><span>${v[0]}/${v[1]}</span></div>`).join("")}`;
+  $("#cost").innerHTML = c.missing ? `<div class="kpi">
+      <div><b>${eur(c.cost_min)}</b><span>ai prezzi minimi visti</span></div>
+      <div><b>${eur(c.cost_median)}</b><span>ai prezzi mediani</span></div></div>
+    <p class="hint">Stima su ${c.priced} carte con prezzi visti${c.missing - c.priced ? `, ${c.missing - c.priced} ancora senza prezzo` : ""}.</p>` : "<p>🎉 Set completo!</p>";
+  const rows = cards.filter((k) => p[k.id]).sort((a, b) => (wanted.has(b.id) - wanted.has(a.id)) || (p[b.id].min - p[a.id].min));
+  $("#ptable tbody").innerHTML = rows.map((k) => { const s = p[k.id]; const tr = s.recent_median != null && s.older_median ? (s.recent_median > s.older_median * 1.05 ? " 📈" : s.recent_median < s.older_median * 0.95 ? " 📉" : "") : "";
+    return `<tr data-id="${k.id}"><td>${wanted.has(k.id) ? "⭐ " : ""}${esc(k.name)} <span class="hint">${k.printed ? k.number + "/" + k.printed : "Classic"}</span>${tr}</td><td class="r">${eur(s.min)}</td><td class="r">${eur(s.median)}</td><td class="r">${eur(s.max)}</td><td class="r">${s.n}</td></tr>`; }).join("")
+    || '<tr><td colspan="5" class="hint">Nessun prezzo ancora.</td></tr>';
+  $("#ptable tbody").querySelectorAll("tr[data-id]").forEach((tr) => tr.onclick = () => openFolder(tr.dataset.id));
+}
+
+/* ---------- Impostazioni ---------- */
+function renderSettings() {
+  const s = state.settings;
+  const row = (label, hint, control) => `<div class="set"><label>${label}<small>${hint}</small></label>${control}</div>`;
+  const num = (key, val, cmd, step = 1, min = 0) => `<input type="number" step="${step}" min="${min}" value="${val ?? ""}" data-cmd="${cmd}" style="width:90px">`;
+  const sw = (on, cmdOn, cmdOff) => `<button class="sw ${on ? "on" : ""}" data-on="${cmdOn}" data-off="${cmdOff}" aria-pressed="${on}"></button>`;
+  const srcs = ["wallapop", "vinted", "ebay"];
+  $("#settings").innerHTML = `
+    ${row("Pausa notifiche", "il bot cerca e accumula, invia tutto alla ripresa", sw(s.paused, "/pausa", "/riprendi"))}
+    ${row("Avviso affare 🔥", "sotto questa % della mediana storica (0 = spento)", num("deal_pct", s.deal_pct, "/affari {v}"))}
+    ${row("Annunci per carta", "i più economici inviati per ogni giro", num("max", s.max_per_card, "/max {v}", 1, 1))}
+    ${row("Prezzo massimo €", "0 = nessun limite", num("prezzo", s.max_price, "/prezzo {v}", 0.5))}
+    ${row("Soglia lotti %", "quota minima di carte mancanti in un lotto", num("soglia", Math.round((s.lot_min_ratio || 0) * 100), "/soglia {v}"))}
+    ${row("Ricerca ogni (min)", "intervallo della ricerca automatica", num("intervallo", s.interval_minutes, "/intervallo {v}", 1, 5))}
+    ${row("Solo carte italiane", "scarta annunci in francese, inglese e altre lingue", sw(s.language === "ita", "/lingua ita", "/lingua tutte"))}
+    ${row("Immagini nei messaggi", "foto degli annunci e della carta", sw(s.images !== false, "/immagini on", "/immagini off"))}
+    ${row("Ore silenziose", s.quiet_hours ? `dalle ${s.quiet_hours[0]} alle ${s.quiet_hours[1]}` : "nessuna",
+      `<span><input type="number" min="0" max="23" value="${s.quiet_hours ? s.quiet_hours[0] : 23}" id="qh1" style="width:62px"> – <input type="number" min="0" max="23" value="${s.quiet_hours ? s.quiet_hours[1] : 8}" id="qh2" style="width:62px"> ${sw(!!s.quiet_hours, "/notte {qh}", "/notte off")}</span>`)}
+    <h2>Fonti</h2>
+    ${srcs.map((k) => row(SRC[k], "", sw((s.sources || []).includes(k), `/fonti ${[...new Set([...(s.sources || []), k])].join(" ")}`, `/fonti ${(s.sources || []).filter((x) => x !== k).join(" ") || "wallapop"}`))).join("")}`;
+  $("#settings").querySelectorAll("input[type=number][data-cmd]").forEach((inp) => inp.onchange = async () => {
+    const cmd = inp.dataset.cmd.replace("{v}", inp.value); if (await sendCmd(cmd)) toast("Inviato: " + cmd);
+  });
+  $("#settings").querySelectorAll(".sw").forEach((b) => b.onclick = async () => {
+    const on = !b.classList.contains("on");
+    let cmd = on ? b.dataset.on : b.dataset.off;
+    cmd = cmd.replace("{qh}", `${$("#qh1").value} ${$("#qh2").value}`);
+    if (await sendCmd(cmd)) { b.classList.toggle("on", on); toast("Inviato: " + cmd); }
+  });
+  const lr = state.last_run;
+  $("#lastrun").innerHTML = lr ? `Ultimo giro ${new Date(lr.started_at * 1000).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}: ${lr.listings_seen} annunci letti, ${lr.matches} segnalati` +
+    (lr.per_source && Object.keys(lr.per_source).length ? " · " + Object.entries(lr.per_source).map(([k, v]) => `${SRC[k] || k} ${v}`).join(", ") : "") +
+    (lr.errors && Object.keys(lr.errors).length ? `<br><span class="err">⚠️ ${Object.entries(lr.errors).map(([k, v]) => esc(k + ": " + String(v).slice(0, 80))).join("<br>")}</span>` : "") : "";
+  document.querySelectorAll("[data-cmd].btn").forEach((b) => b.onclick = async () => { if (await sendCmd(b.dataset.cmd)) toast("Inviato " + b.dataset.cmd + ": guarda la chat"); });
+}
+
+/* ---------- tabs ---------- */
+function showTab(name) {
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
+  ["check", "found", "prices", "settings"].forEach((t) => $("#tab-" + t).classList.toggle("hidden", t !== name));
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll("nav button").forEach((b) => b.onclick = () => showTab(b.dataset.tab));
+load();
+setInterval(load, 90000);
+</script>
+</body>
+</html>

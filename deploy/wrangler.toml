@@ -11,3 +11,9 @@ crons = ["7,27,47 * * * *"]
 
 [vars]
 GITHUB_REPO = "simonecassu/BotScraping"
+
+# Mini App Telegram: pagina statica servita dal worker su /app
+[assets]
+directory = "app"
+binding = "ASSETS"
+run_worker_first = true

@@ -50,6 +50,14 @@ Solo la chat che ha scritto `/start` per prima può comandare il bot. Aggiungend
 (il tuo chat id, lo trovi nel log del primo giro o chiedendolo a @userinfobot) anche il ponte ignora gli estranei.
 GitHub disattiva i workflow pianificati dopo 60 giorni senza attività sul repository: arriva un'email e si riattiva con un tap.
 
+### Mini App dentro Telegram
+
+Con il ponte attivo, accanto alla chat compare il pulsante **App**: apre una pagina dentro Telegram con la checklist
+grafica (tocchi una carta per segnarla mancante o presa), le cartelle degli annunci trovati con foto e prezzi divisi
+per marketplace, i prezzi per carta con progresso e stima di spesa, e le impostazioni con interruttori.
+Ogni tocco diventa un comando per il bot; solo il proprietario (chi ha fatto `/start`) può usarla.
+I dati arrivano da `state.json`, pubblicato nel branch `bot-state` a ogni giro. Pagina: `deploy/app/index.html`.
+
 ### Risposta immediata: il ponte Telegram → GitHub
 
 Senza ponte il bot legge i comandi solo quando gira (ogni 20 minuti). Con il ponte, gratuito su Cloudflare Workers,
