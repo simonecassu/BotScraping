@@ -175,3 +175,23 @@ def test_quiet_hours(monkeypatch):
     assert not search.notifications_suppressed({"quiet_hours": [8, 20]})
     assert search.notifications_suppressed({"paused": True})
     assert not search.notifications_suppressed({})
+
+
+def test_search_card_targeted(index):
+    from pokebot.search import search_card
+    db = make_db()
+    db.save_settings({"language": "ita"})
+    scraper = FakeScraper([
+        Listing("fake", "a", "Lapras 131/128 30th ITA", "https://x/a", price=30, price_text="30 €"),
+        Listing("fake", "b", "Lapras 131/128 30th", "https://x/b", price=12, price_text="12 €"),
+        Listing("fake", "c", "Lokhlass 131/128 30 ans", "https://x/c", price=5, price_text="5 €"),   # francese: escluso
+        Listing("fake", "d", "Moltres 130/128 30th", "https://x/d", price=1, price_text="1 €"),      # altra carta
+        Listing("fake", "e", "Lotto 30th Lapras 131/128 e Moltres 130/128", "https://x/e", price=20, price_text="20 €"),
+    ])
+    db.mark_seen("fake:a")  # già visto in passato: deve comparire comunque
+    items, errors = search_card(index, db, index.by_id["me55-131"], scrapers={"fake": scraper})
+    assert errors == {}
+    assert [l.listing_id for l, _ in items] == ["b", "e", "a"]
+    assert items[1][1].kind == "lot"
+    assert any("131/128" in q for q in scraper.queries)
+    assert {f["listing_key"] for f in db.list_found()} == {"fake:a", "fake:b", "fake:e"}

@@ -294,3 +294,26 @@ def test_export_sends_document(index):
     wb = load_workbook(io.BytesIO(build_workbook(index, db)))
     assert wb.sheetnames == ["Checklist", "Annunci", "Prezzi"]
     assert wb["Checklist"].max_row == 192 and wb["Annunci"].max_row == 2
+
+
+def test_cerca_targeted_command(index, monkeypatch):
+    from pokebot import search as search_mod
+    from pokebot.scrapers.base import BaseScraper, Listing
+
+    class Fake(BaseScraper):
+        name = "fake"
+        label = "Fake"
+
+        def __init__(self, only_italy=True):
+            super().__init__(only_italy=only_italy)
+
+        def search(self, query, limit=60):
+            return [Listing("fake", "1", "Lapras 131/128 30th", "https://x/1", price=12, price_text="12 €")]
+
+    monkeypatch.setitem(search_mod.SCRAPERS, "fake", Fake)
+    db, h = make(index)
+    db.save_settings({"sources": ["fake"]})
+    r = h.handle("/cerca 131")
+    assert "in vendita adesso: 1" in r.text and "12 €" in r.text and not r.run_search
+    assert r.buttons and r.buttons[0][0] == ("💶 Prezzi", "/prezzi 131")
+    assert h.handle("/cerca").run_search

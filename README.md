@@ -43,7 +43,7 @@ Il bot gira ogni 20 minuti sui server di GitHub e si comanda **solo da Telegram*
 | `/pausa` · `/riprendi` · `/notte 23 8` | sospende le notifiche (il bot accumula e invia tutto al ritorno) · ore silenziose |
 | `/esporta` | file Excel con checklist, storico annunci e prezzi |
 | `/immagini on` · `off` | immagine della carta nei messaggi raggruppati |
-| `/cerca` · `/resetvisti` | ricerca immediata · rinotifica gli annunci già visti |
+| `/cerca` · `/cerca 145` · `/resetvisti` | ricerca immediata · ricerca mirata di una carta (tutto ciò che è in vendita ora, dal più economico) · rinotifica gli annunci già visti |
 
 Lo stato (carte mancanti, annunci già visti) è salvato nel branch `bot-state`.
 Solo la chat che ha scritto `/start` per prima può comandare il bot. Aggiungendo il secret `TELEGRAM_CHAT_ID`

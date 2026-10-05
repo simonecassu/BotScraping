@@ -52,12 +52,13 @@ HELP = """<b>Comandi</b>
 /lingua ita – scarta annunci in francese/inglese/altre lingue · /lingua tutte – accetta tutto
 /intervallo 20 – ogni quanti minuti fare la ricerca
 /max 5 – per ogni carta, quanti annunci (i più economici) ricevere a ogni giro
-/cerca – ricerca immediata  ·  /resetvisti – rinotifica anche gli annunci già visti
+/cerca – ricerca immediata · /cerca 145 – una carta: tutto ciò che è in vendita adesso, dal più economico
+/resetvisti – rinotifica anche gli annunci già visti
 Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
-MENU_VERSION = 6
+MENU_VERSION = 7
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -73,7 +74,7 @@ MENU_COMMANDS = [
     ("notte", "Ore silenziose: /notte 23 8 (accumula e invia al mattino), /notte off"),
     ("esporta", "File Excel con checklist, storico annunci e prezzi"),
     ("immagini", "Immagine della carta nei messaggi: /immagini on | off"),
-    ("cerca", "Cerca subito"),
+    ("cerca", "Cerca subito tutto, oppure una carta mirata: /cerca 145"),
     ("intervallo", "Ogni quanti minuti cercare: /intervallo 20"),
     ("max", "Quanti annunci (i piu' economici) per carta in ogni giro: /max 5"),
     ("soglia", "Percentuale minima di carte mancanti nei lotti: /soglia 50"),
@@ -252,6 +253,8 @@ class CommandHandler:
                 return Reply("⚙️ Accetto annunci in qualsiasi lingua.")
             return Reply("Usa <code>/lingua ita</code> oppure <code>/lingua tutte</code>.")
         if cmd == "/cerca":
+            if args.strip():
+                return self._search_cards(args)
             return Reply("🔎 Ok, cerco adesso.", run_search=True)
         if cmd == "/resetvisti":
             self.db.forget_seen()
@@ -385,6 +388,38 @@ class CommandHandler:
             lines.append("\nSenza prezzo: " + html.escape(", ".join(self.index.code_of[c.id] for c in comp.unpriced[:30]))
                          + (" …" if len(comp.unpriced) > 30 else ""))
         return Reply("\n".join(lines))
+
+    def _search_cards(self, args: str) -> Reply:
+        """Ricerca mirata, subito, di una o più carte (max 3): cosa c'è in vendita adesso."""
+        from . import stats as pstats
+        from .search import search_card
+        cards, unknown = self.resolve(args)
+        if not cards:
+            return Reply("Carta non riconosciuta. Es. <code>/cerca 145</code> oppure <code>/cerca c4</code>.")
+        settings = self.db.get_settings()
+        out: list[str] = []
+        for card in cards[:3]:
+            items, errors = search_card(self.index, self.db, card, settings)
+            head = f"🔎 <b>{html.escape(card.label)}</b> · in vendita adesso: {len(items)}"
+            if not items:
+                out.append(head + "\nNiente al momento" + (" (" + ", ".join(errors) + " non raggiungibile)" if errors else "") + ".")
+                continue
+            lines = [head]
+            for i, (lst, res) in enumerate(items, start=1):
+                src = pstats.SOURCE_LABELS.get(lst.source, lst.source)
+                price = html.escape(lst.price_text or (f"{lst.price:.2f} €" if lst.price is not None else "prezzo n.d."))
+                tag = " 📦 lotto" if res.kind == "lot" else ""
+                loc = f" · {html.escape(lst.location)}" if lst.location else ""
+                lines.append(f'{i}. <b>{price}</b> · {html.escape(src)}{loc}{tag}\n    <a href="{html.escape(lst.url, quote=True)}">{html.escape(lst.title[:70])}</a>')
+            if errors:
+                lines.append("⚠️ Fonte non raggiungibile: " + html.escape(", ".join(errors)))
+            out.append("\n".join(lines))
+        if len(cards) > 3:
+            out.append(f"(mostrate 3 carte su {len(cards)}: una ricerca mirata alla volta è più precisa)")
+        if unknown:
+            out.append("❓ Non capiti: " + html.escape(" ".join(unknown)))
+        code = self.index.code_of[cards[0].id]
+        return Reply("\n\n".join(out), buttons=[[("💶 Prezzi", f"/prezzi {code}"), ("📂 Storico", f"/storico {code}")]])
 
     def _progress(self) -> Reply:
         from . import stats as pstats

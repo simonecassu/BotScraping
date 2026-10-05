@@ -261,3 +261,57 @@ def _notify_pending(pending: list, notifier: TelegramNotifier, db: Database, rep
         db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),
                      lst.location, result.kind, result.matched_payload, result.ratio, sent, image=lst.image)
         db.mark_seen(lst.key, notified=sent)
+
+
+def card_queries(card) -> list[str]:
+    if card.printed_total:
+        return [f"{card.name} {card.number}/{card.printed_total}", f"{card.name} 30th", f"{card.name} 30 anniversario"]
+    return [f"{card.name} classic collection", f"{card.name} 30th classic"]
+
+
+def search_card(index: CardIndex, db: Database, card, settings: dict | None = None, scrapers: dict | None = None,
+                limit: int = 10) -> tuple[list[tuple[Listing, "MatchResult"]], dict[str, str]]:
+    """Ricerca mirata di una carta su tutte le fonti: restituisce gli annunci in vendita adesso, dal più economico.
+
+    Include anche annunci già visti. Gli annunci vengono registrati nello storico e segnati come visti.
+    """
+    settings = settings or db.get_settings()
+    matcher = Matcher(index, settings.get("set_keywords", []))
+    language = str(settings.get("language", "ita") or "ita")
+    lot_ratio = float(settings.get("lot_min_ratio", 0.5))
+    max_price = float(settings.get("max_price", 0) or 0)
+    if scrapers is None:
+        scrapers = {}
+        for name in settings.get("sources", []):
+            cls = SCRAPERS.get(name)
+            if cls:
+                scrapers[name] = cls(only_italy=bool(settings.get("only_italy", True)))
+    found: dict[str, tuple[Listing, MatchResult]] = {}
+    errors: dict[str, str] = {}
+    for name, scraper in scrapers.items():
+        for q in card_queries(card):
+            try:
+                listings = scraper.search(q, limit=40)
+            except ScraperError as exc:
+                errors[name] = str(exc)
+                break
+            except Exception as exc:  # noqa: BLE001
+                errors[name] = f"{type(exc).__name__}: {exc}"
+                break
+            for lst in listings:
+                if lst.key in found:
+                    continue
+                res = matcher.analyze(lst.title, lst.description, {card.id}, lot_ratio, False, lst.is_auction, language)
+                hit = res.notify or any(r.card.id == card.id for r in res.refs)
+                if not hit or (max_price and lst.price is not None and lst.price > max_price):
+                    continue
+                found[lst.key] = (lst, res)
+    items = sorted(found.values(), key=lambda pair: (pair[0].price if pair[0].price is not None else float("inf")))
+    existing = {r["listing_key"] for r in db.list_found()}
+    for lst, res in items[:limit]:
+        if lst.key not in existing:
+            db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),
+                         lst.location, res.kind, res.matched_payload or [{"id": card.id, "label": card.label, "sure": True}],
+                         res.ratio, True, image=lst.image)
+        db.mark_seen(lst.key, notified=True)
+    return items[:limit], errors
