@@ -59,6 +59,7 @@ Lo pubblica GitHub Actions al posto tuo: devi solo inserire tre codici nei secre
 5. **Pubblica**: <https://github.com/simonecassu/BotScraping/actions/workflows/ponte.yml> → **Run workflow**.
    Alla fine il log mostra "Ponte attivo" e l'indirizzo del worker.
 
+Il ponte ha anche un **timer** (ogni 20 minuti) che avvia la ricerca periodica: il cron di GitHub resta solo come riserva.
 L'indirizzo del worker mostra lo stato del ponte; aggiungendo `/reset` lo disattivi (si torna alla lettura dei comandi
 a ogni giro). Con il ponte attivo, se mandi più comandi in pochi secondi mettili in **un solo messaggio, uno per riga**.
 Il file del worker è `deploy/cloudflare-worker.js`, la sua configurazione `deploy/wrangler.toml`.

@@ -1,5 +1,6 @@
 // Ponte Telegram → GitHub Actions (Cloudflare Worker, piano gratuito).
-// Ogni messaggio inviato al bot avvia subito il workflow "PokéBot 30th" passando il comando.
+// Ogni messaggio inviato al bot avvia subito il workflow "PokéBot 30th" passando il comando;
+// inoltre, ogni 20 minuti (timer del worker), avvia la ricerca periodica.
 //
 // Variabili da impostare nel Worker (Settings → Variables and Secrets, tipo "Secret"):
 //   TELEGRAM_BOT_TOKEN  token di @BotFather
@@ -26,6 +27,21 @@ async function telegram(env, method, body) {
     body: JSON.stringify(body || {}),
   });
   return r.json();
+}
+
+async function dispatch(env, payload) {
+  const repo = env.GITHUB_REPO || DEFAULT_REPO;
+  return fetch(`https://api.github.com/repos/${repo}/dispatches`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "pokebot-bridge",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
 }
 
 function page(title, body) {
@@ -83,23 +99,17 @@ export default {
     const chatId = String(msg.chat.id);
     if (env.TELEGRAM_CHAT_ID && chatId !== String(env.TELEGRAM_CHAT_ID)) return new Response("ok");
 
-    const repo = env.GITHUB_REPO || DEFAULT_REPO;
-    const gh = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.GITHUB_TOKEN}`,
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "pokebot-bridge",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ event_type: "telegram", client_payload: { chat_id: chatId, text: msg.text } }),
-    });
+    const gh = await dispatch(env, { event_type: "telegram", client_payload: { chat_id: chatId, text: msg.text } });
 
     const ack = gh.status === 204
       ? "⏳ Ricevuto, avvio il bot: risposta tra circa un minuto."
       : `⚠️ GitHub ha risposto ${gh.status}: controlla GITHUB_TOKEN nel Worker.`;
     await telegram(env, "sendMessage", { chat_id: chatId, text: ack });
     return new Response("ok");
+  },
+
+  // Timer (vedi [triggers] in wrangler.toml): avvia la ricerca periodica su GitHub.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(dispatch(env, { event_type: "timer", client_payload: { source: "cron", at: new Date(event.scheduledTime).toISOString() } }));
   },
 };
