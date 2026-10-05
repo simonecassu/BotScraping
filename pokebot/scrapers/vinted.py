@@ -1,9 +1,11 @@
 """Vinted.it tramite l'API del catalogo (richiede i cookie di sessione anonima)."""
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import requests
+from bs4 import BeautifulSoup
 
 from .. import config
 from .base import BaseScraper, Listing, ScraperError, parse_price
@@ -11,6 +13,7 @@ from .base import BaseScraper, Listing, ScraperError, parse_price
 BASE_URL = "https://www.vinted.it"
 API_URL = f"{BASE_URL}/api/v2/catalog/items"
 REFRESH_URL = f"{BASE_URL}/web/api/auth/refresh"
+CATALOG_URL = f"{BASE_URL}/catalog"
 
 BROWSER_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -74,7 +77,10 @@ class VintedScraper(BaseScraper):
         try:
             resp = self._get(API_URL, params=params, headers=headers)
         except ScraperError as exc:
-            if any(code in str(exc) for code in ("401", "403", "404")):
+            if "404" in str(exc):
+                # l'API JSON non risponde più a questo indirizzo: leggi la pagina di ricerca
+                return self._search_html(query, limit, str(exc))
+            if any(code in str(exc) for code in ("401", "403")):
                 self._ensure_cookies(force=True)
                 try:
                     resp = self._get(API_URL, params=params, headers=headers)
@@ -87,6 +93,62 @@ class VintedScraper(BaseScraper):
         except ValueError as exc:
             raise ScraperError("Vinted: risposta non JSON") from exc
         return self.parse(data)
+
+    def _search_html(self, query: str, limit: int, api_error: str) -> list[Listing]:
+        params = {"search_text": query, "order": "newest_first"}
+        try:
+            resp = self._get(CATALOG_URL, params=params, headers=BROWSER_HEADERS)
+        except ScraperError as exc:
+            raise ScraperError(f"{exc} (API: {api_error[:80]}; {self._diag()})") from exc
+        items = self.parse_html(resp.text)
+        if not items and "/items/" not in resp.text:
+            raise ScraperError(f"Vinted: pagina di ricerca senza annunci ({self._diag()}; API: {api_error[:80]})")
+        return items[:limit]
+
+    # ------------------------------------------------------------------
+    _PRICE_IN_TITLE = re.compile(r"(?:prezzo|price)\s*:\s*(€?\s*\d{1,5}(?:[.,]\d{1,2})?\s*€?)", re.IGNORECASE)
+
+    @classmethod
+    def parse_html(cls, html: str) -> list[Listing]:
+        """Estrae gli annunci dalla pagina /catalog (link /items/<id>-slug con attributo title)."""
+        soup = BeautifulSoup(html, "html.parser")
+        out: list[Listing] = []
+        seen: set[str] = set()
+        for a in soup.select("a[href*='/items/']"):
+            href = a.get("href", "")
+            m = re.search(r"/items/(\d+)", href)
+            if not m:
+                continue
+            item_id = m.group(1)
+            if item_id in seen:
+                continue
+            raw_title = (a.get("title") or a.get_text(" ", strip=True) or "").strip()
+            if not raw_title:
+                continue
+            seen.add(item_id)
+            title = raw_title.split(", prezzo", 1)[0].split(", price", 1)[0].strip()
+            price_text = ""
+            pm = cls._PRICE_IN_TITLE.search(raw_title)
+            if pm:
+                price_text = pm.group(1).strip()
+            else:
+                card = a.find_parent(attrs={"data-testid": re.compile("grid-item|item-card|product")}) or a.parent
+                txt = card.get_text(" ", strip=True) if card else ""
+                pm2 = re.search(r"\d{1,5}(?:[.,]\d{2})?\s*€|€\s*\d{1,5}(?:[.,]\d{2})?", txt)
+                price_text = pm2.group(0) if pm2 else ""
+            url = href if href.startswith("http") else BASE_URL + href
+            img = a.find("img")
+            out.append(Listing(
+                source="vinted",
+                listing_id=item_id,
+                title=title,
+                url=url.split("?", 1)[0],
+                price=parse_price(price_text),
+                price_text=price_text,
+                image=(img.get("src") or img.get("data-src") or "") if img else "",
+                extra={"via": "html"},
+            ))
+        return out
 
     # ------------------------------------------------------------------
     @classmethod

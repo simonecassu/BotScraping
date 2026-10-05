@@ -148,3 +148,48 @@ def test_vinted_fetches_cookies_then_searches(monkeypatch):
     assert calls[0].rstrip("/") == "https://www.vinted.it"
     assert "/web/api/auth/refresh" in calls[1] and "/api/v2/catalog/items" in calls[2]
     assert len(out) == 1 and out[0].url == "https://www.vinted.it/items/1"
+
+
+VINTED_HTML = """
+<div data-testid="grid-item"><a href="/items/5551234-lapras-131-128-pokemon" title="Lapras 131/128 Pokemon 30th, prezzo: 7,50 €, marca: Pokémon"><img src="https://i/1.jpg"></a></div>
+<div data-testid="grid-item"><a href="https://www.vinted.it/items/5559999-moltres?referrer=catalog">Moltres 130/128</a><p>12,00 €</p></div>
+<div><a href="/items/5551234-lapras-131-128-pokemon">duplicato</a></div>
+<a href="/member/123">non un annuncio</a>
+"""
+
+
+def test_vinted_html_parse():
+    out = VintedScraper.parse_html(VINTED_HTML)
+    assert [l.listing_id for l in out] == ["5551234", "5559999"]
+    a, b = out
+    assert a.title == "Lapras 131/128 Pokemon 30th" and a.price == 7.5 and a.image == "https://i/1.jpg"
+    assert a.url == "https://www.vinted.it/items/5551234-lapras-131-128-pokemon"
+    assert b.title == "Moltres 130/128" and b.price == 12.0 and b.url == "https://www.vinted.it/items/5559999-moltres"
+
+
+def test_vinted_falls_back_to_html_on_404(monkeypatch):
+    class Resp:
+        def __init__(self, status, text="", payload=None):
+            self.status_code, self.text, self._p = status, text, payload or {}
+            self.url = "https://www.vinted.it/x"
+
+        def json(self):
+            return self._p
+
+    calls = []
+
+    def fake_get(url, **kw):
+        calls.append(url)
+        if "/api/v2/catalog/items" in url:
+            return Resp(404, "<html>non trovata</html>")
+        if "/catalog" in url:
+            return Resp(200, VINTED_HTML)
+        return Resp(200, "")
+
+    s = VintedScraper()
+    s.min_delay = s.max_delay = 0
+    monkeypatch.setattr(s.session, "get", fake_get)
+    monkeypatch.setattr(s.session, "post", lambda url, **kw: Resp(200))
+    out = s.search("lapras")
+    assert len(out) == 2 and out[0].extra["via"] == "html"
+    assert any("/catalog?" in c or c.endswith("/catalog") for c in calls)
