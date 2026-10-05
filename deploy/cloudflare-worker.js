@@ -103,8 +103,13 @@ export default {
 
     // Mini App: pagina statica
     if (url.pathname === "/app" || url.pathname.startsWith("/app/")) {
-      const path = url.pathname === "/app" || url.pathname === "/app/" ? "/index.html" : url.pathname.slice(4);
-      return env.ASSETS.fetch(new Request(new URL(path, url.origin), request));
+      // la radice degli asset serve index.html senza redirect (un /index.html esplicito verrebbe rediretto a "/")
+      const path = url.pathname === "/app" || url.pathname === "/app/" ? "/" : url.pathname.slice(4);
+      const res = await env.ASSETS.fetch(new Request(new URL(path, url.origin), { headers: request.headers }));
+      if (res.status >= 300 && res.status < 400) {
+        return env.ASSETS.fetch(new Request(new URL("/", url.origin), { headers: request.headers }));
+      }
+      return res;
     }
     // Mini App: stato (sempre fresco, aggira la cache del CDN di GitHub)
     if (url.pathname === "/api/state") {
