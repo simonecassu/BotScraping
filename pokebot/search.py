@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 
 from .cards import CardIndex
@@ -25,6 +26,7 @@ class RunReport:
     notified: int = 0
     errors: dict[str, str] = field(default_factory=dict)
     wanted_count: int = 0
+    skipped: Counter = field(default_factory=Counter)
 
 
 def build_queries(index: CardIndex, wanted_ids: set[str], settings: dict, db: Database) -> list[str]:
@@ -104,6 +106,8 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
     db.finish_run(run_id, report.listings, report.matches, report.errors)
     log.info("Ciclo completato: %d query, %d annunci (%d nuovi), %d match, %d notifiche",
              report.queries, report.listings, report.new_listings, report.matches, report.notified)
+    if report.skipped:
+        log.info("Scartati: " + "; ".join(f"{n} × {why}" for why, n in report.skipped.most_common()))
     return report
 
 
@@ -113,10 +117,13 @@ def _handle_listing(lst: Listing, matcher: Matcher, wanted: set[str], lot_ratio:
     result = matcher.analyze(lst.title, lst.description, wanted, lot_ratio, unverifiable, lst.is_auction)
     if not result.notify:
         db.mark_seen(lst.key)
-        log.debug("Scartato [%s] %s -> %s", lst.source, lst.title, result.reason)
+        report.skipped[result.reason] += 1
+        log.log(logging.INFO if result.kind in ("single", "lot") else logging.DEBUG,
+                "Scartato [%s] %s -> %s", lst.source, lst.title[:80], result.reason)
         return
     if max_price and lst.price is not None and lst.price > max_price:
         db.mark_seen(lst.key)
+        report.skipped["oltre il prezzo massimo"] += 1
         log.info("Oltre il prezzo massimo [%s] %s (%s)", lst.source, lst.title, lst.price_text)
         return
     report.matches += 1

@@ -91,7 +91,8 @@ class BaseScraper:
         if resp.status_code in (401, 403, 429):
             raise ScraperError(f"{self.label}: accesso rifiutato (HTTP {resp.status_code}), probabile blocco anti-bot")
         if resp.status_code >= 400:
-            raise ScraperError(f"{self.label}: HTTP {resp.status_code}")
+            snippet = " ".join(resp.text.split())[:160]
+            raise ScraperError(f"{self.label}: HTTP {resp.status_code} su {resp.url.split('?')[0]} — {snippet}")
         return resp
 
     def search(self, query: str, limit: int = 60) -> list[Listing]:
