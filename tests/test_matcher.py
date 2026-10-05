@@ -148,3 +148,11 @@ def test_anniversary_number_is_not_card_number(matcher):
     assert r.notify and any(c.id == "me55-30" for c in r.possible_wanted)
     r2 = matcher.analyze("Pikachu 30 30th celebration", "", {"me55-30"})
     assert [x.card.id for x in r2.refs] == ["me55-30"]
+
+
+def test_single_card_with_quantity_is_not_a_lot(matcher):
+    # caso reale: "Toxel 058/128 ... disponibili x2" -> carta singola in più copie
+    r = matcher.analyze("Toxel 058/128 30c Holo 30 Anniversario Pokemon", "Disponibili x2, 2 pezzi", {"me55-58"})
+    assert r.kind == "single" and r.notify and ids(r.wanted) == ["me55-58"]
+    r2 = matcher.analyze("Lotto Toxel 58/128 30th", "x2", {"me55-58"})
+    assert r2.kind == "lot"

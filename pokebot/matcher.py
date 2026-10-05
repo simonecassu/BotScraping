@@ -24,6 +24,9 @@ _EXCLUDE_RE = [(re.compile(p), why) for p, why in EXCLUDE_PATTERNS]
 _TRADE_RE = re.compile(r"\b(scambio|scambi|scambiare|trade|swap)\b")
 _SELL_RE = re.compile(r"\b(vendo|vendita|vendesi|in vendita|prezzo|€|euro|eur)\b")
 
+# parole che indicano un lotto vero e proprio
+_LOT_WORDS_RE = re.compile(r"\b(lotto|lotti|lot|bundle|collezione|stock|blocco)\b")
+# quantità ("x2", "2 carte"): da sole, con una sola carta riconosciuta, indicano più copie della stessa carta
 _LOT_RE = re.compile(r"\b(lotto|lotti|lot|bundle|collezione|stock|blocco|x\s?\d{1,3}|\d{1,3}\s?x|\d{1,3}\s+carte)\b")
 _FULL_SET_RE = re.compile(r"\b(set completo|master set|masterset|full set|complete set|completo|completa|tutte le carte|intero set)\b")
 _STATED_COUNT_RE = re.compile(r"\b(\d{1,3})\s+(carte|cards|pezzi|pz)\b|\b(carte|cards)\s*x\s?(\d{1,3})\b|\bx\s?(\d{1,3})\b")
@@ -117,8 +120,9 @@ class Matcher:
                 return self._evaluate_lot(text, refs, ambiguous, wanted_ids, lot_min_ratio, notify_unverifiable_lots)
             return MatchResult("none", False, "nessuna carta riconosciuta")
 
+        # una sola carta riconosciuta con "x2" o "2 pezzi" = più copie della stessa carta, non un lotto
         is_lot = (
-            bool(_LOT_RE.search(text))
+            bool(_LOT_WORDS_RE.search(text))
             or bool(_FULL_SET_RE.search(text))
             or (len(refs) + len(ambiguous)) >= 2
         )

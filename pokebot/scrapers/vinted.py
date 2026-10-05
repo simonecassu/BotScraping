@@ -11,10 +11,21 @@ from .base import BaseScraper, Listing, ScraperError, parse_price
 BASE_URL = "https://www.vinted.it"
 API_URL = f"{BASE_URL}/api/v2/catalog/items"
 
+BROWSER_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "it-IT,it;q=0.9,en;q=0.7",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-Dest": "document",
+}
+
 
 class VintedScraper(BaseScraper):
     name = "vinted"
     label = "Vinted"
+
+    home_status: int | None = None
 
     def _ensure_cookies(self, force: bool = False) -> None:
         if force or not self._has_session_cookie():
@@ -24,9 +35,13 @@ class VintedScraper(BaseScraper):
                 pass  # nessun cookie ancora presente
             self._throttle()
             try:
-                self.session.get(BASE_URL, timeout=config.HTTP_TIMEOUT)
+                resp = self.session.get(BASE_URL + "/", timeout=config.HTTP_TIMEOUT, headers=BROWSER_HEADERS)
+                self.home_status = resp.status_code
             except requests.RequestException as exc:
                 raise ScraperError(f"Vinted: errore di rete: {exc}") from exc
+
+    def _diag(self) -> str:
+        return f"home HTTP {self.home_status}, cookie sessione: {'sì' if self._has_session_cookie() else 'no'}"
 
     def _has_session_cookie(self) -> bool:
         return any(c.name == "access_token_web" and "vinted" in (c.domain or "") for c in self.session.cookies)
@@ -39,13 +54,18 @@ class VintedScraper(BaseScraper):
             "per_page": min(limit, 96),
             "page": 1,
         }
-        headers = {"Accept": "application/json, text/plain, */*", "Referer": BASE_URL + "/"}
+        headers = {**BROWSER_HEADERS, "Accept": "application/json, text/plain, */*", "Referer": BASE_URL + "/catalog",
+                   "X-Requested-With": "XMLHttpRequest", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-origin",
+                   "Sec-Fetch-Dest": "empty"}
         try:
             resp = self._get(API_URL, params=params, headers=headers)
         except ScraperError as exc:
-            if "401" in str(exc) or "403" in str(exc):
+            if any(code in str(exc) for code in ("401", "403", "404")):
                 self._ensure_cookies(force=True)
-                resp = self._get(API_URL, params=params, headers=headers)
+                try:
+                    resp = self._get(API_URL, params=params, headers=headers)
+                except ScraperError as exc2:
+                    raise ScraperError(f"{exc2} ({self._diag()})") from exc2
             else:
                 raise
         try:
