@@ -77,8 +77,12 @@ class FakeClient:
     def get_updates(self, offset, timeout=0):
         return [u for u in self.updates if offset is None or u["update_id"] >= offset]
 
-    def send(self, chat_id, text):
+    def send(self, chat_id, text, buttons=None):
         self.sent.append((str(chat_id), text))
+        self.last_buttons = buttons
+
+    def answer_callback(self, callback_id):
+        self.answered = callback_id
 
 
 def test_poll_saves_chat_id_and_ignores_strangers(index, monkeypatch):
@@ -181,3 +185,41 @@ def test_max_command(index):
     h.handle("/max 3")
     assert db.get_settings()["max_per_card"] == 3
     assert "max 3 annunci" in h.handle("/stato").text
+
+
+def test_history_folders(index):
+    db, h = make(index)
+    db.add_found("vinted:1", "vinted", "Zorua 145/128 A", "https://v/1", "15 €", "", "single",
+                 [{"id": "me55-145", "label": "Hisuian Zorua 145/128", "sure": True}], 1.0, True)
+    db.add_found("ebay:2", "ebay", "Zorua 145/128 B", "https://e/2", "8,00 €", "Roma", "single",
+                 [{"id": "me55-145", "label": "Hisuian Zorua 145/128", "sure": True}], 1.0, True)
+    db.add_found("wallapop:3", "wallapop", "Lotto 30th", "https://w/3", "30 €", "", "lot",
+                 [{"id": "me55-145", "label": "Hisuian Zorua 145/128", "sure": True},
+                  {"id": "me55-131", "label": "Lapras 131/128", "sure": True}], 1.0, False)
+    idx = h.handle("/storico")
+    assert "3 trovati" in idx.text and idx.buttons
+    flat = [b for row in idx.buttons for b in row]
+    assert ("145 Hisuian Zorua · 2", "/storico 145") in flat
+    assert any(lbl.startswith("📦 Lotti") for lbl, _ in flat)
+    det = h.handle("/storico 145")
+    assert "eBay.it" in det.text and "Vinted" in det.text and "Wallapop" not in det.text
+    assert det.text.index("eBay.it") < det.text.index("Vinted")
+    assert det.buttons == [[("⬅️ Cartelle", "/storico")]]
+    lots = h.handle("/storico lotti")
+    assert "Lapras 131/128" in lots.text and "non inviato" in lots.text
+    assert "Nessun annuncio" in h.handle("/storico 1").text
+    h.handle("/storico svuota")
+    assert "Nessun annuncio trovato" in h.handle("/storico").text
+
+
+def test_callback_query_is_handled(index, monkeypatch):
+    from pokebot import config
+    monkeypatch.setattr(config, "TELEGRAM_CHAT_ID", "")
+    db = Database(os.path.join(tempfile.mkdtemp(), "t.db"))
+    db.set_kv("telegram_chat_id", "42")
+    client = FakeClient([
+        {"update_id": 1, "callback_query": {"id": "cb1", "data": "/storico", "message": {"chat": {"id": 42}}}},
+    ])
+    tc = TelegramCommands(index, db, client=client)
+    tc.poll_once()
+    assert client.answered == "cb1" and client.sent and "annuncio" in client.sent[0][1].lower()

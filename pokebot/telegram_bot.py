@@ -40,6 +40,7 @@ HELP = """<b>Comandi</b>
 /rimuovi 131 ... – l'hai trovata: toglila (anche /ho 131)
 /lista – tutte le carte del set con i numeri  ·  /lista classic – la Classic Collection
 /stato – ultimo ciclo, errori, impostazioni
+/storico – cartelle per carta: tutti gli annunci trovati finora, divisi per eBay / Vinted / Wallapop
 /soglia 50 – % minima di carte mancanti perché un lotto venga segnalato
 /prezzo 100 – prezzo massimo in € (0 = nessun limite)
 /fonti wallapop vinted ebay – quali marketplace usare
@@ -50,13 +51,14 @@ Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
-MENU_VERSION = 3
+MENU_VERSION = 4
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
     ("rimuovi", "Trovata! Toglila: /rimuovi 131"),
     ("lista", "Tutte le carte con i numeri (/lista classic per la Classic)"),
     ("stato", "Ultimo giro, errori, impostazioni"),
+    ("storico", "Cartelle per carta con tutti gli annunci trovati, divisi per marketplace"),
     ("cerca", "Cerca subito"),
     ("intervallo", "Ogni quanti minuti cercare: /intervallo 20"),
     ("max", "Quanti annunci (i piu' economici) per carta in ogni giro: /max 5"),
@@ -72,6 +74,7 @@ MENU_COMMANDS = [
 class Reply:
     text: str
     run_search: bool = False
+    buttons: list[list[tuple[str, str]]] | None = None  # righe di pulsanti (etichetta, comando)
 
 
 @dataclass
@@ -96,7 +99,7 @@ class TelegramClient:
         return data.get("result", {}) if data.get("ok") else {}
 
     def get_updates(self, offset: int | None, timeout: int = 0) -> list[dict]:
-        params = {"timeout": timeout, "allowed_updates": json.dumps(["message"])}
+        params = {"timeout": timeout, "allowed_updates": json.dumps(["message", "callback_query"])}
         if offset is not None:
             params["offset"] = offset
         resp = requests.get(f"{self.base}/getUpdates", params=params, timeout=config.HTTP_TIMEOUT + timeout)
@@ -111,11 +114,20 @@ class TelegramClient:
                              timeout=config.HTTP_TIMEOUT)
         return resp.status_code == 200 and bool(resp.json().get("ok"))
 
-    def send(self, chat_id: str | int, text: str) -> None:
-        for chunk in _chunks(text):
-            requests.post(f"{self.base}/sendMessage",
-                          json={"chat_id": chat_id, "text": chunk, "parse_mode": "HTML", "disable_web_page_preview": True},
-                          timeout=config.HTTP_TIMEOUT)
+    def send(self, chat_id: str | int, text: str, buttons: list[list[tuple[str, str]]] | None = None) -> None:
+        chunks = _chunks(text)
+        for i, chunk in enumerate(chunks):
+            payload = {"chat_id": chat_id, "text": chunk, "parse_mode": "HTML", "disable_web_page_preview": True}
+            if buttons and i == len(chunks) - 1:
+                payload["reply_markup"] = {"inline_keyboard": [[{"text": lbl, "callback_data": data[:64]} for lbl, data in row]
+                                                               for row in buttons]}
+            requests.post(f"{self.base}/sendMessage", json=payload, timeout=config.HTTP_TIMEOUT)
+
+    def answer_callback(self, callback_id: str) -> None:
+        try:
+            requests.post(f"{self.base}/answerCallbackQuery", json={"callback_query_id": callback_id}, timeout=config.HTTP_TIMEOUT)
+        except requests.RequestException:
+            pass
 
 
 def _chunks(text: str) -> list[str]:
@@ -169,6 +181,8 @@ class CommandHandler:
             return Reply(self._fmt_list(args))
         if cmd == "/stato":
             return Reply(self._fmt_status())
+        if cmd in ("/storico", "/cartelle", "/trovati"):
+            return self._history(args)
         if cmd == "/soglia":
             return self._set_number(args, "lot_min_ratio", lambda v: min(1.0, max(0.0, v / 100)),
                                     lambda v: f"Soglia lotti: {v * 100:.0f}% di carte mancanti.")
@@ -276,6 +290,81 @@ class CommandHandler:
         return Reply("⚙️ Fonti attive: " + ", ".join(chosen))
 
     # ------------------------------------------------------------------
+    SOURCE_ORDER = ["ebay", "vinted", "wallapop"]
+    SOURCE_LABELS = {"ebay": "eBay.it", "vinted": "Vinted", "wallapop": "Wallapop"}
+
+    def _history(self, args: str) -> Reply:
+        """Cartelle per carta con lo storico degli annunci trovati."""
+        arg = args.strip().lower()
+        if arg in ("svuota", "cancella", "pulisci"):
+            self.db.clear_found()
+            return Reply("🗑 Storico svuotato. Gli annunci già visti non verranno comunque rinotificati.")
+        rows = self.db.list_found()
+        if not rows:
+            return Reply("Nessun annuncio trovato finora. Lo storico si riempie a ogni giro di ricerca.")
+        if not arg:
+            return self._history_index(rows)
+        if arg in ("lotti", "lotto", "lot"):
+            members = [r for r in rows if r["kind"] == "lot"]
+            return self._history_detail("📦 Lotti con carte mancanti", members, show_cards=True)
+        card = self.index.by_code.get(arg) or self.index.by_id.get(arg)
+        if not card:
+            return Reply("Carta non riconosciuta. Usa /storico senza argomenti e tocca una cartella.")
+        members = [r for r in rows if r["kind"] != "lot" and any(m["id"] == card.id for m in r["matched"])]
+        return self._history_detail(f"🃏 {card.label}", members)
+
+    def _history_index(self, rows: list[dict]) -> Reply:
+        counts: dict[str, int] = {}
+        lots = 0
+        for r in rows:
+            if r["kind"] == "lot":
+                lots += 1
+                continue
+            for m in r["matched"]:
+                counts[m["id"]] = counts.get(m["id"], 0) + 1
+        cards = sorted((self.index.by_id[cid] for cid in counts if cid in self.index.by_id), key=lambda c: c.sort_key)
+        lines = [f"📂 <b>Storico annunci</b> · {len(rows)} trovati in totale", "Tocca una cartella per vedere gli annunci divisi per marketplace."]
+        buttons: list[list[tuple[str, str]]] = []
+        row: list[tuple[str, str]] = []
+        for c in cards:
+            code = self.index.code_of[c.id]
+            row.append((f"{code} {c.name} · {counts[c.id]}", f"/storico {code}"))
+            if len(row) == 2:
+                buttons.append(row)
+                row = []
+        if row:
+            buttons.append(row)
+        if lots:
+            buttons.append([(f"📦 Lotti · {lots}", "/storico lotti")])
+        buttons.append([("🗑 Svuota storico", "/storico svuota")])
+        return Reply("\n".join(lines), buttons=buttons[:50])
+
+    def _history_detail(self, title: str, members: list[dict], show_cards: bool = False, per_source: int = 12) -> Reply:
+        from .scrapers.base import parse_price
+        if not members:
+            return Reply(f"<b>{html.escape(title)}</b>\nNessun annuncio in questa cartella.", buttons=[[("⬅️ Cartelle", "/storico")]])
+        lines = [f"<b>{html.escape(title)}</b> · {len(members)} annunci trovati"]
+        by_source: dict[str, list[dict]] = {}
+        for r in members:
+            by_source.setdefault(r["source"], []).append(r)
+        order = [s for s in self.SOURCE_ORDER if s in by_source] + [s for s in by_source if s not in self.SOURCE_ORDER]
+        for src in order:
+            items = by_source[src]
+            items.sort(key=lambda r: (parse_price(r.get("price")) if r.get("price") else float("inf"), -r["created_at"]))
+            lines.append(f"\n<b>{html.escape(self.SOURCE_LABELS.get(src, src))}</b> ({len(items)})")
+            for r in items[:per_source]:
+                when = time.strftime("%d/%m", time.localtime(r["created_at"]))
+                price = html.escape(r.get("price") or "n.d.")
+                sent = "" if r.get("notified") else " · non inviato"
+                extra = ""
+                if show_cards:
+                    labels = [m["label"] for m in r["matched"][:3]]
+                    extra = " · " + html.escape(", ".join(labels)) + (" …" if len(r["matched"]) > 3 else "")
+                lines.append(f'• {price} · {when}{sent} · <a href="{html.escape(r["url"], quote=True)}">{html.escape(r["title"][:60])}</a>{extra}')
+            if len(items) > per_source:
+                lines.append(f"  … e altri {len(items) - per_source}")
+        return Reply("\n".join(lines), buttons=[[("⬅️ Cartelle", "/storico")]])
+
     def _card_line(self, c: Card) -> str:
         code = self.index.code_of[c.id]
         label = f"{code} · {c.name}" if c.printed_total else f"{code} · {c.name} #{c.number}"
@@ -383,10 +472,16 @@ class TelegramCommands:
         want_search = False
         for upd in updates:
             self.db.set_kv("telegram_offset", int(upd["update_id"]) + 1)
-            msg = upd.get("message") or {}
+            cb = upd.get("callback_query")
+            if cb:  # pulsante toccato: il dato del pulsante è un comando
+                self.client.answer_callback(str(cb.get("id", "")))
+                msg = cb.get("message") or {}
+                text = cb.get("data") or ""
+            else:
+                msg = upd.get("message") or {}
+                text = msg.get("text") or ""
             chat = msg.get("chat") or {}
             chat_id = str(chat.get("id") or "")
-            text = msg.get("text") or ""
             if not chat_id or not text:
                 continue
             if not self._authorized(chat_id, text):
@@ -395,7 +490,7 @@ class TelegramCommands:
             reply = self.handler.handle(text)
             want_search = want_search or reply.run_search
             try:
-                self.client.send(chat_id, reply.text)
+                self.client.send(chat_id, reply.text, reply.buttons)
             except requests.RequestException as exc:
                 log.warning("Telegram sendMessage: %s", exc)
         return want_search
@@ -413,7 +508,7 @@ class TelegramCommands:
             return False
         reply = self.handler.handle(text)
         try:
-            self.client.send(chat_id, reply.text)
+            self.client.send(chat_id, reply.text, reply.buttons)
         except requests.RequestException as exc:
             log.warning("Telegram sendMessage: %s", exc)
         return reply.run_search

@@ -65,7 +65,7 @@ export default {
         const res = await telegram(env, "setWebhook", {
           url: `${url.origin}/`,
           secret_token: await secretFor(env),
-          allowed_updates: ["message"],
+          allowed_updates: ["message", "callback_query"],
           drop_pending_updates: false,
         });
         return page(res.ok ? "✅ Ponte attivo" : "❌ Errore",
@@ -94,12 +94,20 @@ export default {
     } catch {
       return new Response("bad request", { status: 400 });
     }
-    const msg = update.message;
-    if (!msg || !msg.text) return new Response("ok");
+    // messaggio normale oppure pulsante toccato (callback_query: il dato del pulsante è un comando)
+    let msg = update.message;
+    let text = msg && msg.text;
+    if (update.callback_query) {
+      const cb = update.callback_query;
+      await telegram(env, "answerCallbackQuery", { callback_query_id: cb.id });
+      msg = cb.message;
+      text = cb.data;
+    }
+    if (!msg || !text) return new Response("ok");
     const chatId = String(msg.chat.id);
     if (env.TELEGRAM_CHAT_ID && chatId !== String(env.TELEGRAM_CHAT_ID)) return new Response("ok");
 
-    const gh = await dispatch(env, { event_type: "telegram", client_payload: { chat_id: chatId, text: msg.text } });
+    const gh = await dispatch(env, { event_type: "telegram", client_payload: { chat_id: chatId, text } });
 
     const ack = gh.status === 204
       ? "⏳ Ricevuto, avvio il bot: risposta tra circa un minuto."

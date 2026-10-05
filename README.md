@@ -33,6 +33,7 @@ Il bot gira ogni 20 minuti sui server di GitHub e si comanda **solo da Telegram*
 | `/rimuovi 131` (o `/ho 131`) | trovata: toglila |
 | `/lista` · `/lista classic` | tutte le carte con i numeri |
 | `/stato` | ultimo ciclo, errori, impostazioni |
+| `/storico` | cartelle per carta con tutti gli annunci trovati, divisi per eBay / Vinted / Wallapop (pulsanti) |
 | `/soglia 50` · `/prezzo 100` · `/fonti wallapop vinted ebay` | soglia lotti, prezzo massimo, marketplace |
 | `/intervallo 20` | ogni quanti minuti fare la ricerca automatica |
 | `/cerca` · `/resetvisti` | ricerca immediata · rinotifica gli annunci già visti |

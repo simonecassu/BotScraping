@@ -137,7 +137,7 @@ class Database:
                 ("_" + key, json.dumps(value)),
             )
 
-    def prune(self, seen_days: int = 45, keep_found: int = 300, keep_runs: int = 50) -> None:
+    def prune(self, seen_days: int = 45, keep_found: int = 2000, keep_runs: int = 50) -> None:
         """Mantiene il database piccolo (utile quando viene salvato su GitHub a ogni esecuzione)."""
         with self.connect() as c:
             c.execute("DELETE FROM seen WHERE first_seen < ?", (time.time() - seen_days * 86400,))
@@ -175,7 +175,7 @@ class Database:
             )
             return int(cur.lastrowid)
 
-    def list_found(self, limit: int = 200) -> list[dict]:
+    def list_found(self, limit: int = 2000) -> list[dict]:
         with self.connect() as c:
             rows = c.execute("SELECT * FROM found ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
         out = []
