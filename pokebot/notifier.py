@@ -70,6 +70,22 @@ class TelegramNotifier:
             return False
         return True
 
+    def send_photo_bytes(self, png: bytes, caption: str) -> bool:
+        """Foto caricata direttamente (collage) con didascalia."""
+        if not self.configured or not png:
+            return False
+        url = f"https://api.telegram.org/bot{self.token}/sendPhoto"
+        try:
+            resp = requests.post(url, data={"chat_id": self.chat_id, "caption": caption[:1024], "parse_mode": "HTML"},
+                                 files={"photo": ("annunci.png", png, "image/png")}, timeout=config.HTTP_TIMEOUT * 2)
+        except requests.RequestException as exc:
+            log.warning("Telegram sendPhoto (collage): %s", exc)
+            return False
+        if resp.status_code != 200:
+            log.info("Telegram sendPhoto collage rifiutata (%s): %s", resp.status_code, resp.text[:120])
+            return False
+        return True
+
     def send_album(self, photo_urls: list[str], caption: str) -> bool:
         """Album (2-10 foto) con didascalia sulla prima; False se Telegram rifiuta."""
         if not self.configured or len(photo_urls) < 2:
@@ -88,12 +104,28 @@ class TelegramNotifier:
             return False
         return True
 
+    _collage_rows: list[dict] | None = None
+    _collage_title: str = ""
+
     def send_group_with_photos(self, text: str, listing_photos: list[str], card_image: str | None, images: bool) -> bool:
         """Gruppo di annunci: album con le foto dei venditori (nell'ordine dell'elenco) + testo.
 
         Con una sola foto usa sendPhoto; se le foto mancano o Telegram le rifiuta, ripiega sull'immagine della carta.
         """
         photos = [u for u in listing_photos if u]
+        if images and photos and self._collage_rows is not None:
+            # modalità "collage": un'unica immagine con la miniatura accanto a ogni riga
+            try:
+                from .collage import build_collage
+                png = build_collage(self._collage_title, self._collage_rows)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Collage non generato: %s", exc)
+                png = None
+            if png:
+                if len(text) <= 1024 and self.send_photo_bytes(png, text):
+                    return True
+                if len(text) > 1024 and self.send_photo_bytes(png, text.split("\n", 1)[0]):
+                    return self.send(text, disable_preview=True)
         if images and photos:
             if len(photos) >= 2:
                 if len(text) <= 1024 and self.send_album(photos, text):
@@ -127,11 +159,15 @@ class TelegramNotifier:
             if key != "lot" and not key.startswith("maybe:"):
                 card = chosen[0][1].wanted[0] if chosen[0][1].wanted else None
                 image = card.image if card else None
-            # foto dei venditori nello stesso ordine dell'elenco: la foto n corrisponde all'annuncio n
+            # miniature dei venditori accanto a ogni riga (collage); in mancanza, album o immagine della carta
             listing_photos = [lst.image for lst, _ in chosen]
-            if all(listing_photos) and self.send_group_with_photos(text, listing_photos, image, images):
-                sent_keys.update(lst.key for lst, _ in chosen)
-            elif self.send_with_image(text, image, images):
+            self._collage_title = title.replace("🃏 ", "").replace("📦 ", "").replace("❔ ", "")
+            self._collage_rows = [{"image": lst.image, "price": lst.price_text or (f"{lst.price:.2f} €" if lst.price is not None else ""),
+                                   "source": lst.source, "title": lst.title, "location": lst.location,
+                                   "lot": res.kind == "lot"} for lst, res in chosen]
+            ok = any(listing_photos) and self.send_group_with_photos(text, listing_photos, image, images)
+            self._collage_rows = None
+            if ok or self.send_with_image(text, image, images):
                 sent_keys.update(lst.key for lst, _ in chosen)
         return [lst.key in sent_keys for lst, _ in items]
 
@@ -180,8 +216,6 @@ def format_group(title: str, chosen: list[tuple[Listing, MatchResult]], total: i
     esc = html.escape
     sub = f"{len(chosen)} più economici su {total} trovati oggi" if total > len(chosen) else f"{total} trovat{'o' if total == 1 else 'i'} oggi"
     lines = [f"<b>{esc(title)}</b> · {sub}"]
-    if len(chosen) >= 2 and all(lst.image for lst, _ in chosen):
-        lines.append("<i>Le foto qui sopra seguono l'ordine dell'elenco</i>")
     for i, (lst, res) in enumerate(chosen, start=1):
         src = SOURCE_LABELS.get(lst.source, lst.source)
         price = esc(lst.price_text or (f"{lst.price:.2f} €" if lst.price is not None else "prezzo n.d."))

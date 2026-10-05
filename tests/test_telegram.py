@@ -328,6 +328,8 @@ def test_group_uses_listing_photo_album(index, monkeypatch):
     n = TelegramNotifier(token="t", chat_id="1")
     calls = []
     monkeypatch.setattr(n, "send_album", lambda photos, caption: calls.append(("album", list(photos), caption)) or True)
+    import pokebot.collage as collage_mod
+    monkeypatch.setattr(collage_mod, "build_collage", lambda title, rows: None)  # senza rete: niente collage, si usa l'album
     monkeypatch.setattr(n, "send_photo", lambda url, caption: calls.append(("photo", url, caption)) or True)
     monkeypatch.setattr(n, "send", lambda text, disable_preview=False: calls.append(("text", text)) or True)
     m = Matcher(index, config.DEFAULT_SETTINGS["set_keywords"])
@@ -339,7 +341,7 @@ def test_group_uses_listing_photo_album(index, monkeypatch):
     assert n.notify_many(items, max_per_card=5, images=True) == [True] * 3
     kind, photos, caption = calls[0]
     assert kind == "album" and photos == ["https://img/0.jpg", "https://img/1.jpg", "https://img/2.jpg"]
-    assert "ordine dell'elenco" in caption and "10 €" in caption
+    assert "10 €" in caption and "Lapras 131/128" in caption
     # senza foto degli annunci: immagine ufficiale della carta
     calls.clear()
     items2 = [(Listing("ebay", "x", "Lapras 131/128 30th", "https://e/x", price=5, price_text="5 €"), items[0][1])]
