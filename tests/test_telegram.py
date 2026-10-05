@@ -317,3 +317,35 @@ def test_cerca_targeted_command(index, monkeypatch):
     assert "in vendita adesso: 1" in r.text and "12 €" in r.text and not r.run_search
     assert r.buttons and r.buttons[0][0] == ("💶 Prezzi", "/prezzi 131")
     assert h.handle("/cerca").run_search
+
+
+def test_group_uses_listing_photo_album(index, monkeypatch):
+    from pokebot import config
+    from pokebot.matcher import Matcher
+    from pokebot.notifier import TelegramNotifier
+    from pokebot.scrapers.base import Listing
+
+    n = TelegramNotifier(token="t", chat_id="1")
+    calls = []
+    monkeypatch.setattr(n, "send_album", lambda photos, caption: calls.append(("album", list(photos), caption)) or True)
+    monkeypatch.setattr(n, "send_photo", lambda url, caption: calls.append(("photo", url, caption)) or True)
+    monkeypatch.setattr(n, "send", lambda text, disable_preview=False: calls.append(("text", text)) or True)
+    m = Matcher(index, config.DEFAULT_SETTINGS["set_keywords"])
+    items = []
+    for i in range(3):
+        lst = Listing("vinted", str(i), f"Lapras 131/128 30th n.{i}", f"https://v/{i}", price=10 + i, price_text=f"{10 + i} €",
+                      image=f"https://img/{i}.jpg")
+        items.append((lst, m.analyze(lst.title, "", {"me55-131"})))
+    assert n.notify_many(items, max_per_card=5, images=True) == [True] * 3
+    kind, photos, caption = calls[0]
+    assert kind == "album" and photos == ["https://img/0.jpg", "https://img/1.jpg", "https://img/2.jpg"]
+    assert "ordine dell'elenco" in caption and "10 €" in caption
+    # senza foto degli annunci: immagine ufficiale della carta
+    calls.clear()
+    items2 = [(Listing("ebay", "x", "Lapras 131/128 30th", "https://e/x", price=5, price_text="5 €"), items[0][1])]
+    n.notify_many(items2, images=True)
+    assert calls[0][0] == "photo" and "scrydex" in calls[0][1]
+    # immagini disattivate: solo testo
+    calls.clear()
+    n.notify_many(items, images=False)
+    assert calls[0][0] == "text"

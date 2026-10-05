@@ -70,6 +70,40 @@ class TelegramNotifier:
             return False
         return True
 
+    def send_album(self, photo_urls: list[str], caption: str) -> bool:
+        """Album (2-10 foto) con didascalia sulla prima; False se Telegram rifiuta."""
+        if not self.configured or len(photo_urls) < 2:
+            return False
+        media = [{"type": "photo", "media": u} for u in photo_urls[:10]]
+        media[0]["caption"] = caption[:1024]
+        media[0]["parse_mode"] = "HTML"
+        url = f"https://api.telegram.org/bot{self.token}/sendMediaGroup"
+        try:
+            resp = requests.post(url, json={"chat_id": self.chat_id, "media": media}, timeout=config.HTTP_TIMEOUT * 2)
+        except requests.RequestException as exc:
+            log.warning("Telegram sendMediaGroup: %s", exc)
+            return False
+        if resp.status_code != 200:
+            log.info("Telegram sendMediaGroup rifiutato (%s): %s", resp.status_code, resp.text[:120])
+            return False
+        return True
+
+    def send_group_with_photos(self, text: str, listing_photos: list[str], card_image: str | None, images: bool) -> bool:
+        """Gruppo di annunci: album con le foto dei venditori (nell'ordine dell'elenco) + testo.
+
+        Con una sola foto usa sendPhoto; se le foto mancano o Telegram le rifiuta, ripiega sull'immagine della carta.
+        """
+        photos = [u for u in listing_photos if u]
+        if images and photos:
+            if len(photos) >= 2:
+                if len(text) <= 1024 and self.send_album(photos, text):
+                    return True
+                if len(text) > 1024 and self.send_album(photos, text.split("\n", 1)[0]):
+                    return self.send(text, disable_preview=True)
+            elif self.send_photo(photos[0], text if len(text) <= 1024 else text.split("\n", 1)[0]):
+                return True if len(text) <= 1024 else self.send(text, disable_preview=True)
+        return self.send_with_image(text, card_image, images)
+
     def send_with_image(self, text: str, image_url: str | None, images: bool) -> bool:
         """Testo con immagine della carta se abilitata; se il testo è lungo, prima la foto poi il testo."""
         if images and image_url:
@@ -93,7 +127,11 @@ class TelegramNotifier:
             if key != "lot" and not key.startswith("maybe:"):
                 card = chosen[0][1].wanted[0] if chosen[0][1].wanted else None
                 image = card.image if card else None
-            if self.send_with_image(text, image, images):
+            # foto dei venditori nello stesso ordine dell'elenco: la foto n corrisponde all'annuncio n
+            listing_photos = [lst.image for lst, _ in chosen]
+            if all(listing_photos) and self.send_group_with_photos(text, listing_photos, image, images):
+                sent_keys.update(lst.key for lst, _ in chosen)
+            elif self.send_with_image(text, image, images):
                 sent_keys.update(lst.key for lst, _ in chosen)
         return [lst.key in sent_keys for lst, _ in items]
 
@@ -106,7 +144,8 @@ class TelegramNotifier:
                 f"<b>{esc(listing.price_text or f'{listing.price:.2f} €')}</b> · {esc(SOURCE_LABELS.get(listing.source, listing.source))}"
                 f" · {pct:.0f}% della mediana ({median:.2f} €)\n"
                 f'<a href="{esc(listing.url, quote=True)}">{esc(listing.title[:80])}</a>')
-        return self.send_with_image(text, card.image, images)
+        # foto dell'annuncio (com'è messa la carta in vendita); se manca, l'immagine ufficiale della carta
+        return self.send_with_image(text, listing.image or card.image, images)
 
     def test_message(self) -> bool:
         return self.send("✅ PokéBot 30th collegato: riceverai qui gli annunci delle carte mancanti.", True)
@@ -141,6 +180,8 @@ def format_group(title: str, chosen: list[tuple[Listing, MatchResult]], total: i
     esc = html.escape
     sub = f"{len(chosen)} più economici su {total} trovati oggi" if total > len(chosen) else f"{total} trovat{'o' if total == 1 else 'i'} oggi"
     lines = [f"<b>{esc(title)}</b> · {sub}"]
+    if len(chosen) >= 2 and all(lst.image for lst, _ in chosen):
+        lines.append("<i>Le foto qui sopra seguono l'ordine dell'elenco</i>")
     for i, (lst, res) in enumerate(chosen, start=1):
         src = SOURCE_LABELS.get(lst.source, lst.source)
         price = esc(lst.price_text or (f"{lst.price:.2f} €" if lst.price is not None else "prezzo n.d."))
