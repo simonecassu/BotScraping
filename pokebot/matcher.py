@@ -120,15 +120,18 @@ class Matcher:
                 return self._evaluate_lot(text, refs, ambiguous, wanted_ids, lot_min_ratio, notify_unverifiable_lots)
             return MatchResult("none", False, "nessuna carta riconosciuta")
 
-        # una sola carta riconosciuta con "x2" o "2 pezzi" = più copie della stessa carta, non un lotto
+        # una sola carta riconosciuta con "x2" o "2 pezzi" = più copie della stessa carta, non un lotto.
+        # Se c'è almeno una carta identificata con certezza, i nomi senza numero ("... Pikachu Nintendo")
+        # sono quasi sempre rumore del titolo: non bastano da soli a fare un lotto.
+        distinct = len(refs) if refs else len(ambiguous)
         is_lot = (
             bool(_LOT_WORDS_RE.search(text))
             or bool(_FULL_SET_RE.search(text))
-            or (len(refs) + len(ambiguous)) >= 2
+            or distinct >= 2
         )
         if is_lot:
             return self._evaluate_lot(text, refs, ambiguous, wanted_ids, lot_min_ratio, notify_unverifiable_lots)
-        return self._evaluate_single(refs, ambiguous, wanted_ids)
+        return self._evaluate_single(refs, ambiguous if not refs else [], wanted_ids)
 
     # ------------------------------------------------------------------
     def _extract_refs(self, text: str, has_set_kw: bool) -> tuple[list[CardRef], list[AmbiguousRef], bool]:
@@ -172,6 +175,12 @@ class Matcher:
                 else:
                     ambiguous.append(AmbiguousRef(name, candidates))
 
+        # "Mewtwo" accanto a "Mewtwo ex 151/128" è la stessa carta, non una seconda: scarta i nomi "prefisso"
+        # di una carta già identificata dal numero
+        sure_names = [normalize(r.card.name) for r in refs.values() if r.via != "nome"]
+        for cid, r in list(refs.items()):
+            if r.via == "nome" and any(n.startswith(normalize(r.card.name) + " ") for n in sure_names):
+                del refs[cid]
         # un gruppo ambiguo risolto da un numero trovato dopo va rimosso
         ambiguous = [a for a in ambiguous if not any(c.id in refs for c in a.candidates)]
         # dedup gruppi ambigui per nome

@@ -156,3 +156,14 @@ def test_single_card_with_quantity_is_not_a_lot(matcher):
     assert r.kind == "single" and r.notify and ids(r.wanted) == ["me55-58"]
     r2 = matcher.analyze("Lotto Toxel 58/128 30th", "x2", {"me55-58"})
     assert r2.kind == "lot"
+
+
+def test_noise_name_next_to_identified_card_is_not_a_lot(matcher):
+    # casi reali eBay: "Pikachu Nintendo" e "Mewtwo illustrazione" sono rumore accanto a 151/128
+    r = matcher.analyze("Mewtwo Ex 151/128 Rare 30th Anniversario Pokemon Rare MINT Pikachu Nintendo", "", {"me55-151"})
+    assert r.kind == "single" and r.notify and ids(r.wanted) == ["me55-151"]
+    r2 = matcher.analyze("Vendo carta Pokémon Mewtwo illustrazione speciale del 30 anniversario (151/128)", "", {"me55-151"})
+    assert r2.kind == "single" and r2.notify
+    # con la parola "lotto" i nomi senza numero contano ancora
+    r3 = matcher.analyze("Lotto 30th: Pikachu ex 149/128 + Lapras + Moltres", "", {"me55-149"})
+    assert r3.kind == "lot" and r3.total_cards == 3
