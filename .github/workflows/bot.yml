@@ -1,14 +1,13 @@
 # Esegue il bot gratis su GitHub Actions, senza PC.
 # Serve solo il secret TELEGRAM_BOT_TOKEN (Settings → Secrets and variables → Actions).
-# - ogni 5 minuti legge i comandi Telegram; la ricerca vera parte ogni /intervallo minuti o con /cerca
-# - "Run workflow" (o il Comando rapido iOS) forza una ricerca immediata
-# - un messaggio Telegram può avviarlo all'istante tramite il ponte Cloudflare (deploy/cloudflare-worker.js)
+# - ogni 20 minuti fa la ricerca; ogni messaggio Telegram lo avvia all'istante tramite il ponte Cloudflare
+#   (deploy/cloudflare-worker.js); "Run workflow" forza una ricerca immediata
 # Lo stato (carte mancanti, annunci già visti) è salvato nel branch "bot-state".
 name: PokéBot 30th
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "7,27,47 * * * *"
   workflow_dispatch:
   repository_dispatch:
     types: [telegram]

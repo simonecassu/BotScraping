@@ -34,44 +34,31 @@ Il bot gira ogni 20 minuti sui server di GitHub e si comanda **solo da Telegram*
 | `/lista` · `/lista classic` | tutte le carte con i numeri |
 | `/stato` | ultimo ciclo, errori, impostazioni |
 | `/soglia 50` · `/prezzo 100` · `/fonti wallapop vinted ebay` | soglia lotti, prezzo massimo, marketplace |
-| `/intervallo 20` | ogni quanti minuti fare la ricerca |
+| `/intervallo 20` | ogni quanti minuti fare la ricerca automatica |
 | `/cerca` · `/resetvisti` | ricerca immediata · rinotifica gli annunci già visti |
 
-Il bot legge i comandi **ogni 5 minuti** e fa la ricerca vera ogni `/intervallo` minuti (20 di default) oppure
-subito dopo un `/cerca`. Lo stato (carte mancanti, annunci già visti) è salvato nel branch `bot-state`.
-
-### Avviarlo all'istante
-
-| Livello | Come | Ritardo |
-|---|---|---|
-| Base | il bot passa da solo ogni 5 minuti | fino a 5 min (GitHub a volte ritarda i cron) |
-| Pulsante iPhone | Comando rapido iOS / Siri che chiama GitHub (sotto) | ~1 min |
-| Da Telegram | ponte gratuito su Cloudflare: ogni messaggio al bot avvia subito il workflow | ~1 min |
-
-**Comando rapido iOS** (una volta sola):
-1. Crea un token su <https://github.com/settings/personal-access-tokens/new>: *Only select repositories* → BotScraping,
-   *Repository permissions* → **Actions: Read and write**. Copia il token.
-2. App **Comandi rapidi** → nuovo comando → azione **Ottieni contenuto di URL**:
-   - URL `https://api.github.com/repos/simonecassu/BotScraping/actions/workflows/bot.yml/dispatches`
-   - Metodo **POST**, Intestazioni: `Authorization` = `Bearer <token>`, `Accept` = `application/vnd.github+json`
-   - Corpo della richiesta **JSON**: chiave `ref`, valore `claude/pokemon-scraping-bot-wzsmmv`
-3. Chiamalo "Cerca carte": lo metti in Home o lo dici a Siri. Avvia una ricerca completa immediata.
-
-**Ponte Telegram → GitHub** (Cloudflare Workers, gratuito, una volta sola):
-1. Token GitHub come sopra ma con permesso **Contents: Read and write** (serve per `repository_dispatch`).
-2. Su <https://dash.cloudflare.com> → Workers & Pages → **Create** → Worker "Hello World" → **Edit code** →
-   incolla `deploy/cloudflare-worker.js` → **Deploy**. Annota l'indirizzo `https://<nome>.<account>.workers.dev`.
-3. Nel Worker → Settings → **Variables and Secrets**: `TELEGRAM_BOT_TOKEN`, `GITHUB_TOKEN`, `GITHUB_REPO` = `simonecassu/BotScraping`,
-   `WEBHOOK_SECRET` = una parola a caso.
-4. Apri in Safari (sostituendo i valori):
-   `https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=https://<nome>.<account>.workers.dev/&secret_token=<WEBHOOK_SECRET>`
-   Deve rispondere `"ok":true`.
-
-Da quel momento ogni comando che scrivi al bot avvia subito il workflow: il ponte risponde "Ricevuto" e il bot
-risponde entro un minuto. Per tornare alla modalità base basta aprire `https://api.telegram.org/bot<TOKEN>/deleteWebhook`.
-Con il ponte attivo, se mandi più comandi in pochi secondi mettili in **un solo messaggio, uno per riga**.
+Lo stato (carte mancanti, annunci già visti) è salvato nel branch `bot-state`.
 Solo la chat che ha scritto `/start` per prima può comandare il bot.
 GitHub disattiva i workflow pianificati dopo 60 giorni senza attività sul repository: arriva un'email e si riattiva con un tap.
+
+### Risposta immediata: il ponte Telegram → GitHub
+
+Senza ponte il bot legge i comandi solo quando gira (ogni 20 minuti). Con il ponte, gratuito su Cloudflare Workers,
+**ogni messaggio al bot avvia subito il workflow**: il ponte risponde "Ricevuto" e il bot risponde entro un minuto.
+Configurazione una volta sola, tutta da telefono:
+
+1. **Token GitHub**: <https://github.com/settings/personal-access-tokens/new> → nome a piacere, scadenza la più lunga,
+   *Repository access* → **Only select repositories** → `BotScraping`, *Repository permissions* → **Contents: Read and write**
+   → **Generate token** → copia il token (inizia con `github_pat_`).
+2. **Worker**: <https://dash.cloudflare.com> (account gratuito) → **Workers & Pages** → **Create** → *Start with Hello World* →
+   **Deploy** → **Edit code** → cancella tutto e incolla il contenuto di `deploy/cloudflare-worker.js` → **Deploy**.
+3. **Variabili**: nel Worker → **Settings** → **Variables and Secrets** → **Add**, tipo *Secret*:
+   `TELEGRAM_BOT_TOKEN` (token di @BotFather) e `GITHUB_TOKEN` (token del punto 1) → **Deploy**.
+4. **Attivazione**: apri in Safari l'indirizzo del Worker seguito da `/setup`
+   (es. `https://pokebot.<tuo-account>.workers.dev/setup`). Deve comparire "✅ Ponte attivo".
+
+`/status` mostra lo stato del ponte, `/reset` lo disattiva (si torna alla lettura dei comandi a ogni giro).
+Con il ponte attivo, se mandi più comandi in pochi secondi mettili in **un solo messaggio, uno per riga**.
 
 ## Avvio rapido su PC
 
