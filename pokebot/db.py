@@ -62,6 +62,10 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            try:
+                conn.execute("ALTER TABLE runs ADD COLUMN per_source TEXT")
+            except sqlite3.OperationalError:
+                pass  # colonna già presente
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -199,11 +203,13 @@ class Database:
             cur = c.execute("INSERT INTO runs(started_at) VALUES (?)", (time.time(),))
             return int(cur.lastrowid)
 
-    def finish_run(self, run_id: int, listings_seen: int, matches: int, errors: dict[str, str]) -> None:
+    def finish_run(self, run_id: int, listings_seen: int, matches: int, errors: dict[str, str],
+                   per_source: dict[str, int] | None = None) -> None:
         with self.connect() as c:
             c.execute(
-                "UPDATE runs SET finished_at = ?, listings_seen = ?, matches = ?, errors = ? WHERE id = ?",
-                (time.time(), listings_seen, matches, json.dumps(errors, ensure_ascii=False), run_id),
+                "UPDATE runs SET finished_at = ?, listings_seen = ?, matches = ?, errors = ?, per_source = ? WHERE id = ?",
+                (time.time(), listings_seen, matches, json.dumps(errors, ensure_ascii=False),
+                 json.dumps(per_source or {}), run_id),
             )
 
     def last_runs(self, limit: int = 10) -> list[dict]:
@@ -216,6 +222,10 @@ class Database:
                 d["errors"] = json.loads(d["errors"]) if d["errors"] else {}
             except json.JSONDecodeError:
                 d["errors"] = {"?": d["errors"]}
+            try:
+                d["per_source"] = json.loads(d.get("per_source") or "{}")
+            except json.JSONDecodeError:
+                d["per_source"] = {}
             out.append(d)
         return out
 

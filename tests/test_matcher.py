@@ -167,3 +167,19 @@ def test_noise_name_next_to_identified_card_is_not_a_lot(matcher):
     # con la parola "lotto" i nomi senza numero contano ancora
     r3 = matcher.analyze("Lotto 30th: Pikachu ex 149/128 + Lapras + Moltres", "", {"me55-149"})
     assert r3.kind == "lot" and r3.total_cards == 3
+
+
+def test_language_filter(matcher):
+    w = {"me55-131", "me55-152", "me55-64"}
+    fr = ["Lokhlass Ar 131/128 Me5.5 30 ans", "Cartes Pokémon 30 ans - Lokhlass 131/128 AR",
+          "Carte Pokémon 64/128 Mewtwo ex - 30 ans FR Neuve", "Mew EX FA 152/128 30 ans Célébrations - PCA 10"]
+    for t in fr:
+        r = matcher.analyze(t, "", w, language="ita")
+        assert r.kind == "excluded" and "francese" in r.reason, t
+    r = matcher.analyze("Mew EX - 30th Celebration - 152/128 - ENG", "", w, language="ita")
+    assert r.kind == "excluded" and "inglese" in r.reason
+    # italiano esplicito o neutro: passa
+    for t in ["Lapras 131/128 30° anniversario ITA Near Mint", "Lapras 131/128 30th", "Lotto ITA/ENG Lapras 131/128 30th"]:
+        assert matcher.analyze(t, "", w, language="ita").notify, t
+    # con lingua "tutte" il francese passa
+    assert matcher.analyze(fr[0], "", w, language="tutte").notify

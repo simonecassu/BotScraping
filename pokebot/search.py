@@ -27,6 +27,7 @@ class RunReport:
     errors: dict[str, str] = field(default_factory=dict)
     wanted_count: int = 0
     skipped: Counter = field(default_factory=Counter)
+    per_source: Counter = field(default_factory=Counter)
 
 
 def build_queries(index: CardIndex, wanted_ids: set[str], settings: dict, db: Database) -> list[str]:
@@ -70,6 +71,7 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
     only_italy = bool(settings.get("only_italy", True))
     unverifiable = bool(settings.get("notify_unverifiable_lots", False))
     max_per_card = int(settings.get("max_per_card", 5) or 5)
+    language = str(settings.get("language", "ita") or "ita")
     notifier = notifier or TelegramNotifier.from_db(db)
 
     if scrapers is None:
@@ -85,38 +87,49 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
     pending: list[tuple[Listing, "MatchResult"]] = []  # match da notificare a fine ciclo (raggruppati se tanti)
 
     for name, scraper in scrapers.items():
+        consecutive_errors = 0
         for q in queries:
             try:
                 listings = scraper.search(q)
+                consecutive_errors = 0
             except ScraperError as exc:
-                log.warning("%s", exc)
+                consecutive_errors += 1
+                log.warning("%s (query: %s)", exc, q)
                 report.errors[name] = str(exc)
-                break  # un marketplace bloccato: inutile insistere in questo ciclo
+                if consecutive_errors >= 3 or "accesso rifiutato" in str(exc):
+                    break  # marketplace bloccato o giù: inutile insistere in questo ciclo
+                continue
             except Exception as exc:  # noqa: BLE001
                 log.exception("Errore inatteso in %s", name)
                 report.errors[name] = f"{type(exc).__name__}: {exc}"
                 break
+            report.per_source[name] += len(listings)
+            log.debug("%s: %d risultati per '%s'", name, len(listings), q)
             for lst in listings:
                 report.listings += 1
                 if lst.key in seen_this_run or db.is_seen(lst.key):
                     continue
                 seen_this_run.add(lst.key)
                 report.new_listings += 1
-                _handle_listing(lst, matcher, wanted, lot_ratio, max_price, unverifiable, db, report, pending)
+                _handle_listing(lst, matcher, wanted, lot_ratio, max_price, unverifiable, db, report, pending, language)
+        if name in report.errors and report.per_source.get(name):
+            # qualche query è riuscita: l'errore è parziale, non bloccante
+            report.errors[name] = "parziale: " + report.errors[name]
 
     _notify_pending(pending, notifier, db, report, dry_run, max_per_card)
     report.finished_at = time.time()
-    db.finish_run(run_id, report.listings, report.matches, report.errors)
-    log.info("Ciclo completato: %d query, %d annunci (%d nuovi), %d match, %d notifiche",
-             report.queries, report.listings, report.new_listings, report.matches, report.notified)
+    db.finish_run(run_id, report.listings, report.matches, report.errors, dict(report.per_source))
+    log.info("Ciclo completato: %d query, %d annunci (%d nuovi), %d match, %d notifiche · per fonte: %s",
+             report.queries, report.listings, report.new_listings, report.matches, report.notified,
+             ", ".join(f"{k} {v}" for k, v in report.per_source.items()) or "-")
     if report.skipped:
         log.info("Scartati: " + "; ".join(f"{n} × {why}" for why, n in report.skipped.most_common()))
     return report
 
 
 def _handle_listing(lst: Listing, matcher: Matcher, wanted: set[str], lot_ratio: float, max_price: float,
-                    unverifiable: bool, db: Database, report: RunReport, pending: list) -> None:
-    result = matcher.analyze(lst.title, lst.description, wanted, lot_ratio, unverifiable, lst.is_auction)
+                    unverifiable: bool, db: Database, report: RunReport, pending: list, language: str = "tutte") -> None:
+    result = matcher.analyze(lst.title, lst.description, wanted, lot_ratio, unverifiable, lst.is_auction, language)
     if not result.notify:
         db.mark_seen(lst.key)
         report.skipped[result.reason] += 1

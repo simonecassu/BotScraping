@@ -80,3 +80,34 @@ def test_no_wanted_skips(index):
     scraper = FakeScraper([])
     rep = run_search(index, db, notifier=FakeNotifier(), scrapers={"fake": scraper})
     assert rep.queries == 0 and scraper.queries == []
+
+
+def test_source_error_tolerance(index):
+    """Un errore isolato non interrompe la fonte; tre consecutivi sì."""
+    from pokebot.scrapers.base import ScraperError
+
+    class Flaky(FakeScraper):
+        def __init__(self, fail_on):
+            super().__init__([Listing("fake", "ok", "Lapras 131/128 30th", "https://x/ok")])
+            self.fail_on = fail_on
+            self.n = 0
+
+        def search(self, query, limit=60):
+            self.n += 1
+            self.queries.append(query)
+            if self.n in self.fail_on:
+                raise ScraperError("Fake: pagina senza annunci")
+            return list(self.listings)
+
+    db = make_db()
+    db.set_wanted_bulk(["me55-131"], True)
+    db.save_settings({"generic_queries": ["a", "b", "c", "d", "e"], "per_card_queries": False})
+    s1 = Flaky(fail_on={2})
+    rep = run_search(index, db, notifier=FakeNotifier(), scrapers={"fake": s1})
+    assert len(s1.queries) == 5 and rep.errors["fake"].startswith("parziale") and rep.per_source["fake"] == 4
+    db2 = make_db()
+    db2.set_wanted_bulk(["me55-131"], True)
+    db2.save_settings({"generic_queries": ["a", "b", "c", "d", "e"], "per_card_queries": False})
+    s2 = Flaky(fail_on={1, 2, 3})
+    rep2 = run_search(index, db2, notifier=FakeNotifier(), scrapers={"fake": s2})
+    assert len(s2.queries) == 3 and not rep2.errors["fake"].startswith("parziale")

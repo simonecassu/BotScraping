@@ -37,6 +37,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "lot_min_ratio": 0.5,
     "max_price": 0,  # 0 = nessun limite
     "max_per_card": 5,  # per ogni carta, quanti annunci (i più economici) inviare per ciclo
+    "language": "ita",  # "ita" scarta gli annunci dichiaratamente in altre lingue (FR/EN/DE/ES/JP); "tutte" accetta tutto
     "sources": ["wallapop", "vinted", "ebay"],
     "set_keywords": [
         "30th celebration",

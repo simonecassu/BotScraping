@@ -31,6 +31,20 @@ _LOT_RE = re.compile(r"\b(lotto|lotti|lot|bundle|collezione|stock|blocco|x\s?\d{
 _FULL_SET_RE = re.compile(r"\b(set completo|master set|masterset|full set|complete set|completo|completa|tutte le carte|intero set)\b")
 _STATED_COUNT_RE = re.compile(r"\b(\d{1,3})\s+(carte|cards|pezzi|pz)\b|\b(carte|cards)\s*x\s?(\d{1,3})\b|\bx\s?(\d{1,3})\b")
 
+# Annunci in altre lingue (usato con l'impostazione lingua = "ita")
+_LANG_PATTERNS: list[tuple[str, str]] = [
+    (r"\b(fr|vf|francese|french|francais|française|francaise)\b|"
+     r"\b(cartes|neuve|neuf|etat|tres bon|jamais jouee|envoi|30 ans|\d+ ans|serie ?:|celebrations 30|lot de|pieces|carte pokemon)\b|"
+     r"\b(lokhlass|sulfura|artikodin|electhor|noadkoko|dracaufeu|ectoplasma|miaouss|nymphali|drattak|amphinobi|chochodile|"
+     r"lugulabre|lougaroc|ekaiser|gromago|baggiguane|mentali|evoli|carapuce|salameche)\b", "francese"),
+    (r"\b(eng|en|english|inglese|english version|usa)\b", "inglese"),
+    (r"\b(de|deutsch|german|tedesco|deutsche|neuwertig|karte|karten)\b", "tedesco"),
+    (r"\b(es|espanol|spanish|spagnolo|castellano|nueva|tarjeta|cartas)\b", "spagnolo"),
+    (r"\b(jp|jpn|jap|japanese|giapponese|japan|kor|korean|coreano|chinese|cinese|zh)\b", "giapponese/asiatica"),
+]
+_LANG_RE = [(re.compile(p), lang) for p, lang in _LANG_PATTERNS]
+_ITALIAN_HINT_RE = re.compile(r"\b(ita|italiano|italiana|italiane|it)\b")
+
 # Indizi di set diversi (25° anniversario "Celebrations")
 _OTHER_SET_RE = re.compile(r"\b(25th|25 anniversario|25° anniversario|celebrations|venticinquesimo)\b")
 _THIRTY_RE = re.compile(r"\b(30th|30|30°|trentesimo|30esimo|2026)\b")
@@ -96,12 +110,16 @@ class Matcher:
 
     # ------------------------------------------------------------------
     def analyze(self, title: str, description: str, wanted_ids: set[str], lot_min_ratio: float = 0.5,
-                notify_unverifiable_lots: bool = False, is_auction: bool = False) -> MatchResult:
+                notify_unverifiable_lots: bool = False, is_auction: bool = False, language: str = "tutte") -> MatchResult:
         text = normalize(f"{title} . {description}")
         title_n = normalize(title)
 
         if is_auction:
             return MatchResult("excluded", False, "asta, non acquisto immediato")
+        if language == "ita":
+            other = self.detect_other_language(title_n, text)
+            if other:
+                return MatchResult("excluded", False, f"lingua diversa ({other})")
         for rx, why in _EXCLUDE_RE:
             if rx.search(title_n) or (rx.search(text) and why in ("carta non originale", "codice / digitale")):
                 return MatchResult("excluded", False, why)
@@ -132,6 +150,21 @@ class Matcher:
         if is_lot:
             return self._evaluate_lot(text, refs, ambiguous, wanted_ids, lot_min_ratio, notify_unverifiable_lots)
         return self._evaluate_single(refs, ambiguous if not refs else [], wanted_ids)
+
+    @staticmethod
+    def detect_other_language(title_n: str, text: str) -> str | None:
+        """Lingua diversa dall'italiano dichiarata o evidente nel titolo (la descrizione conta solo se esplicita)."""
+        for rx, lang in _LANG_RE:
+            if rx.search(title_n):
+                # "ITA / ENG" (bilingue o lotto misto): se l'italiano è citato esplicitamente, lascia passare
+                if _ITALIAN_HINT_RE.search(title_n) and lang != "francese":
+                    continue
+                return lang
+        # nella descrizione accetta solo dichiarazioni esplicite di lingua
+        explicit = re.search(r"\b(lingua|language|version|versione)\s*:?\s*(fr|francese|french|eng|english|inglese|de|tedesco|german|es|spagnolo|spanish|jp|jpn|giapponese|japanese)\b", text)
+        if explicit and not _ITALIAN_HINT_RE.search(text):
+            return explicit.group(2)
+        return None
 
     # ------------------------------------------------------------------
     def _extract_refs(self, text: str, has_set_kw: bool) -> tuple[list[CardRef], list[AmbiguousRef], bool]:

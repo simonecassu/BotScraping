@@ -44,6 +44,7 @@ HELP = """<b>Comandi</b>
 /soglia 50 – % minima di carte mancanti perché un lotto venga segnalato
 /prezzo 100 – prezzo massimo in € (0 = nessun limite)
 /fonti wallapop vinted ebay – quali marketplace usare
+/lingua ita – scarta annunci in francese/inglese/altre lingue · /lingua tutte – accetta tutto
 /intervallo 20 – ogni quanti minuti fare la ricerca
 /max 5 – per ogni carta, quanti annunci (i più economici) ricevere a ogni giro
 /cerca – ricerca immediata  ·  /resetvisti – rinotifica anche gli annunci già visti
@@ -51,7 +52,7 @@ Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
-MENU_VERSION = 4
+MENU_VERSION = 5
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -65,6 +66,7 @@ MENU_COMMANDS = [
     ("soglia", "Percentuale minima di carte mancanti nei lotti: /soglia 50"),
     ("prezzo", "Prezzo massimo in euro: /prezzo 100 (0 = nessun limite)"),
     ("fonti", "Marketplace da usare: /fonti wallapop vinted ebay"),
+    ("lingua", "Solo carte italiane (/lingua ita) oppure tutte le lingue (/lingua tutte)"),
     ("resetvisti", "Rinotifica anche gli annunci gia' visti"),
     ("aiuto", "Elenco dei comandi"),
 ]
@@ -197,6 +199,15 @@ class CommandHandler:
                                     lambda v: f"Ricerca ogni {v} minuti.")
         if cmd == "/fonti":
             return self._set_sources(args)
+        if cmd == "/lingua":
+            a = args.strip().lower()
+            if a in ("ita", "it", "italiano", "italiana"):
+                self.db.save_settings({"language": "ita"})
+                return Reply("⚙️ Solo annunci italiani: scarto quelli dichiaratamente in francese, inglese, tedesco, spagnolo o giapponese.")
+            if a in ("tutte", "tutto", "any", "all"):
+                self.db.save_settings({"language": "tutte"})
+                return Reply("⚙️ Accetto annunci in qualsiasi lingua.")
+            return Reply("Usa <code>/lingua ita</code> oppure <code>/lingua tutte</code>.")
         if cmd == "/cerca":
             return Reply("🔎 Ok, cerco adesso.", run_search=True)
         if cmd == "/resetvisti":
@@ -406,11 +417,16 @@ class CommandHandler:
         price_txt = "nessuno" if not max_price else f"{max_price:g} €"
         lines = [f"🃏 Mancanti: <b>{len(self.db.wanted_ids())}</b>/{len(self.index.by_id)}",
                  f"⚙️ Ricerca ogni {int(s['interval_minutes'])} min · max {int(s.get('max_per_card', 5))} annunci per carta · "
-                 f"soglia lotti {s['lot_min_ratio'] * 100:.0f}% · prezzo max {price_txt} · fonti: {', '.join(s['sources'])}"]
+                 f"soglia lotti {s['lot_min_ratio'] * 100:.0f}% · prezzo max {price_txt} · lingua: {s.get('language', 'ita')} · "
+                 f"fonti: {', '.join(s['sources'])}"]
         if runs:
             r = runs[0]
             when = time.strftime("%d/%m %H:%M", time.localtime(r["started_at"]))
             lines.append(f"🕒 Ultimo ciclo {when}: {r['listings_seen']} annunci letti, {r['matches']} segnalati")
+            per_source = r.get("per_source") or {}
+            if per_source:
+                lines.append("📊 Letti per fonte: " + " · ".join(
+                    f"{self.SOURCE_LABELS.get(k, k)} {v}" for k, v in per_source.items()))
             for k, v in (r["errors"] or {}).items():
                 lines.append(f"⚠️ {html.escape(k)}: {html.escape(str(v)[:200])}")
         else:

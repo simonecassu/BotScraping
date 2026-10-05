@@ -223,3 +223,15 @@ def test_callback_query_is_handled(index, monkeypatch):
     tc = TelegramCommands(index, db, client=client)
     tc.poll_once()
     assert client.answered == "cb1" and client.sent and "annuncio" in client.sent[0][1].lower()
+
+
+def test_language_command_and_status_counts(index):
+    db, h = make(index)
+    h.handle("/lingua tutte")
+    assert db.get_settings()["language"] == "tutte"
+    h.handle("/lingua ita")
+    assert db.get_settings()["language"] == "ita"
+    run_id = db.start_run()
+    db.finish_run(run_id, 10, 1, {}, {"ebay": 6, "vinted": 4})
+    st = h.handle("/stato").text
+    assert "lingua: ita" in st and "eBay.it 6" in st and "Vinted 4" in st

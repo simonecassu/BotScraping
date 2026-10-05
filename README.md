@@ -36,6 +36,7 @@ Il bot gira ogni 20 minuti sui server di GitHub e si comanda **solo da Telegram*
 | `/storico` | cartelle per carta con tutti gli annunci trovati, divisi per eBay / Vinted / Wallapop (pulsanti) |
 | `/soglia 50` · `/prezzo 100` · `/fonti wallapop vinted ebay` | soglia lotti, prezzo massimo, marketplace |
 | `/intervallo 20` | ogni quanti minuti fare la ricerca automatica |
+| `/lingua ita` · `/lingua tutte` | scarta gli annunci in francese/inglese/altre lingue (default) oppure accetta tutto |
 | `/cerca` · `/resetvisti` | ricerca immediata · rinotifica gli annunci già visti |
 
 Lo stato (carte mancanti, annunci già visti) è salvato nel branch `bot-state`.
