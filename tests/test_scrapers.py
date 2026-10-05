@@ -140,5 +140,5 @@ def test_vinted_fetches_cookies_then_searches(monkeypatch):
     s.min_delay = s.max_delay = 0
     monkeypatch.setattr(s.session, "get", fake_get)
     out = s.search("lapras")
-    assert calls[0] == "https://www.vinted.it" and "/api/v2/catalog/items" in calls[1]
+    assert calls[0].rstrip("/") == "https://www.vinted.it" and "/api/v2/catalog/items" in calls[1]
     assert len(out) == 1 and out[0].url == "https://www.vinted.it/items/1"
