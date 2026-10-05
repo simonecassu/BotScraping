@@ -6,6 +6,7 @@ Al primo /start salva il chat id (niente getUpdates a mano). Poi:
 from __future__ import annotations
 
 import html
+import json
 import logging
 import re
 import time
@@ -76,14 +77,23 @@ class TelegramClient:
     def base(self) -> str:
         return f"https://api.telegram.org/bot{self.token}"
 
+    def get_me(self) -> str:
+        """Username del bot a cui appartiene il token (per i log)."""
+        resp = requests.get(f"{self.base}/getMe", timeout=config.HTTP_TIMEOUT)
+        data = resp.json()
+        if not data.get("ok"):
+            raise requests.RequestException(f"getMe: {data.get('description', resp.status_code)}")
+        return data["result"].get("username", "?")
+
     def get_updates(self, offset: int | None, timeout: int = 0) -> list[dict]:
-        params = {"timeout": timeout, "allowed_updates": ["message"]}
+        params = {"timeout": timeout, "allowed_updates": json.dumps(["message"])}
         if offset is not None:
             params["offset"] = offset
         resp = requests.get(f"{self.base}/getUpdates", params=params, timeout=config.HTTP_TIMEOUT + timeout)
-        resp.raise_for_status()
         data = resp.json()
-        return data.get("result", []) if data.get("ok") else []
+        if not data.get("ok"):
+            raise requests.RequestException(f"getUpdates: {data.get('description', resp.status_code)}")
+        return data.get("result", [])
 
     def set_my_commands(self, commands: list[tuple[str, str]]) -> bool:
         resp = requests.post(f"{self.base}/setMyCommands",
@@ -329,6 +339,12 @@ class TelegramCommands:
         except requests.RequestException as exc:
             log.warning("Telegram getUpdates: %s", exc)
             return False
+        if timeout == 0:  # esecuzione singola (GitHub Actions): lascia traccia nel log
+            try:
+                me = self.client.get_me()
+            except (requests.RequestException, ValueError, KeyError) as exc:
+                me = f"? ({exc})"
+            log.info("Telegram: bot @%s, %d messaggi nuovi (offset %s)", me, len(updates), offset)
         want_search = False
         for upd in updates:
             self.db.set_kv("telegram_offset", int(upd["update_id"]) + 1)

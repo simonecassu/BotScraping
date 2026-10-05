@@ -65,6 +65,9 @@ class FakeClient:
         self.menu = commands
         return True
 
+    def get_me(self):
+        return "fakebot"
+
     def get_updates(self, offset, timeout=0):
         return [u for u in self.updates if offset is None or u["update_id"] >= offset]
 
