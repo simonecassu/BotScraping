@@ -39,7 +39,8 @@ Il bot gira ogni 20 minuti sui server di GitHub e si comanda **solo da Telegram*
 | `/cerca` · `/resetvisti` | ricerca immediata · rinotifica gli annunci già visti |
 
 Lo stato (carte mancanti, annunci già visti) è salvato nel branch `bot-state`.
-Solo la chat che ha scritto `/start` per prima può comandare il bot.
+Solo la chat che ha scritto `/start` per prima può comandare il bot. Aggiungendo il secret `TELEGRAM_CHAT_ID`
+(il tuo chat id, lo trovi nel log del primo giro o chiedendolo a @userinfobot) anche il ponte ignora gli estranei.
 GitHub disattiva i workflow pianificati dopo 60 giorni senza attività sul repository: arriva un'email e si riattiva con un tap.
 
 ### Risposta immediata: il ponte Telegram → GitHub

@@ -4,6 +4,7 @@
 #   CLOUDFLARE_ACCOUNT_ID  Account ID (pagina Workers & Pages, colonna di destra)
 #   BRIDGE_GITHUB_TOKEN    fine-grained token GitHub con "Contents: Read and write" su questo repository
 #   TELEGRAM_BOT_TOKEN     già presente per il bot
+#   TELEGRAM_CHAT_ID       (facoltativo) il tuo chat id: il ponte ignora chiunque altro
 name: Ponte Telegram
 
 on:
@@ -44,9 +45,14 @@ jobs:
         env:
           BRIDGE_GITHUB_TOKEN: ${{ secrets.BRIDGE_GITHUB_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           printf '%s' "$TELEGRAM_BOT_TOKEN" | npx --yes wrangler@4 secret put TELEGRAM_BOT_TOKEN
           printf '%s' "$BRIDGE_GITHUB_TOKEN" | npx --yes wrangler@4 secret put GITHUB_TOKEN
+          # facoltativo: se impostato, il ponte scarta i messaggi di chiunque non sia il proprietario
+          if [ -n "$TELEGRAM_CHAT_ID" ]; then
+            printf '%s' "$TELEGRAM_CHAT_ID" | npx --yes wrangler@4 secret put TELEGRAM_CHAT_ID
+          fi
 
       - name: Attiva il ponte su Telegram
         run: |
