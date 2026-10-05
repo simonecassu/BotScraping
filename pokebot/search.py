@@ -67,7 +67,7 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
     max_price = float(settings.get("max_price", 0) or 0)
     only_italy = bool(settings.get("only_italy", True))
     unverifiable = bool(settings.get("notify_unverifiable_lots", False))
-    notifier = notifier or TelegramNotifier()
+    notifier = notifier or TelegramNotifier.from_db(db)
 
     if scrapers is None:
         scrapers = {}

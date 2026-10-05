@@ -14,7 +14,34 @@ Regole del bot:
   preordini, proxy/fake, codici online, prodotti sigillati (buste, ETB, box…), accessori, e il set *Celebrations* del 25°.
 - **Non rinotifica** mai lo stesso annuncio.
 
-## Avvio rapido
+## Senza PC: gratis su GitHub Actions, comandi da Telegram (consigliato)
+
+Il bot gira ogni 20 minuti sui server di GitHub e si comanda **solo da Telegram**, anche da iPhone.
+
+1. Su Telegram scrivi a **@BotFather** → `/newbot` (o `/token` se il bot esiste già) e copia il token.
+2. Apri <https://github.com/simonecassu/BotScraping/settings/secrets/actions/new>:
+   *Name* `TELEGRAM_BOT_TOKEN`, *Secret* il token → **Add secret**.
+3. Apri la scheda **Actions** del repository → workflow **PokéBot 30th** → **Run workflow** (oppure aspetta il prossimo giro).
+4. Su Telegram scrivi **/start** al tuo bot: al primo giro il bot si collega da solo alla tua chat (nessun chat id da cercare).
+5. Segna le carte mancanti con i comandi, ad esempio `/aggiungi 131 132 149-152`, `/aggiungi sir`, `/aggiungi tutte`.
+
+| Comando | Effetto |
+|---|---|
+| `/mancanti` | elenco delle carte che ti mancano |
+| `/aggiungi 131 132 149-152 c4` | segna come mancanti (numeri, intervalli, `c1..c30` per la Classic) |
+| `/aggiungi ir` · `sir` · `pr` · `pikachu ex` · `tutte` · `classic` | per rarità, per nome, tutto il set |
+| `/rimuovi 131` (o `/ho 131`) | trovata: toglila |
+| `/lista` · `/lista classic` | tutte le carte con i numeri |
+| `/stato` | ultimo ciclo, errori, impostazioni |
+| `/soglia 50` · `/prezzo 100` · `/fonti wallapop vinted ebay` | soglia lotti, prezzo massimo, marketplace |
+| `/cerca` · `/resetvisti` | ricerca al prossimo giro · rinotifica gli annunci già visti |
+
+I comandi vengono letti a ogni giro (ogni 20 minuti circa; con **Run workflow** subito).
+Lo stato (carte mancanti, annunci già visti) è salvato nel branch `bot-state`.
+Solo la chat che ha scritto `/start` per prima può comandare il bot.
+GitHub disattiva i workflow pianificati dopo 60 giorni senza attività sul repository: arriva un'email e si riattiva con un tap.
+
+## Avvio rapido su PC
 
 ```bash
 git clone <questo repo> && cd BotScraping
@@ -26,11 +53,10 @@ python run.py               # interfaccia su http://localhost:8080
 
 Con Docker: `cp .env.example .env`, compila il file, poi `docker compose up -d`.
 
-### Telegram in 2 minuti
-1. Su Telegram scrivi a **@BotFather** → `/newbot` → copia il token in `TELEGRAM_BOT_TOKEN`.
-2. Scrivi un messaggio qualsiasi al tuo nuovo bot.
-3. Apri `https://api.telegram.org/bot<TOKEN>/getUpdates` e copia il valore di `"chat":{"id":…}` in `TELEGRAM_CHAT_ID`.
-4. In **Impostazioni → Invia messaggio di prova** verifichi che arrivi.
+### Telegram
+Basta il token di @BotFather in `TELEGRAM_BOT_TOKEN`: al primo `/start` il bot salva da solo la chat.
+`TELEGRAM_CHAT_ID` è facoltativo (se impostato, solo quella chat è accettata).
+Anche su PC i comandi Telegram della tabella qui sopra funzionano, in tempo reale.
 
 ## Come si usa
 
@@ -49,6 +75,7 @@ python cli.py cerca --dry-run                 # un ciclo senza inviare notifiche
 python cli.py cerca                           # un ciclo con notifiche
 python cli.py test-telegram
 python cli.py mancanti
+python cli.py actions                         # un passaggio completo (comandi Telegram + ricerca), per cron
 python cli.py analizza "Lotto 30th: Lapras 131/128, Moltres 130/128"   # come viene classificato un annuncio
 ```
 
@@ -96,4 +123,5 @@ pytest
 
 Struttura: `pokebot/cards.py` (set e indice), `pokebot/matcher.py` (riconoscimento e regole singola/lotto),
 `pokebot/scrapers/` (un modulo per marketplace), `pokebot/search.py` (ciclo di ricerca), `pokebot/notifier.py`
-(Telegram), `pokebot/scheduler.py` (esecuzione periodica), `pokebot/web/` (interfaccia Flask).
+(Telegram), `pokebot/telegram_bot.py` (comandi Telegram), `pokebot/scheduler.py` (esecuzione periodica),
+`pokebot/web/` (interfaccia Flask), `.github/workflows/bot.yml` (esecuzione su GitHub Actions).

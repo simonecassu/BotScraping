@@ -1,0 +1,61 @@
+# Esegue il bot gratis su GitHub Actions ogni 20 minuti, senza PC.
+# Serve solo il secret TELEGRAM_BOT_TOKEN (Settings → Secrets and variables → Actions).
+# Lo stato (carte mancanti, annunci già visti) è salvato nel branch "bot-state".
+name: PokéBot 30th
+
+on:
+  schedule:
+    - cron: "7,27,47 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pokebot
+  cancel-in-progress: false
+
+jobs:
+  cerca:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Installa dipendenze
+        run: pip install -r requirements.txt
+
+      - name: Ripristina lo stato precedente
+        run: |
+          mkdir -p data
+          if git fetch --depth=1 origin bot-state 2>/dev/null; then
+            git show origin/bot-state:pokebot.db > data/pokebot.db && echo "stato ripristinato"
+          else
+            echo "primo avvio: nessuno stato precedente"
+          fi
+
+      - name: Comandi Telegram + ricerca
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
+          EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+        run: python cli.py actions
+
+      - name: Salva lo stato
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          test -f data/pokebot.db || exit 0
+          rm -rf /tmp/state && mkdir -p /tmp/state && cp data/pokebot.db /tmp/state/
+          cd /tmp/state
+          git init -q -b bot-state
+          git -c user.name=pokebot -c user.email=pokebot@users.noreply.github.com add pokebot.db
+          git -c user.name=pokebot -c user.email=pokebot@users.noreply.github.com commit -q -m "stato bot $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" bot-state

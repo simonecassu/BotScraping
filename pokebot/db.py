@@ -104,7 +104,7 @@ class Database:
     def get_settings(self) -> dict[str, Any]:
         out = dict(config.DEFAULT_SETTINGS)
         with self.connect() as c:
-            for r in c.execute("SELECT key, value FROM settings"):
+            for r in c.execute("SELECT key, value FROM settings WHERE substr(key, 1, 1) != '_'"):
                 try:
                     out[r["key"]] = json.loads(r["value"])
                 except json.JSONDecodeError:
@@ -118,6 +118,37 @@ class Database:
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 [(k, json.dumps(v)) for k, v in values.items()],
             )
+
+    # ---- valori interni (chat id Telegram, offset aggiornamenti...) --------
+    def get_kv(self, key: str, default: Any = None) -> Any:
+        with self.connect() as c:
+            r = c.execute("SELECT value FROM settings WHERE key = ?", ("_" + key,)).fetchone()
+        if r is None:
+            return default
+        try:
+            return json.loads(r["value"])
+        except json.JSONDecodeError:
+            return r["value"]
+
+    def set_kv(self, key: str, value: Any) -> None:
+        with self.connect() as c:
+            c.execute(
+                "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                ("_" + key, json.dumps(value)),
+            )
+
+    def prune(self, seen_days: int = 45, keep_found: int = 300, keep_runs: int = 50) -> None:
+        """Mantiene il database piccolo (utile quando viene salvato su GitHub a ogni esecuzione)."""
+        with self.connect() as c:
+            c.execute("DELETE FROM seen WHERE first_seen < ?", (time.time() - seen_days * 86400,))
+            c.execute("DELETE FROM found WHERE id NOT IN (SELECT id FROM found ORDER BY created_at DESC LIMIT ?)", (keep_found,))
+            c.execute("DELETE FROM runs WHERE id NOT IN (SELECT id FROM runs ORDER BY started_at DESC LIMIT ?)", (keep_runs,))
+        with _lock:
+            conn = sqlite3.connect(self.path, isolation_level=None)
+            try:
+                conn.execute("VACUUM")
+            finally:
+                conn.close()
 
     # ---- annunci ----------------------------------------------------------
     def is_seen(self, listing_key: str) -> bool:

@@ -64,11 +64,17 @@ class CardIndex:
         self.by_id: dict[str, Card] = {}
         self.by_set_number: dict[tuple[str, str], Card] = {}
         self.names: dict[str, list[Card]] = {}  # nome normalizzato -> carte
+        # codice breve per i comandi Telegram: numero per il set principale, c1..cN per gli altri
+        self.code_of: dict[str, str] = {}
+        self.by_code: dict[str, Card] = {}
         aliases = aliases or {}
         for s in sets:
-            for c in s.cards:
+            for i, c in enumerate(s.cards, start=1):
                 self.by_id[c.id] = c
                 self.by_set_number[(s.id, c.number)] = c
+                code = c.number.lower() if s.printed_total else f"c{i}"
+                self.code_of[c.id] = code
+                self.by_code.setdefault(code, c)
                 for n in self._name_variants(c.name) + [normalize(a) for a in aliases.get(c.id, [])]:
                     if len(n) < 3:
                         continue  # nomi di 1-2 lettere (es. "N") darebbero falsi positivi

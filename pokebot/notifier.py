@@ -20,6 +20,12 @@ class TelegramNotifier:
         self.token = (token or config.TELEGRAM_BOT_TOKEN).strip()
         self.chat_id = (chat_id or config.TELEGRAM_CHAT_ID).strip()
 
+    @classmethod
+    def from_db(cls, db) -> "TelegramNotifier":
+        """Token dall'ambiente; chat id dall'ambiente oppure quello salvato dal comando /start."""
+        chat_id = config.TELEGRAM_CHAT_ID or str(db.get_kv("telegram_chat_id", "") or "")
+        return cls(chat_id=chat_id)
+
     @property
     def configured(self) -> bool:
         return bool(self.token and self.chat_id)

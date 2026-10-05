@@ -5,6 +5,8 @@
   python cli.py test-telegram    invia un messaggio di prova
   python cli.py mancanti         elenca le carte selezionate come mancanti
   python cli.py analizza "titolo annuncio" ["descrizione"]   mostra come il bot classifica un testo
+  python cli.py actions          un passaggio completo per GitHub Actions / cron: legge i comandi
+                                 Telegram arrivati, esegue la ricerca, compatta il database
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ from pokebot.db import Database
 from pokebot.matcher import Matcher
 from pokebot.notifier import TelegramNotifier
 from pokebot.search import run_search
+from pokebot.telegram_bot import TelegramCommands
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -31,6 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("titolo")
     a.add_argument("descrizione", nargs="?", default="")
     a.add_argument("--asta", action="store_true")
+    sub.add_parser("actions", help="comandi Telegram + ricerca + pulizia (per GitHub Actions / cron)")
     args = p.parse_args(argv)
 
     logging.basicConfig(level=logging.DEBUG if getattr(args, "verbose", False) else logging.INFO,
@@ -40,6 +44,18 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "cerca":
         rep = run_search(index, db, dry_run=args.dry_run)
+        print(f"Query: {rep.queries} · annunci: {rep.listings} (nuovi {rep.new_listings}) · match: {rep.matches} · notifiche: {rep.notified}")
+        for k, v in rep.errors.items():
+            print(f"  errore {k}: {v}")
+        return 0
+    if args.cmd == "actions":
+        commands = TelegramCommands(index, db)
+        if commands.enabled:
+            commands.poll_once(timeout=0)
+        else:
+            print("TELEGRAM_BOT_TOKEN mancante: nessun comando letto, nessuna notifica possibile.")
+        rep = run_search(index, db)
+        db.prune()
         print(f"Query: {rep.queries} · annunci: {rep.listings} (nuovi {rep.new_listings}) · match: {rep.matches} · notifiche: {rep.notified}")
         for k, v in rep.errors.items():
             print(f"  errore {k}: {v}")

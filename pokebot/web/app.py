@@ -71,7 +71,7 @@ def create_app(index: CardIndex | None = None, db: Database | None = None,
             db.save_settings(values)
             flash("Impostazioni salvate.", "ok")
             return redirect(url_for("settings"))
-        notifier = TelegramNotifier()
+        notifier = TelegramNotifier.from_db(db)
         return render_template("settings.html", s=db.get_settings(), telegram_ok=notifier.configured,
                                ebay_api=bool(config.EBAY_CLIENT_ID and config.EBAY_CLIENT_SECRET),
                                status=_status(db, scheduler), total=len(index.by_id), missing=len(db.wanted_ids()))
@@ -97,7 +97,7 @@ def create_app(index: CardIndex | None = None, db: Database | None = None,
 
     @app.post("/azioni/test-telegram")
     def test_telegram():
-        ok = TelegramNotifier().test_message()
+        ok = TelegramNotifier.from_db(db).test_message()
         flash("Messaggio di prova inviato su Telegram." if ok else
               "Invio fallito: controlla TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID nel file .env.", "ok" if ok else "err")
         return redirect(url_for("settings"))
@@ -134,6 +134,6 @@ def _status(db: Database, scheduler: Scheduler | None) -> dict:
         "next_run_at": scheduler.next_run_at if scheduler else None,
         "next_in_min": (max(0, round((scheduler.next_run_at - time.time()) / 60)) if scheduler and scheduler.next_run_at else None),
         "last_run": last,
-        "telegram": TelegramNotifier().configured,
+        "telegram": TelegramNotifier.from_db(db).configured,
         "now": time.time(),
     }

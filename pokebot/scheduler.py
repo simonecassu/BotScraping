@@ -8,6 +8,7 @@ import time
 from .cards import CardIndex
 from .db import Database
 from .search import RunReport, run_search
+from .telegram_bot import TelegramCommands
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +24,8 @@ class Scheduler:
         self.last_report: RunReport | None = None
         self.next_run_at: float | None = None
         self._lock = threading.Lock()
+        self.commands = TelegramCommands(index, db)
+        self._tg_thread: threading.Thread | None = None
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -30,6 +33,9 @@ class Scheduler:
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, name="pokebot-scheduler", daemon=True)
         self._thread.start()
+        if self.commands.enabled:
+            self._tg_thread = threading.Thread(target=self._telegram_loop, name="pokebot-telegram", daemon=True)
+            self._tg_thread.start()
 
     def stop(self) -> None:
         self._stop.set()
@@ -47,6 +53,16 @@ class Scheduler:
             finally:
                 self.running = False
         return self.last_report
+
+    def _telegram_loop(self) -> None:
+        """Ascolta i comandi Telegram (/aggiungi, /mancanti, /cerca...) con long polling."""
+        while not self._stop.is_set():
+            try:
+                if self.commands.poll_once(timeout=25):
+                    self.trigger()
+            except Exception:  # noqa: BLE001
+                log.exception("Errore nel polling Telegram")
+                time.sleep(10)
 
     def _loop(self) -> None:
         # primo ciclo poco dopo l'avvio
