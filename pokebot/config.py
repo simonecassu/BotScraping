@@ -33,7 +33,7 @@ USER_AGENT = os.getenv(
 
 # Impostazioni modificabili dall'interfaccia web (valori di default).
 DEFAULT_SETTINGS: dict[str, object] = {
-    "interval_minutes": 15,
+    "interval_minutes": 20,
     "lot_min_ratio": 0.5,
     "max_price": 0,  # 0 = nessun limite
     "sources": ["wallapop", "vinted", "ebay"],

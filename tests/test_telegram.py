@@ -106,3 +106,40 @@ def test_poll_saves_chat_id_and_ignores_strangers(index, monkeypatch):
     client.menu = None
     tc.poll_once()
     assert client.menu is None
+
+
+def test_multiline_and_interval(index):
+    db, h = make(index)
+    r = h.handle("/aggiungi 131\n/intervallo 30\n/cerca")
+    assert r.run_search and db.wanted_ids() == {"me55-131"}
+    assert db.get_settings()["interval_minutes"] == 30
+    assert "30 minuti" in r.text and "1 carte" in r.text
+    assert db.get_settings()["interval_minutes"] == 30
+    h.handle("/intervallo 1")  # minimo 5
+    assert db.get_settings()["interval_minutes"] == 5
+
+
+def test_handle_payload_from_bridge(index, monkeypatch):
+    from pokebot import config
+    monkeypatch.setattr(config, "TELEGRAM_CHAT_ID", "")
+    db = Database(os.path.join(tempfile.mkdtemp(), "t.db"))
+    client = FakeClient([])
+    tc = TelegramCommands(index, db, client=client)
+    assert tc.handle_payload({"chat_id": 7, "text": "/mancanti"}) is False  # prima di /start: ignorato
+    assert client.sent == []
+    assert tc.handle_payload({"chat_id": 7, "text": "/start"}) is False
+    assert db.get_kv("telegram_chat_id") == "7"
+    assert tc.handle_payload({"chat_id": 7, "text": "/aggiungi 131\n/cerca"}) is True
+    assert db.wanted_ids() == {"me55-131"}
+    assert tc.handle_payload({"chat_id": 8, "text": "/rimuovi 131"}) is False  # estraneo
+    assert db.wanted_ids() == {"me55-131"}
+    assert tc.handle_payload(None) is False and tc.handle_payload({}) is False
+
+
+def test_webhook_active_skips_polling(index):
+    db = Database(os.path.join(tempfile.mkdtemp(), "t.db"))
+    client = FakeClient([{"update_id": 1, "message": {"chat": {"id": 1}, "text": "/start"}}])
+    client.webhook_info = lambda: {"url": "https://x.workers.dev/", "pending_update_count": 0}
+    tc = TelegramCommands(index, db, client=client)
+    assert tc.poll_once() is False
+    assert client.sent == [] and db.get_kv("telegram_offset") is None

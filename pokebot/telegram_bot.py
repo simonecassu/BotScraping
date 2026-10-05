@@ -43,11 +43,13 @@ HELP = """<b>Comandi</b>
 /soglia 50 – % minima di carte mancanti perché un lotto venga segnalato
 /prezzo 100 – prezzo massimo in € (0 = nessun limite)
 /fonti wallapop vinted ebay – quali marketplace usare
-/cerca – ricerca immediata  ·  /resetvisti – rinotifica anche gli annunci già visti"""
+/intervallo 20 – ogni quanti minuti fare la ricerca
+/cerca – ricerca immediata  ·  /resetvisti – rinotifica anche gli annunci già visti
+Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
-MENU_VERSION = 1
+MENU_VERSION = 2
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -55,6 +57,7 @@ MENU_COMMANDS = [
     ("lista", "Tutte le carte con i numeri (/lista classic per la Classic)"),
     ("stato", "Ultimo giro, errori, impostazioni"),
     ("cerca", "Cerca subito"),
+    ("intervallo", "Ogni quanti minuti cercare: /intervallo 20"),
     ("soglia", "Percentuale minima di carte mancanti nei lotti: /soglia 50"),
     ("prezzo", "Prezzo massimo in euro: /prezzo 100 (0 = nessun limite)"),
     ("fonti", "Marketplace da usare: /fonti wallapop vinted ebay"),
@@ -89,11 +92,6 @@ class TelegramClient:
         resp = requests.get(f"{self.base}/getWebhookInfo", timeout=config.HTTP_TIMEOUT)
         data = resp.json()
         return data.get("result", {}) if data.get("ok") else {}
-
-    def delete_webhook(self) -> bool:
-        """Se un webhook è attivo, getUpdates non funziona: lo rimuove senza perdere i messaggi in coda."""
-        resp = requests.post(f"{self.base}/deleteWebhook", json={"drop_pending_updates": False}, timeout=config.HTTP_TIMEOUT)
-        return resp.status_code == 200 and bool(resp.json().get("ok"))
 
     def get_updates(self, offset: int | None, timeout: int = 0) -> list[dict]:
         params = {"timeout": timeout, "allowed_updates": json.dumps(["message"])}
@@ -141,6 +139,14 @@ class CommandHandler:
 
     # ------------------------------------------------------------------
     def handle(self, text: str) -> Reply:
+        """Un messaggio può contenere più comandi, uno per riga."""
+        lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+        if len(lines) <= 1:
+            return self._handle_one(lines[0] if lines else "")
+        replies = [self._handle_one(ln) for ln in lines]
+        return Reply("\n\n".join(r.text for r in replies), run_search=any(r.run_search for r in replies))
+
+    def _handle_one(self, text: str) -> Reply:
         text = (text or "").strip()
         if not text.startswith("/"):
             return Reply("Scrivimi un comando, ad esempio /mancanti. Con /aiuto vedi l'elenco.")
@@ -167,6 +173,9 @@ class CommandHandler:
         if cmd == "/prezzo":
             return self._set_number(args, "max_price", lambda v: max(0.0, v),
                                     lambda v: f"Prezzo massimo: {'nessun limite' if not v else f'{v:g} €'}.")
+        if cmd == "/intervallo":
+            return self._set_number(args, "interval_minutes", lambda v: max(5, int(v)),
+                                    lambda v: f"Ricerca ogni {v} minuti.")
         if cmd == "/fonti":
             return self._set_sources(args)
         if cmd == "/cerca":
@@ -302,7 +311,8 @@ class CommandHandler:
         max_price = s["max_price"]
         price_txt = "nessuno" if not max_price else f"{max_price:g} €"
         lines = [f"🃏 Mancanti: <b>{len(self.db.wanted_ids())}</b>/{len(self.index.by_id)}",
-                 f"⚙️ Soglia lotti {s['lot_min_ratio'] * 100:.0f}% · prezzo max {price_txt} · fonti: {', '.join(s['sources'])}"]
+                 f"⚙️ Ricerca ogni {int(s['interval_minutes'])} min · soglia lotti {s['lot_min_ratio'] * 100:.0f}% · "
+                 f"prezzo max {price_txt} · fonti: {', '.join(s['sources'])}"]
         if runs:
             r = runs[0]
             when = time.strftime("%d/%m %H:%M", time.localtime(r["started_at"]))
@@ -348,11 +358,11 @@ class TelegramCommands:
         if timeout == 0:  # esecuzione singola (GitHub Actions): diagnostica nel log
             try:
                 info = self.client.webhook_info()
-                if info.get("url"):
-                    log.warning("Telegram: webhook attivo su %s, lo rimuovo per poter leggere i messaggi", info["url"])
-                    self.client.delete_webhook()
             except (requests.RequestException, ValueError) as exc:
                 log.warning("Telegram getWebhookInfo: %s", exc)
+            if info.get("url"):
+                log.info("Telegram: webhook attivo (%s): i comandi arrivano dal ponte, lettura diretta saltata", info["url"])
+                return False
         try:
             updates = self.client.get_updates(offset, timeout=timeout)
         except requests.RequestException as exc:
@@ -384,6 +394,24 @@ class TelegramCommands:
             except requests.RequestException as exc:
                 log.warning("Telegram sendMessage: %s", exc)
         return want_search
+
+    def handle_payload(self, payload: dict | None) -> bool:
+        """Comando arrivato tramite repository_dispatch (ponte Telegram → GitHub). True se chiede /cerca."""
+        if not isinstance(payload, dict):
+            return False
+        chat_id = str(payload.get("chat_id") or "")
+        text = str(payload.get("text") or "")
+        if not chat_id or not text:
+            return False
+        if not self._authorized(chat_id, text):
+            log.warning("Comando via ponte ignorato da chat non autorizzata %s", chat_id)
+            return False
+        reply = self.handler.handle(text)
+        try:
+            self.client.send(chat_id, reply.text)
+        except requests.RequestException as exc:
+            log.warning("Telegram sendMessage: %s", exc)
+        return reply.run_search
 
     def _authorized(self, chat_id: str, text: str) -> bool:
         pinned = config.TELEGRAM_CHAT_ID or str(self.db.get_kv("telegram_chat_id", "") or "")

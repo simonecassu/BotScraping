@@ -11,8 +11,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import os
 import sys
+import time
 
 from pokebot.cards import load_sets
 from pokebot.db import Database
@@ -34,7 +37,8 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("titolo")
     a.add_argument("descrizione", nargs="?", default="")
     a.add_argument("--asta", action="store_true")
-    sub.add_parser("actions", help="comandi Telegram + ricerca + pulizia (per GitHub Actions / cron)")
+    ac = sub.add_parser("actions", help="comandi Telegram + ricerca + pulizia (per GitHub Actions / cron)")
+    ac.add_argument("--force", action="store_true", help="cerca anche se l'intervallo non è ancora passato")
     args = p.parse_args(argv)
 
     logging.basicConfig(level=logging.DEBUG if getattr(args, "verbose", False) else logging.INFO,
@@ -50,11 +54,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "actions":
         commands = TelegramCommands(index, db)
-        if commands.enabled:
-            commands.poll_once(timeout=0)
+        want_search = False
+        payload = _dispatch_payload()
+        if payload is not None:
+            want_search = commands.handle_payload(payload)
+        elif commands.enabled:
+            want_search = commands.poll_once(timeout=0)
         else:
             print("TELEGRAM_BOT_TOKEN mancante: nessun comando letto, nessuna notifica possibile.")
+        if not (args.force or want_search or _search_due(db)):
+            print("Ricerca non ancora dovuta (vedi /intervallo): solo comandi Telegram.")
+            db.prune()
+            return 0
         rep = run_search(index, db)
+        db.set_kv("last_search_ts", time.time())
         db.prune()
         print(f"Query: {rep.queries} · annunci: {rep.listings} (nuovi {rep.new_listings}) · match: {rep.matches} · notifiche: {rep.notified}")
         for k, v in rep.errors.items():
@@ -83,6 +96,24 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  ambigua '{g.name}': {', '.join(c.label for c in g.candidates)}")
         return 0
     return 1
+
+
+def _dispatch_payload() -> dict | None:
+    """Payload del repository_dispatch (ponte Telegram → GitHub), se presente."""
+    raw = os.getenv("POKEBOT_DISPATCH_PAYLOAD", "").strip()
+    if not raw or raw == "null":
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) and data.get("text") else None
+
+
+def _search_due(db: Database) -> bool:
+    interval = float(db.get_settings().get("interval_minutes", 20) or 20)
+    last = float(db.get_kv("last_search_ts", 0) or 0)
+    return time.time() - last >= interval * 60 - 30  # 30 s di tolleranza sui ritardi del cron
 
 
 if __name__ == "__main__":
