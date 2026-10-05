@@ -45,6 +45,23 @@ HELP = """<b>Comandi</b>
 /cerca – ricerca immediata  ·  /resetvisti – rinotifica anche gli annunci già visti"""
 
 
+# Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
+MENU_VERSION = 1
+MENU_COMMANDS = [
+    ("mancanti", "Carte che ti mancano"),
+    ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
+    ("rimuovi", "Trovata! Toglila: /rimuovi 131"),
+    ("lista", "Tutte le carte con i numeri (/lista classic per la Classic)"),
+    ("stato", "Ultimo giro, errori, impostazioni"),
+    ("cerca", "Cerca subito"),
+    ("soglia", "Percentuale minima di carte mancanti nei lotti: /soglia 50"),
+    ("prezzo", "Prezzo massimo in euro: /prezzo 100 (0 = nessun limite)"),
+    ("fonti", "Marketplace da usare: /fonti wallapop vinted ebay"),
+    ("resetvisti", "Rinotifica anche gli annunci gia' visti"),
+    ("aiuto", "Elenco dei comandi"),
+]
+
+
 @dataclass
 class Reply:
     text: str
@@ -67,6 +84,12 @@ class TelegramClient:
         resp.raise_for_status()
         data = resp.json()
         return data.get("result", []) if data.get("ok") else []
+
+    def set_my_commands(self, commands: list[tuple[str, str]]) -> bool:
+        resp = requests.post(f"{self.base}/setMyCommands",
+                             json={"commands": [{"command": c, "description": d[:256]} for c, d in commands]},
+                             timeout=config.HTTP_TIMEOUT)
+        return resp.status_code == 200 and bool(resp.json().get("ok"))
 
     def send(self, chat_id: str | int, text: str) -> None:
         for chunk in _chunks(text):
@@ -284,10 +307,22 @@ class TelegramCommands:
     def enabled(self) -> bool:
         return bool(self.client.token)
 
+    def ensure_menu(self) -> None:
+        """Registra il menu comandi su Telegram (una volta sola per versione del menu)."""
+        if not self.enabled or self.db.get_kv("telegram_menu_version") == MENU_VERSION:
+            return
+        try:
+            if self.client.set_my_commands(MENU_COMMANDS):
+                self.db.set_kv("telegram_menu_version", MENU_VERSION)
+                log.info("Menu comandi Telegram registrato")
+        except requests.RequestException as exc:
+            log.warning("Telegram setMyCommands: %s", exc)
+
     def poll_once(self, timeout: int = 0) -> bool:
         """Elabora i messaggi nuovi. Restituisce True se qualcuno ha chiesto /cerca."""
         if not self.enabled:
             return False
+        self.ensure_menu()
         offset = self.db.get_kv("telegram_offset")
         try:
             updates = self.client.get_updates(offset, timeout=timeout)

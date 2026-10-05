@@ -59,6 +59,11 @@ class FakeClient:
     def __init__(self, updates):
         self.updates = updates
         self.sent = []
+        self.menu = None
+
+    def set_my_commands(self, commands):
+        self.menu = commands
+        return True
 
     def get_updates(self, offset, timeout=0):
         return [u for u in self.updates if offset is None or u["update_id"] >= offset]
@@ -85,3 +90,10 @@ def test_poll_saves_chat_id_and_ignores_strangers(index, monkeypatch):
     assert db.wanted_ids() == set()
     # secondo giro: nessun nuovo update
     assert tc.poll_once() is False
+    # menu comandi registrato una volta sola
+    assert client.menu and client.menu[0][0] == "mancanti"
+    from pokebot.telegram_bot import MENU_VERSION
+    assert db.get_kv("telegram_menu_version") == MENU_VERSION
+    client.menu = None
+    tc.poll_once()
+    assert client.menu is None
