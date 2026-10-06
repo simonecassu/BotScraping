@@ -48,6 +48,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          POKEBOT_TIER: ${{ vars.POKEBOT_TIER }}  # "lite" per la versione ridotta (Settings → Variables), vuoto = completa
           EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
           EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
           POKEBOT_DISPATCH_PAYLOAD: ${{ toJson(github.event.client_payload) }}

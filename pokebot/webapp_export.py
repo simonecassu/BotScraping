@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import time
 
+from . import config
 from . import stats as pstats
 from .cards import CardIndex
 from .db import Database
@@ -48,7 +49,9 @@ def build_state(index: CardIndex, db: Database, max_found: int = 1000) -> dict:
         })
     return {
         "generated_at": time.time(),
-        "owner_chat_id": str(db.get_kv("telegram_chat_id", "") or ""),
+        "owner_chat_id": db.owner_chat_id(),
+        "chat_ids": db.chat_ids(),
+        "tier": config.TIER,
         "wanted": sorted(wanted),
         "settings": {k: settings.get(k) for k in SETTING_KEYS},
         "sets": sets,

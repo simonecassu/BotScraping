@@ -57,8 +57,17 @@ HELP = """<b>Comandi</b>
 Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
 
+LITE_LOCKED = ("🔒 Questo comando è disponibile solo nella versione completa del bot "
+               "(variabile <code>POKEBOT_TIER</code> non impostata su <code>lite</code>).")
+
+HELP_USERS = """/invita – codice da dare a un'altra persona (es. la tua ragazza): riceve le stesse notifiche e usa gli stessi comandi
+/utenti – chi è collegato · /espelli 123456 – scollega una persona"""
+
+HELP_LITE_NOTE = "\n\n<i>Versione lite: ricerca ogni ora, 3 annunci per carta, senza foto, affari, Excel e inviti.</i>"
+
+
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
-MENU_VERSION = 7
+MENU_VERSION = 8
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -79,6 +88,8 @@ MENU_COMMANDS = [
     ("max", "Quanti annunci (i piu' economici) per carta in ogni giro: /max 5"),
     ("soglia", "Percentuale minima di carte mancanti nei lotti: /soglia 50"),
     ("prezzo", "Prezzo massimo in euro: /prezzo 100 (0 = nessun limite)"),
+    ("invita", "Codice per collegare un'altra persona alle stesse notifiche"),
+    ("utenti", "Chi e' collegato al bot"),
     ("fonti", "Marketplace da usare: /fonti wallapop vinted ebay"),
     ("lingua", "Solo carte italiane (/lingua ita) oppure tutte le lingue (/lingua tutte)"),
     ("resetvisti", "ATTENZIONE: rinotifica tutti gli annunci gia' visti (chiede conferma)"),
@@ -173,25 +184,33 @@ class CommandHandler:
         self.db = db
 
     # ------------------------------------------------------------------
-    def handle(self, text: str) -> Reply:
+    def handle(self, text: str, chat_id: str = "") -> Reply:
         """Un messaggio può contenere più comandi, uno per riga."""
         lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
         if len(lines) <= 1:
-            return self._handle_one(lines[0] if lines else "")
-        replies = [self._handle_one(ln) for ln in lines]
+            return self._handle_one(lines[0] if lines else "", chat_id)
+        replies = [self._handle_one(ln, chat_id) for ln in lines]
         return Reply("\n\n".join(r.text for r in replies), run_search=any(r.run_search for r in replies))
 
-    def _handle_one(self, text: str) -> Reply:
+    def _handle_one(self, text: str, chat_id: str = "") -> Reply:
         text = (text or "").strip()
         if not text.startswith("/"):
             return Reply("Scrivimi un comando, ad esempio /mancanti. Con /aiuto vedi l'elenco.")
         cmd, _, args = text.partition(" ")
         cmd = cmd.split("@", 1)[0].lower()
         args = args.strip()
+        if config.LITE and cmd in config.LITE_LOCKED_COMMANDS:
+            return Reply(LITE_LOCKED)
         if cmd == "/start":
-            return Reply("✅ Collegato! Da adesso ti mando qui gli annunci delle carte mancanti.\n\n" + HELP)
+            return Reply("✅ Collegato! Da adesso ti mando qui gli annunci delle carte mancanti.\n\n" + self.help_text())
         if cmd in ("/aiuto", "/help"):
-            return Reply(HELP)
+            return Reply(self.help_text())
+        if cmd == "/invita":
+            return self._invite(chat_id)
+        if cmd == "/utenti":
+            return self._users(chat_id)
+        if cmd in ("/espelli", "/rimuoviutente"):
+            return self._kick(chat_id, args)
         if cmd == "/mancanti":
             return Reply(self._fmt_missing())
         if cmd in ("/aggiungi", "/manca", "/mancano"):
@@ -264,6 +283,52 @@ class CommandHandler:
             return Reply("♻️ Memoria azzerata: al prossimo ciclo rinotifico anche gli annunci già visti "
                          "(al massimo 10 carte per giro, il resto finisce nello storico).")
         return Reply("Comando sconosciuto. /aiuto per l'elenco.")
+
+    def help_text(self) -> str:
+        if config.LITE:
+            return HELP + HELP_LITE_NOTE
+        return HELP + "\n" + HELP_USERS
+
+    # ------------------------------------------------------------------
+    def _is_owner(self, chat_id: str) -> bool:
+        owner = self.db.owner_chat_id()
+        return bool(chat_id) and (not owner or str(chat_id) == owner)
+
+    def _invite(self, chat_id: str) -> Reply:
+        if not self._is_owner(chat_id):
+            return Reply("Solo il proprietario del bot può invitare altre persone.")
+        import secrets
+        code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
+        self.db.set_kv("invite_code", {"code": code, "expires": time.time() + 48 * 3600})
+        return Reply("👥 Codice invito (vale 48 ore, una persona):\n"
+                     f"<code>/start {code}</code>\n\n"
+                     "Falle aprire il bot e incollare quel comando: da lì riceve le stesse notifiche, "
+                     "gestisce la stessa checklist e può aprire la Mini App.")
+
+    def _users(self, chat_id: str) -> Reply:
+        ids = self.db.chat_ids()
+        if not ids:
+            return Reply("Nessuno collegato ancora.")
+        lines = [f"👥 <b>Persone collegate</b> ({len(ids)})"]
+        for i, cid in enumerate(ids):
+            tag = " · proprietario" if i == 0 else ""
+            you = " · tu" if cid == str(chat_id) else ""
+            lines.append(f"• <code>{cid}</code>{tag}{you}")
+        if self._is_owner(chat_id):
+            lines.append("\n/invita per aggiungere qualcuno · /espelli ID per scollegarlo")
+        return Reply("\n".join(lines))
+
+    def _kick(self, chat_id: str, args: str) -> Reply:
+        if not self._is_owner(chat_id):
+            return Reply("Solo il proprietario del bot può scollegare qualcuno.")
+        target = args.strip()
+        if not target.lstrip("-").isdigit():
+            return Reply("Usa <code>/espelli ID</code> con l'ID che vedi in /utenti.")
+        if target == self.db.owner_chat_id():
+            return Reply("Il proprietario non si può scollegare.")
+        if self.db.remove_chat_id(target):
+            return Reply(f"👋 Chat <code>{target}</code> scollegata: non riceve più notifiche né comandi.")
+        return Reply("Quell'ID non è tra le persone collegate (vedi /utenti).")
 
     # ------------------------------------------------------------------
     def resolve(self, args: str) -> tuple[list[Card], list[str]]:
@@ -644,7 +709,8 @@ class TelegramCommands:
         if not self.enabled or self.db.get_kv("telegram_menu_version") == MENU_VERSION:
             return
         try:
-            if self.client.set_my_commands(MENU_COMMANDS):
+            menu = [c for c in MENU_COMMANDS if not (config.LITE and "/" + c[0] in config.LITE_LOCKED_COMMANDS)]
+            if self.client.set_my_commands(menu):
                 self.db.set_kv("telegram_menu_version", MENU_VERSION)
                 log.info("Menu comandi Telegram registrato")
         except requests.RequestException as exc:
@@ -695,7 +761,7 @@ class TelegramCommands:
             if not self._authorized(chat_id, text):
                 log.warning("Messaggio ignorato da chat non autorizzata %s", chat_id)
                 continue
-            reply = self.handler.handle(text)
+            reply = self.handler.handle(text, chat_id)
             want_search = want_search or reply.run_search
             self._deliver(chat_id, reply)
         return want_search
@@ -719,16 +785,30 @@ class TelegramCommands:
         if not self._authorized(chat_id, text):
             log.warning("Comando via ponte ignorato da chat non autorizzata %s", chat_id)
             return False
-        reply = self.handler.handle(text)
+        reply = self.handler.handle(text, chat_id)
         self._deliver(chat_id, reply)
         return reply.run_search
 
     def _authorized(self, chat_id: str, text: str) -> bool:
-        pinned = config.TELEGRAM_CHAT_ID or str(self.db.get_kv("telegram_chat_id", "") or "")
-        if pinned:
-            return chat_id == pinned
-        if text.strip().lower().startswith("/start"):
+        """Proprietario (dall'ambiente o dal primo /start) e invitati (via `/start CODICE` entro la scadenza)."""
+        chat_id = str(chat_id)
+        allowed = self.db.chat_ids()
+        if chat_id in allowed:
+            return True
+        parts = text.strip().split()
+        if not parts or not parts[0].lower().startswith("/start"):
+            return False
+        if not allowed:
             self.db.set_kv("telegram_chat_id", chat_id)  # il primo che scrive /start diventa il proprietario
             log.info("Chat id Telegram salvato: %s", chat_id)
+            return True
+        if config.LITE or len(parts) < 2:
+            return False
+        inv = self.db.get_kv("invite_code") or {}
+        if (isinstance(inv, dict) and inv.get("code") and parts[1].upper() == str(inv["code"]).upper()
+                and float(inv.get("expires") or 0) > time.time()):
+            self.db.add_chat_id(chat_id)
+            self.db.set_kv("invite_code", None)  # monouso
+            log.info("Nuova persona collegata con invito: %s", chat_id)
             return True
         return False

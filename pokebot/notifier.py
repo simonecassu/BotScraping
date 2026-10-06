@@ -16,40 +16,53 @@ SOURCE_LABELS = {"wallapop": "Wallapop", "vinted": "Vinted", "ebay": "eBay.it"}
 
 
 class TelegramNotifier:
-    def __init__(self, token: str | None = None, chat_id: str | None = None):
+    def __init__(self, token: str | None = None, chat_id: str | None = None, chat_ids: list[str] | None = None):
         self.token = (token or config.TELEGRAM_BOT_TOKEN).strip()
-        self.chat_id = (chat_id or config.TELEGRAM_CHAT_ID).strip()
+        ids = [str(c).strip() for c in (chat_ids or []) if str(c).strip()]
+        first = (chat_id or config.TELEGRAM_CHAT_ID).strip()
+        if first and first not in ids:
+            ids.insert(0, first)
+        self.chat_ids = ids
 
     @classmethod
     def from_db(cls, db) -> "TelegramNotifier":
-        """Token dall'ambiente; chat id dall'ambiente oppure quello salvato dal comando /start."""
-        chat_id = config.TELEGRAM_CHAT_ID or str(db.get_kv("telegram_chat_id", "") or "")
-        return cls(chat_id=chat_id)
+        """Token dall'ambiente; destinatari: proprietario (dall'ambiente o dal primo /start) più gli invitati."""
+        return cls(chat_ids=db.chat_ids())
+
+    @property
+    def chat_id(self) -> str:
+        return self.chat_ids[0] if self.chat_ids else ""
 
     @property
     def configured(self) -> bool:
-        return bool(self.token and self.chat_id)
+        return bool(self.token and self.chat_ids)
+
+    def _post(self, method: str, payload: dict, files: dict | None = None, timeout_mult: float = 1.0,
+              log_level: int = logging.ERROR) -> bool:
+        """Invia lo stesso messaggio a ogni chat autorizzata; True se almeno una consegna è riuscita."""
+        url = f"https://api.telegram.org/bot{self.token}/{method}"
+        ok_any = False
+        for cid in self.chat_ids:
+            body = dict(payload, chat_id=cid)
+            try:
+                if files:
+                    resp = requests.post(url, data=body, files=files, timeout=config.HTTP_TIMEOUT * timeout_mult)
+                else:
+                    resp = requests.post(url, json=body, timeout=config.HTTP_TIMEOUT * timeout_mult)
+            except requests.RequestException as exc:
+                log.log(log_level, "Telegram %s (chat %s): errore di rete: %s", method, cid, exc)
+                continue
+            if resp.status_code != 200:
+                log.log(log_level, "Telegram %s (chat %s): HTTP %s %s", method, cid, resp.status_code, resp.text[:200])
+                continue
+            ok_any = True
+        return ok_any
 
     def send(self, text: str, disable_preview: bool = False) -> bool:
         if not self.configured:
-            log.warning("Telegram non configurato: imposta TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID")
+            log.warning("Telegram non configurato: imposta TELEGRAM_BOT_TOKEN e scrivi /start al bot")
             return False
-        url = f"https://api.telegram.org/bot{self.token}/sendMessage"
-        payload = {
-            "chat_id": self.chat_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": disable_preview,
-        }
-        try:
-            resp = requests.post(url, json=payload, timeout=config.HTTP_TIMEOUT)
-        except requests.RequestException as exc:
-            log.error("Telegram: errore di rete: %s", exc)
-            return False
-        if resp.status_code != 200:
-            log.error("Telegram: HTTP %s %s", resp.status_code, resp.text[:300])
-            return False
-        return True
+        return self._post("sendMessage", {"text": text, "parse_mode": "HTML", "disable_web_page_preview": disable_preview})
 
     def notify_listing(self, listing: Listing, result: MatchResult) -> bool:
         return self.send(format_listing(listing, result))
@@ -58,33 +71,15 @@ class TelegramNotifier:
         """Foto con didascalia (max 1024 caratteri); False se Telegram rifiuta (si ripiega sul testo)."""
         if not self.configured or not photo_url:
             return False
-        url = f"https://api.telegram.org/bot{self.token}/sendPhoto"
-        payload = {"chat_id": self.chat_id, "photo": photo_url, "caption": caption[:1024], "parse_mode": "HTML"}
-        try:
-            resp = requests.post(url, json=payload, timeout=config.HTTP_TIMEOUT)
-        except requests.RequestException as exc:
-            log.warning("Telegram sendPhoto: %s", exc)
-            return False
-        if resp.status_code != 200:
-            log.info("Telegram sendPhoto rifiutata (%s), invio come testo", resp.status_code)
-            return False
-        return True
+        return self._post("sendPhoto", {"photo": photo_url, "caption": caption[:1024], "parse_mode": "HTML"},
+                          log_level=logging.INFO)
 
     def send_photo_bytes(self, png: bytes, caption: str) -> bool:
         """Foto caricata direttamente (collage) con didascalia."""
         if not self.configured or not png:
             return False
-        url = f"https://api.telegram.org/bot{self.token}/sendPhoto"
-        try:
-            resp = requests.post(url, data={"chat_id": self.chat_id, "caption": caption[:1024], "parse_mode": "HTML"},
-                                 files={"photo": ("annunci.png", png, "image/png")}, timeout=config.HTTP_TIMEOUT * 2)
-        except requests.RequestException as exc:
-            log.warning("Telegram sendPhoto (collage): %s", exc)
-            return False
-        if resp.status_code != 200:
-            log.info("Telegram sendPhoto collage rifiutata (%s): %s", resp.status_code, resp.text[:120])
-            return False
-        return True
+        return self._post("sendPhoto", {"caption": caption[:1024], "parse_mode": "HTML"},
+                          files={"photo": ("annunci.png", png, "image/png")}, timeout_mult=2, log_level=logging.INFO)
 
     def send_album(self, photo_urls: list[str], caption: str) -> bool:
         """Album (2-10 foto) con didascalia sulla prima; False se Telegram rifiuta."""
@@ -93,16 +88,7 @@ class TelegramNotifier:
         media = [{"type": "photo", "media": u} for u in photo_urls[:10]]
         media[0]["caption"] = caption[:1024]
         media[0]["parse_mode"] = "HTML"
-        url = f"https://api.telegram.org/bot{self.token}/sendMediaGroup"
-        try:
-            resp = requests.post(url, json={"chat_id": self.chat_id, "media": media}, timeout=config.HTTP_TIMEOUT * 2)
-        except requests.RequestException as exc:
-            log.warning("Telegram sendMediaGroup: %s", exc)
-            return False
-        if resp.status_code != 200:
-            log.info("Telegram sendMediaGroup rifiutato (%s): %s", resp.status_code, resp.text[:120])
-            return False
-        return True
+        return self._post("sendMediaGroup", {"media": media}, timeout_mult=2, log_level=logging.INFO)
 
     _collage_rows: list[dict] | None = None
     _collage_title: str = ""
