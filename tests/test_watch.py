@@ -88,3 +88,15 @@ def test_run_watches_postponed_when_paused(index):
     scr = FakeScraper([])
     assert watch.run_watches(index, db, FakeNotifier(), {"fake": scr}) == ["rimandate (pausa/notte)"]
     assert not scr.queries and watch.list_watches(db)["me55-131"]["last"] == 0
+
+
+def test_found_log_and_export(index):
+    from pokebot.webapp_export import build_state
+    db = _db()
+    db.save_settings({"sources": ["fake"], "quiet_hours": None})
+    watch.add_watch(db, "me55-131")
+    scr = FakeScraper([Listing("fake", "L1", "Lapras 131/128 30th", "https://f/1", price=12.0, price_text="12 €", image="https://img/1.jpg")])
+    watch.run_watches(index, db, FakeNotifier(), {"fake": scr})
+    st = build_state(index, db)
+    assert st["watches"][0]["code"] == "131" and st["watches"][0]["found"] == 1 and st["watches"][0]["checks"] == 1
+    assert st["watch_found"][0]["key"] == "fake:L1" and st["watch_found"][0]["card"] == "me55-131" and st["watch_found"][0]["image"] == "https://img/1.jpg"

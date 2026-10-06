@@ -108,6 +108,25 @@ def clear_watches(db: Database) -> int:
     return n
 
 
+MAX_FOUND_LOG = 300
+
+
+def record_found(db: Database, card_id: str, listings: list) -> None:
+    """Tiene l'elenco (ultimi 300) degli annunci scovati dagli inseguimenti, per la sezione della Mini App."""
+    log_ = db.get_kv("watch_found", []) or []
+    now = time.time()
+    for lst in listings:
+        log_.append({"key": lst.key, "card": card_id, "ts": now, "title": lst.title, "url": lst.url, "source": lst.source,
+                     "price": lst.price_text or (f"{lst.price:.2f} €" if lst.price is not None else ""),
+                     "price_num": lst.price, "image": lst.image or "", "location": lst.location or ""})
+    db.set_kv("watch_found", log_[-MAX_FOUND_LOG:])
+
+
+def found_log(db: Database) -> list[dict]:
+    log_ = db.get_kv("watch_found", []) or []
+    return log_ if isinstance(log_, list) else []
+
+
 def describe(index: CardIndex, db: Database) -> str:
     watches = list_watches(db)
     if not watches:
@@ -166,6 +185,7 @@ def run_watches(index: CardIndex, db: Database, notifier=None, scrapers: dict | 
             sent = notifier.notify_many(items, max_per_card=int(settings.get("max_per_card", 5) or 5),
                                         images=bool(settings.get("images", True)))
             w["found"] = int(w.get("found", 0)) + sum(1 for ok in sent if ok)
+            record_found(db, cid, [lst for lst, _ in items])
         log_lines.append(f"{card.label}: {len(items)} nuovi" + (f" (errori: {', '.join(errors)})" if errors else ""))
     if changed:
         db.set_kv("watches", watches)

@@ -31,12 +31,13 @@ input[type=search]{flex:1;min-width:150px}
 .pill{font-size:12px;font-weight:800;padding:5px 11px;border-radius:999px;background:var(--sec);color:var(--hint);border:2px solid transparent}.pill.on{color:#1a1a1a;background:var(--yel);border-color:#fff3b0}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(98px,1fr));gap:9px}
 .c{position:relative;background:var(--card);border-radius:12px;padding:6px;border:3px solid #0a1328;box-shadow:0 3px 0 #0a1328}
-.c.miss{border-color:var(--yel);box-shadow:0 3px 0 var(--yel2),0 0 14px rgba(255,203,5,.35)}
+.c:not(.miss){border-color:var(--yel);box-shadow:0 3px 0 var(--yel2),0 0 16px rgba(255,203,5,.45)}
 .c img{width:100%;aspect-ratio:245/342;object-fit:cover;border-radius:7px;background:#0008;display:block}
-.c:not(.miss) img{filter:grayscale(.85) brightness(.55)}
+.c.miss img{filter:grayscale(.9) brightness(.4)}
+.c.miss .nm,.c.miss .n{opacity:.55}
 .c:not(.miss)::before{content:"✓";position:absolute;right:8px;top:8px;width:22px;height:22px;border-radius:50%;background:var(--ok);color:#06320f;font-weight:900;font-size:14px;display:flex;align-items:center;justify-content:center;z-index:1}
 .c .n{font-size:11px;color:var(--hint);margin-top:5px;font-weight:700}.c .nm{font-size:12px;font-weight:800;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.c .tag{position:absolute;top:8px;left:8px;background:var(--red);color:#fff;font-size:10px;font-weight:900;padding:2px 7px;border-radius:7px;letter-spacing:.3px;z-index:1}
+.c .tag{position:absolute;top:8px;left:8px;background:#0a1328;color:#dbe4f5;border:1px solid #2a3a60;font-size:10px;font-weight:900;padding:2px 7px;border-radius:7px;letter-spacing:.3px;z-index:1}
 .c.pending{opacity:.55}
 h2{font-size:18px;font-weight:900;margin:16px 0 8px;color:var(--yel)}h3{font-size:13px;color:var(--hint);margin:12px 0 6px;font-weight:800;text-transform:uppercase;letter-spacing:.6px}
 .folder{background:var(--sec);border-radius:14px;padding:10px 12px;margin-bottom:9px;border:2px solid var(--line)}
@@ -63,6 +64,7 @@ a{color:var(--link);text-decoration:none}
   <nav>
     <button data-tab="check" class="on">Checklist</button>
     <button data-tab="found">Trovati</button>
+    <button data-tab="chase">Inseguimento</button>
     <button data-tab="prices">Prezzi</button>
     <button data-tab="settings">Impostazioni</button>
   </nav>
@@ -74,13 +76,26 @@ a{color:var(--link);text-decoration:none}
       <select id="rar"><option value="">Tutte le rarità</option></select>
     </div>
     <div class="card-row" id="setpills"></div>
-    <p class="hint">Tocca una carta per segnarla <b>mancante</b> (bordo giallo) o <b>presa</b>. Ogni tocco diventa un comando per il bot.</p>
+    <p class="hint">Le carte che <b>hai</b> sono accese, quelle che <b>mancano</b> restano al buio. Tocca una carta per cambiarla: ogni tocco diventa un comando per il bot.</p>
     <div id="grid" class="grid"></div>
   </section>
 
   <section id="tab-found" class="hidden">
     <div class="card-row"><input id="qf" type="search" placeholder="Filtra per carta…"><span class="pill" id="fcount"></span></div>
     <div id="folders"></div>
+  </section>
+
+  <section id="tab-chase" class="hidden">
+    <p class="hint">Un inseguimento cerca una carta <b>ogni 5 minuti per 6 ore</b> e ti avvisa in chat solo sugli annunci nuovi.</p>
+    <div class="card-row">
+      <input id="chase-card" type="search" placeholder="Es. 151 o c4" style="flex:1;min-width:110px">
+      <select id="chase-dur"><option value="">6 ore</option><option value="1h">1 ora</option><option value="2h">2 ore</option><option value="12h">12 ore</option><option value="24h">24 ore</option></select>
+      <button class="btn" id="chase-go">🏃 Insegui</button>
+    </div>
+    <h2>Inseguiti</h2>
+    <div id="chase-list"></div>
+    <h2>Trovati inseguendo</h2>
+    <div id="chase-found"></div>
   </section>
 
   <section id="tab-prices" class="hidden">
@@ -145,7 +160,7 @@ async function load() {
   renderAll();
 }
 
-function renderAll() { renderChecklist(); renderFound(); renderPrices(); renderSettings(); }
+function renderAll() { renderChecklist(); renderFound(); renderChase(); renderPrices(); renderSettings(); }
 
 /* ---------- Checklist ---------- */
 function renderChecklist() {
@@ -213,6 +228,40 @@ function renderFound() {
 $("#qf").oninput = renderFound;
 function openFolder(id) { showTab("found"); $("#qf").value = ""; renderFound(); const f = $(`.folder[data-key="${id}"]`); if (f) { f.querySelector(".bd").classList.remove("hidden"); f.scrollIntoView({ behavior: "smooth" }); } }
 
+/* ---------- Inseguimento ---------- */
+function renderChase() {
+  const ws = state.watches || [], now = Date.now() / 1000;
+  const left = (sec) => sec < 60 ? "pochi secondi" : sec < 3600 ? Math.round(sec / 60) + " min" : (sec / 3600).toFixed(sec % 3600 ? 1 : 0).replace(".0", "") + " ore";
+  const hhmm = (ts) => new Date(ts * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+  $("#chase-list").innerHTML = ws.length ? ws.sort((a, b) => a.until - b.until).map((w) => { const c = byId[w.card]; return `
+    <div class="folder"><div class="hd">${c && c.image ? `<img src="${esc(c.image)}" alt="">` : ""}
+      <b>${esc(w.label)}<small class="hint" style="display:block">ogni ${Math.round(w.every / 60)} min · fino alle ${hhmm(w.until)} (ancora ${left(Math.max(0, w.until - now))})<br>${w.checks} controlli · <b>${w.found}</b> annunci nuovi</small></b>
+      <button class="btn sec" data-stop="${esc(w.code)}">⏹</button></div></div>`; }).join("")
+    : '<p class="hint">Nessun inseguimento attivo. Scrivi un numero qui sopra e tocca Insegui.</p>';
+  $("#chase-list").querySelectorAll("[data-stop]").forEach((b) => b.onclick = async () => { if (await sendCmd("/insegui stop " + b.dataset.stop)) { toast("Fermato: guarda la chat"); b.closest(".folder").style.opacity = .4; } });
+  const fl = state.watch_found || [];
+  const groups = {};
+  fl.forEach((f) => (groups[f.card] ||= []).push(f));
+  $("#chase-found").innerHTML = fl.length ? Object.keys(groups).map((id) => { const c = byId[id]; const items = groups[id]; return `
+    <div class="folder"><div class="hd">${c && c.image ? `<img src="${esc(c.image)}" alt="">` : ""}<b>${esc(c ? (c.printed ? `${c.name} ${c.number}/${c.printed}` : `${c.name} (Classic)`) : id)}</b><span class="cnt">${items.length} ›</span></div>
+      <div class="bd ${Object.keys(groups).length > 1 ? "hidden" : ""}">${items.map((f) => `
+        <div class="lst" data-url="${esc(f.url)}">
+          ${f.image ? `<img loading="lazy" src="${esc(f.image)}" alt="">` : '<div class="ph">foto n.d.</div>'}
+          <div class="t"><div class="ti">${esc(f.title)}</div>
+            <div class="mt">${new Date(f.ts * 1000).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} · ${SRC[f.source] || f.source}${f.location ? " · " + esc(f.location) : ""}</div></div>
+          <div class="pr">${esc(f.price || "n.d.")}</div>
+        </div>`).join("")}</div></div>`; }).join("")
+    : '<p class="hint">Qui compaiono gli annunci scovati dagli inseguimenti.</p>';
+  $("#chase-found").querySelectorAll(".folder .hd").forEach((hd) => hd.onclick = () => hd.nextElementSibling.classList.toggle("hidden"));
+  $("#chase-found").querySelectorAll(".lst").forEach((el) => el.onclick = () => openLink(el.dataset.url));
+}
+$("#chase-go").onclick = async () => {
+  const v = $("#chase-card").value.trim(), d = $("#chase-dur").value;
+  if (!v) { toast("Scrivi il numero della carta"); return; }
+  if (await sendCmd(`/insegui ${v}${d ? " " + d : ""}`)) { toast("Inseguimento avviato: guarda la chat"); $("#chase-card").value = ""; setTimeout(load, 70000); }
+};
+$("#chase-card").onkeydown = (e) => { if (e.key === "Enter") $("#chase-go").click(); };
+
 /* ---------- Prezzi / progresso ---------- */
 function renderPrices() {
   const c = state.completion, p = state.prices;
@@ -274,7 +323,7 @@ function renderSettings() {
 /* ---------- tabs ---------- */
 function showTab(name) {
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
-  ["check", "found", "prices", "settings"].forEach((t) => $("#tab-" + t).classList.toggle("hidden", t !== name));
+  ["check", "found", "chase", "prices", "settings"].forEach((t) => $("#tab-" + t).classList.toggle("hidden", t !== name));
   window.scrollTo(0, 0);
 }
 document.querySelectorAll("nav button").forEach((b) => b.onclick = () => showTab(b.dataset.tab));
