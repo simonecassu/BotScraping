@@ -16,7 +16,7 @@ Regole del bot:
 
 ## Senza PC: gratis su GitHub Actions, comandi da Telegram (consigliato)
 
-Il bot gira ogni 5 minuti sui server di GitHub (una carta mancante a rotazione per giro, più le ricerche generiche sul set ogni 20 minuti) e si comanda **solo da Telegram**, anche da iPhone.
+Il bot gira ogni 20 minuti sui server di GitHub e si comanda **solo da Telegram**, anche da iPhone.
 
 1. Su Telegram scrivi a **@BotFather** → `/newbot` (o `/token` se il bot esiste già) e copia il token.
 2. Apri <https://github.com/simonecassu/BotScraping/settings/secrets/actions/new>:
@@ -60,7 +60,7 @@ I dati arrivano da `state.json`, pubblicato nel branch `bot-state` a ogni giro. 
 
 ### Risposta immediata: il ponte Telegram → GitHub
 
-Senza ponte il bot legge i comandi solo quando gira (ogni 5 minuti). Con il ponte, gratuito su Cloudflare Workers,
+Senza ponte il bot legge i comandi solo quando gira (ogni 20 minuti). Con il ponte, gratuito su Cloudflare Workers,
 **ogni messaggio al bot avvia subito il workflow**: il ponte risponde "Ricevuto" e il bot risponde entro un minuto.
 Lo pubblica GitHub Actions al posto tuo: devi solo inserire tre codici nei secret del repository.
 
@@ -76,7 +76,7 @@ Lo pubblica GitHub Actions al posto tuo: devi solo inserire tre codici nei secre
 5. **Pubblica**: <https://github.com/simonecassu/BotScraping/actions/workflows/ponte.yml> → **Run workflow**.
    Alla fine il log mostra "Ponte attivo" e l'indirizzo del worker.
 
-Il ponte ha anche un **timer** (ogni 5 minuti) che avvia il giro di ricerca: il cron di GitHub resta solo come riserva.
+Il ponte ha anche un **timer** (ogni 20 minuti) che avvia la ricerca periodica: il cron di GitHub resta solo come riserva.
 L'indirizzo del worker mostra lo stato del ponte; aggiungendo `/reset` lo disattivi (si torna alla lettura dei comandi
 a ogni giro). Con il ponte attivo, se mandi più comandi in pochi secondi mettili in **un solo messaggio, uno per riga**.
 Il file del worker è `deploy/cloudflare-worker.js`, la sua configurazione `deploy/wrangler.toml`.

@@ -232,19 +232,3 @@ def test_deal_cap_and_suspicious(index):
     rep = run_search(index, db, notifier=notifier, scrapers={"fake": FakeScraper(listings)})
     assert rep.deals == 1 and [l.listing_id for l, _ in notifier.deals] == ["b"]
     assert rep.matches == 3  # la mystery box è scartata del tutto
-
-
-def test_generic_queries_only_every_20_minutes(index, monkeypatch):
-    import time as _t
-    from pokebot.search import build_queries, generic_due
-    db = Database(os.path.join(tempfile.mkdtemp(), "t.db"))
-    db.save_settings({"generic_queries": ["pokemon 30th"], "per_card_queries": True, "per_card_batch": 1, "generic_every_minutes": 20})
-    wanted = {"me55-131", "me55-145"}
-    s = db.get_settings()
-    assert generic_due(db, s)  # mai fatte: dovute
-    assert build_queries(index, wanted, s, db, include_generic=True) == ["pokemon 30th", "Lapras 131/128"]
-    db.set_kv("last_generic_ts", _t.time())
-    assert not generic_due(db, s)
-    assert build_queries(index, wanted, s, db, include_generic=False) == ["Hisuian Zorua 145/128"]  # una carta a giro, a rotazione
-    db.set_kv("last_generic_ts", _t.time() - 21 * 60)
-    assert generic_due(db, s)

@@ -1,6 +1,6 @@
 // Ponte Telegram → GitHub Actions (Cloudflare Worker, piano gratuito).
 // Ogni messaggio inviato al bot avvia subito il workflow "PokéBot 30th" passando il comando;
-// inoltre, ogni 5 minuti (timer del worker), avvia un giro di ricerca.
+// inoltre, ogni 20 minuti (timer del worker), avvia la ricerca periodica.
 //
 // Variabili da impostare nel Worker (Settings → Variables and Secrets, tipo "Secret"):
 //   TELEGRAM_BOT_TOKEN  token di @BotFather
