@@ -50,7 +50,7 @@ HELP = """<b>Comandi</b>
 /prezzo 100 – prezzo massimo in € (0 = nessun limite)
 /fonti wallapop vinted ebay – quali marketplace usare
 /lingua ita – scarta annunci in francese/inglese/altre lingue · /lingua tutte – accetta tutto
-/intervallo 20 – ogni quanti minuti fare la ricerca
+/intervallo 5 – ogni quanti minuti fare un giro · /carte 1 – quante carte mancanti cercare a ogni giro (a rotazione)
 /max 5 – per ogni carta, quanti annunci (i più economici) ricevere a ogni giro
 /cerca – ricerca immediata · /cerca 145 – una carta: tutto ciò che è in vendita adesso, dal più economico
 /resetvisti – rinotifica anche gli annunci già visti
@@ -58,7 +58,7 @@ Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
-MENU_VERSION = 7
+MENU_VERSION = 8
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -75,7 +75,8 @@ MENU_COMMANDS = [
     ("esporta", "File Excel con checklist, storico annunci e prezzi"),
     ("immagini", "Immagine della carta nei messaggi: /immagini on | off"),
     ("cerca", "Cerca subito tutto, oppure una carta mirata: /cerca 145"),
-    ("intervallo", "Ogni quanti minuti cercare: /intervallo 20"),
+    ("intervallo", "Ogni quanti minuti fare un giro: /intervallo 5"),
+    ("carte", "Quante carte mancanti cercare a ogni giro, a rotazione: /carte 1"),
     ("max", "Quanti annunci (i piu' economici) per carta in ogni giro: /max 5"),
     ("soglia", "Percentuale minima di carte mancanti nei lotti: /soglia 50"),
     ("prezzo", "Prezzo massimo in euro: /prezzo 100 (0 = nessun limite)"),
@@ -240,7 +241,11 @@ class CommandHandler:
                                     lambda v: f"Per ogni carta ricevi al massimo {v} annunci (i più economici) per giro.")
         if cmd == "/intervallo":
             return self._set_number(args, "interval_minutes", lambda v: max(5, int(v)),
-                                    lambda v: f"Ricerca ogni {v} minuti.")
+                                    lambda v: f"Un giro ogni {v} minuti (il timer scatta ogni 5).")
+        if cmd in ("/carte", "/rotazione"):
+            return self._set_number(args, "per_card_batch", lambda v: max(1, min(50, int(v))),
+                                    lambda v: f"A ogni giro cerco {v} carta{'e' if v != 1 else ''} mancant{'i' if v != 1 else 'e'} a rotazione "
+                                              f"(più le ricerche generiche sul set ogni 20 minuti).")
         if cmd == "/fonti":
             return self._set_sources(args)
         if cmd == "/lingua":
@@ -608,7 +613,8 @@ class CommandHandler:
         flags.append(f"🔥 affari {'off' if not s.get('deal_pct') else str(int(s['deal_pct'])) + '%'}")
         flags.append(f"🖼 immagini {'on' if s.get('images', True) else 'off'}")
         lines = [f"🃏 Mancanti: <b>{len(self.db.wanted_ids())}</b>/{len(self.index.by_id)} · " + " · ".join(flags),
-                 f"⚙️ Ricerca ogni {int(s['interval_minutes'])} min · max {int(s.get('max_per_card', 5))} annunci per carta · "
+                 f"⚙️ Giro ogni {int(s['interval_minutes'])} min ({int(s.get('per_card_batch', 1))} carte a rotazione, generiche ogni "
+                 f"{int(s.get('generic_every_minutes', 20))} min) · max {int(s.get('max_per_card', 5))} annunci per carta · "
                  f"soglia lotti {s['lot_min_ratio'] * 100:.0f}% · prezzo max {price_txt} · lingua: {s.get('language', 'ita')} · "
                  f"fonti: {', '.join(s['sources'])}"]
         if runs:

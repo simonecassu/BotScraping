@@ -37,8 +37,18 @@ class RunReport:
     per_source: Counter = field(default_factory=Counter)
 
 
-def build_queries(index: CardIndex, wanted_ids: set[str], settings: dict, db: Database) -> list[str]:
-    queries = [q.strip() for q in settings.get("generic_queries", []) if q.strip()]
+def generic_due(db: Database, settings: dict) -> bool:
+    """Le ricerche generiche sul set si fanno solo ogni `generic_every_minutes` (le carte a rotazione a ogni giro)."""
+    every = float(settings.get("generic_every_minutes", 20) or 0)
+    if every <= 0:
+        return True
+    last = float(db.get_kv("last_generic_ts", 0) or 0)
+    return time.time() - last >= every * 60 - 30
+
+
+def build_queries(index: CardIndex, wanted_ids: set[str], settings: dict, db: Database,
+                  include_generic: bool = True) -> list[str]:
+    queries = [q.strip() for q in settings.get("generic_queries", []) if q.strip()] if include_generic else []
     if settings.get("per_card_queries") and wanted_ids:
         batch = int(settings.get("per_card_batch", 20) or 0)
         for cid in db.next_rotation(sorted(wanted_ids), batch):
@@ -60,7 +70,8 @@ def build_queries(index: CardIndex, wanted_ids: set[str], settings: dict, db: Da
 
 
 def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None = None,
-               scrapers: dict | None = None, dry_run: bool = False) -> RunReport:
+               scrapers: dict | None = None, dry_run: bool = False, full: bool = False) -> RunReport:
+    """Un giro di ricerca. `full` forza anche le ricerche generiche (es. /cerca manuale)."""
     report = RunReport(started_at=time.time())
     settings = db.get_settings()
     wanted = db.wanted_ids()
@@ -91,7 +102,10 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
             if cls:
                 scrapers[name] = cls(only_italy=only_italy)
 
-    queries = build_queries(index, wanted, settings, db)
+    include_generic = full or generic_due(db, settings)
+    queries = build_queries(index, wanted, settings, db, include_generic=include_generic)
+    if include_generic and not dry_run:
+        db.set_kv("last_generic_ts", time.time())
     report.queries = len(queries)
     seen_this_run: set[str] = set()
     pending: list[tuple[Listing, "MatchResult"]] = []  # match da notificare a fine ciclo (raggruppati se tanti)

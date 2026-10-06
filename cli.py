@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     db = Database()
 
     if args.cmd == "cerca":
-        rep = run_search(index, db, dry_run=args.dry_run)
+        rep = run_search(index, db, dry_run=args.dry_run, full=True)
         print(f"Query: {rep.queries} · annunci: {rep.listings} (nuovi {rep.new_listings}) · match: {rep.matches} · notifiche: {rep.notified}")
         for k, v in rep.errors.items():
             print(f"  errore {k}: {v}")
@@ -73,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
             print("Ricerca non ancora dovuta (vedi /intervallo): solo comandi Telegram.")
             db.prune()
             return 0
-        rep = run_search(index, db)
+        rep = run_search(index, db, full=bool(args.force or want_search))
         db.set_kv("last_search_ts", time.time())
         db.prune()
         print(f"Query: {rep.queries} · annunci: {rep.listings} (nuovi {rep.new_listings}) · match: {rep.matches} · notifiche: {rep.notified}")

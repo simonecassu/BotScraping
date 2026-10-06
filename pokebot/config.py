@@ -35,7 +35,7 @@ USER_AGENT = os.getenv(
 
 # Impostazioni modificabili dall'interfaccia web (valori di default).
 DEFAULT_SETTINGS: dict[str, object] = {
-    "interval_minutes": 20,
+    "interval_minutes": 5,  # ogni quanti minuti fare un giro (il timer del ponte scatta ogni 5)
     "lot_min_ratio": 0.5,
     "max_price": 0,  # 0 = nessun limite
     "max_per_card": 5,  # per ogni carta, quanti annunci (i più economici) inviare per ciclo
@@ -66,7 +66,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
         "pokemon classic collection 30th",
     ],
     "per_card_queries": True,
-    "per_card_batch": 20,  # quante carte mancanti cercare singolarmente per ciclo (a rotazione)
+    "per_card_batch": 1,  # quante carte mancanti cercare singolarmente per giro (a rotazione): una ogni 5 minuti
+    "generic_every_minutes": 20,  # le ricerche generiche sul set (più pesanti) solo ogni tot minuti
     "notify_unverifiable_lots": False,
     "only_italy": True,
 }
