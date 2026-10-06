@@ -53,12 +53,13 @@ HELP = """<b>Comandi</b>
 /intervallo 20 – ogni quanti minuti fare la ricerca
 /max 5 – per ogni carta, quanti annunci (i più economici) ricevere a ogni giro
 /cerca – ricerca immediata · /cerca 145 – una carta: tutto ciò che è in vendita adesso, dal più economico
+/segui c4 6h – ricerca intensiva: ogni 5 minuti per 6 ore, avviso appena spunta un annuncio nuovo (anche /cerca c4 6h, /segui 145 2h ogni 10m) · /segui – quali sono attive · /segui stop
 /resetvisti – rinotifica anche gli annunci già visti
 Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
-MENU_VERSION = 7
+MENU_VERSION = 8
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -75,6 +76,7 @@ MENU_COMMANDS = [
     ("esporta", "File Excel con checklist, storico annunci e prezzi"),
     ("immagini", "Immagine della carta nei messaggi: /immagini on | off"),
     ("cerca", "Cerca subito tutto, oppure una carta mirata: /cerca 145"),
+    ("segui", "Ricerca intensiva su una carta: /segui c4 6h (ogni 5 min, avviso sui nuovi annunci)"),
     ("intervallo", "Ogni quanti minuti cercare: /intervallo 20"),
     ("max", "Quanti annunci (i piu' economici) per carta in ogni giro: /max 5"),
     ("soglia", "Percentuale minima di carte mancanti nei lotti: /soglia 50"),
@@ -254,8 +256,13 @@ class CommandHandler:
             return Reply("Usa <code>/lingua ita</code> oppure <code>/lingua tutte</code>.")
         if cmd == "/cerca":
             if args.strip():
+                from .watch import parse_duration
+                if any(parse_duration(t) is not None or t.lower() == "ogni" for t in args.split()):
+                    return self._follow(args)  # "/cerca c4 6h" = ricerca intensiva
                 return self._search_cards(args)
             return Reply("🔎 Ok, cerco adesso.", run_search=True)
+        if cmd in ("/segui", "/insegui", "/monitora"):
+            return self._follow(args)
         if cmd == "/resetvisti":
             if args.strip().lower() != "conferma":
                 return Reply("⚠️ Questo rinotifica <b>tutti</b> gli annunci già visti (possono essere centinaia).\n"
@@ -392,6 +399,44 @@ class CommandHandler:
             lines.append("\nSenza prezzo: " + html.escape(", ".join(self.index.code_of[c.id] for c in comp.unpriced[:30]))
                          + (" …" if len(comp.unpriced) > 30 else ""))
         return Reply("\n".join(lines))
+
+    def _follow(self, args: str) -> Reply:
+        """/segui c4 6h [ogni 10m] – ricerca intensiva a ogni sveglia del bot; /segui – elenco; /segui stop [carte]."""
+        from . import watch
+        a = args.strip()
+        if not a:
+            return Reply(watch.describe(self.index, self.db))
+        first, _, rest = a.partition(" ")
+        if first.lower() in ("stop", "basta", "ferma", "off"):
+            if not rest.strip():
+                n = watch.clear_watches(self.db)
+                return Reply(f"⏹ Fermate {n} ricerche intensive." if n else "Nessuna ricerca intensiva attiva.")
+            cards, unknown = self.resolve(rest)
+            stopped = [c.label for c in cards if watch.remove_watch(self.db, c.id)]
+            msg = ("⏹ Fermata: " + ", ".join(html.escape(x) for x in stopped)) if stopped else "Quelle carte non erano seguite."
+            if unknown:
+                msg += "\n❓ Non capiti: " + html.escape(" ".join(unknown))
+            return Reply(msg)
+        card_args, duration, every = watch.parse_watch_args(a)
+        cards, unknown = self.resolve(card_args)
+        if not cards:
+            return Reply("Carta non riconosciuta. Es. <code>/segui c4 6h</code>, <code>/segui 145 2h ogni 10m</code>.")
+        active = watch.list_watches(self.db)
+        room = watch.MAX_WATCHES - len({cid for cid in active if cid not in {c.id for c in cards}})
+        cards = cards[:max(0, room)]
+        if not cards:
+            return Reply(f"Al massimo {watch.MAX_WATCHES} ricerche intensive insieme: ferma qualcosa con /segui stop.")
+        for c in cards:
+            w = watch.add_watch(self.db, c.id, duration, every)
+        names = ", ".join(html.escape(c.label) for c in cards)
+        lines = [f"⏱ Seguo <b>{names}</b> ogni {watch.fmt_duration(every)} per {watch.fmt_duration(duration)} "
+                 f"(fino alle {watch.fmt_time(w['until'])}).",
+                 "Primo controllo tra pochi secondi, poi ti avviso solo quando spunta un annuncio nuovo. "
+                 "Alla fine ti mando il riepilogo."]
+        if unknown:
+            lines.append("❓ Non capiti: " + html.escape(" ".join(unknown)))
+        code = self.index.code_of[cards[0].id]
+        return Reply("\n".join(lines), buttons=[[("⏹ Ferma", f"/segui stop {code}"), ("⏱ Attive", "/segui")]])
 
     def _search_cards(self, args: str) -> Reply:
         """Ricerca mirata, subito, di una o più carte (max 3): cosa c'è in vendita adesso."""
@@ -607,6 +652,9 @@ class CommandHandler:
             flags.append(f"🌙 notte {qh[0]}-{qh[1]}")
         flags.append(f"🔥 affari {'off' if not s.get('deal_pct') else str(int(s['deal_pct'])) + '%'}")
         flags.append(f"🖼 immagini {'on' if s.get('images', True) else 'off'}")
+        from .watch import list_watches
+        if list_watches(self.db):
+            flags.append(f"⏱ intensive {len(list_watches(self.db))} (/segui)")
         lines = [f"🃏 Mancanti: <b>{len(self.db.wanted_ids())}</b>/{len(self.index.by_id)} · " + " · ".join(flags),
                  f"⚙️ Ricerca ogni {int(s['interval_minutes'])} min · max {int(s.get('max_per_card', 5))} annunci per carta · "
                  f"soglia lotti {s['lot_min_ratio'] * 100:.0f}% · prezzo max {price_txt} · lingua: {s.get('language', 'ita')} · "

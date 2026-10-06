@@ -301,10 +301,11 @@ def card_queries(card) -> list[str]:
 
 
 def search_card(index: CardIndex, db: Database, card, settings: dict | None = None, scrapers: dict | None = None,
-                limit: int = 10) -> tuple[list[tuple[Listing, "MatchResult"]], dict[str, str]]:
+                limit: int = 10, only_new: bool = False) -> tuple[list[tuple[Listing, "MatchResult"]], dict[str, str]]:
     """Ricerca mirata di una carta su tutte le fonti: restituisce gli annunci in vendita adesso, dal più economico.
 
-    Include anche annunci già visti. Gli annunci vengono registrati nello storico e segnati come visti.
+    Include anche annunci già visti (con `only_new=True` restituisce solo quelli mai visti né registrati).
+    Gli annunci vengono registrati nello storico e segnati come visti.
     """
     settings = settings or db.get_settings()
     matcher = Matcher(index, settings.get("set_keywords", []))
@@ -339,6 +340,8 @@ def search_card(index: CardIndex, db: Database, card, settings: dict | None = No
                 found[lst.key] = (lst, res)
     items = sorted(found.values(), key=lambda pair: (pair[0].price if pair[0].price is not None else float("inf")))
     existing = {r["listing_key"] for r in db.list_found()}
+    if only_new:
+        items = [pair for pair in items if pair[0].key not in existing and not db.is_seen(pair[0].key)]
     for lst, res in items[:limit]:
         if lst.key not in existing:
             db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),

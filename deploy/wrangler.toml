@@ -5,9 +5,9 @@ main = "cloudflare-worker.js"
 compatibility_date = "2025-09-01"
 workers_dev = true
 
-# orologio del bot: ogni 20 minuti il ponte avvia la ricerca su GitHub (il cron di GitHub è inaffidabile)
+# orologio del bot: ogni 5 minuti il ponte sveglia il bot (ricerche intensive /segui); la ricerca completa segue /intervallo (il cron di GitHub è inaffidabile)
 [triggers]
-crons = ["7,27,47 * * * *"]
+crons = ["*/5 * * * *"]
 
 [vars]
 GITHUB_REPO = "simonecassu/BotScraping"

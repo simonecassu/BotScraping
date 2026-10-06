@@ -16,7 +16,7 @@ Regole del bot:
 
 ## Senza PC: gratis su GitHub Actions, comandi da Telegram (consigliato)
 
-Il bot gira ogni 20 minuti sui server di GitHub e si comanda **solo da Telegram**, anche da iPhone.
+Il bot si sveglia ogni 5 minuti sui server di GitHub (ricerca completa ogni 20 minuti, o quanto dici con `/intervallo`; le ricerche intensive `/segui` a ogni sveglia) e si comanda **solo da Telegram**, anche da iPhone.
 
 1. Su Telegram scrivi a **@BotFather** → `/newbot` (o `/token` se il bot esiste già) e copia il token.
 2. Apri <https://github.com/simonecassu/BotScraping/settings/secrets/actions/new>:
@@ -44,6 +44,7 @@ Il bot gira ogni 20 minuti sui server di GitHub e si comanda **solo da Telegram*
 | `/esporta` | file Excel con checklist, storico annunci e prezzi |
 | `/immagini on` · `off` | immagine della carta nei messaggi raggruppati |
 | `/cerca` · `/cerca 145` · `/resetvisti` | ricerca immediata · ricerca mirata di una carta (tutto ciò che è in vendita ora, dal più economico) · rinotifica gli annunci già visti |
+| `/segui c4 6h` · `/segui 145 2h ogni 10m` · `/segui` · `/segui stop` | ricerca intensiva: a ogni sveglia del bot (5 minuti) cerca quella carta e avvisa solo sugli annunci nuovi, per il tempo indicato (default 6 ore, max 48), poi manda il riepilogo · elenco delle attive · ferma tutte (o `/segui stop c4`) |
 
 Lo stato (carte mancanti, annunci già visti) è salvato nel branch `bot-state`.
 Solo la chat che ha scritto `/start` per prima può comandare il bot. Aggiungendo il secret `TELEGRAM_CHAT_ID`
@@ -60,7 +61,7 @@ I dati arrivano da `state.json`, pubblicato nel branch `bot-state` a ogni giro. 
 
 ### Risposta immediata: il ponte Telegram → GitHub
 
-Senza ponte il bot legge i comandi solo quando gira (ogni 20 minuti). Con il ponte, gratuito su Cloudflare Workers,
+Senza ponte il bot legge i comandi solo quando gira (ogni 5 minuti). Con il ponte, gratuito su Cloudflare Workers,
 **ogni messaggio al bot avvia subito il workflow**: il ponte risponde "Ricevuto" e il bot risponde entro un minuto.
 Lo pubblica GitHub Actions al posto tuo: devi solo inserire tre codici nei secret del repository.
 
@@ -76,7 +77,7 @@ Lo pubblica GitHub Actions al posto tuo: devi solo inserire tre codici nei secre
 5. **Pubblica**: <https://github.com/simonecassu/BotScraping/actions/workflows/ponte.yml> → **Run workflow**.
    Alla fine il log mostra "Ponte attivo" e l'indirizzo del worker.
 
-Il ponte ha anche un **timer** (ogni 20 minuti) che avvia la ricerca periodica: il cron di GitHub resta solo come riserva.
+Il ponte ha anche un **timer** (ogni 5 minuti) che sveglia il bot: ricerche intensive `/segui c4 6h` e, quando è ora, la ricerca completa: il cron di GitHub resta solo come riserva.
 L'indirizzo del worker mostra lo stato del ponte; aggiungendo `/reset` lo disattivi (si torna alla lettura dei comandi
 a ogni giro). Con il ponte attivo, se mandi più comandi in pochi secondi mettili in **un solo messaggio, uno per riga**.
 Il file del worker è `deploy/cloudflare-worker.js`, la sua configurazione `deploy/wrangler.toml`.
