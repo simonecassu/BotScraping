@@ -65,15 +65,15 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("TELEGRAM_BOT_TOKEN mancante: nessun comando letto, nessuna notifica possibile.")
         from pokebot.watch import run_watches
-        for line in run_watches(index, db):  # ricerche intensive (/segui): a ogni sveglia, 5 minuti
-            print(f"intensiva · {line}")
+        for line in run_watches(index, db):  # inseguimenti (/insegui): a ogni sveglia, 5 minuti
+            print(f"inseguimento · {line}")
         if not (args.force or want_search or _search_due(db)):
             from pokebot.notifier import TelegramNotifier
             from pokebot.search import flush_queued, notifications_suppressed
             settings = db.get_settings()
             if not notifications_suppressed(settings):
                 flush_queued(db, TelegramNotifier.from_db(db), settings, index.by_id)
-            print("Ricerca completa non ancora dovuta (vedi /intervallo): solo comandi Telegram e ricerche intensive.")
+            print("Ricerca completa non ancora dovuta (vedi /intervallo): solo comandi Telegram e inseguimenti.")
             db.prune()
             return 0
         rep = run_search(index, db)
