@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PokéBot 30th</title>
+<title>Pokébot</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@600;800;900&display=swap');
@@ -56,21 +56,44 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:8px 4px;b
 .toast{position:fixed;left:12px;right:12px;bottom:14px;background:#111c;color:#fff;padding:11px 14px;border-radius:14px;font-size:14px;font-weight:800;backdrop-filter:blur(8px);z-index:9;opacity:0;transition:opacity .2s;pointer-events:none;border:2px solid var(--yel)}.toast.show{opacity:1}
 .hint{color:var(--hint);font-size:13px;font-weight:700}.err{color:var(--bad)}
 a{color:var(--link);text-decoration:none}
+
+.back{border:0;background:rgba(255,255,255,.18);color:#fff;width:34px;height:34px;border-radius:50%;font:900 22px/1 "Nunito",sans-serif;flex:none;padding:0 0 3px}
+.title #ttl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px}
+.tile{background:var(--sec);border:3px solid #0a1328;box-shadow:0 4px 0 #0a1328;border-radius:18px;padding:18px 14px;min-height:124px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer}
+.tile .ic{font-size:30px}.tile b{font-size:17px;font-weight:900;display:block;margin-top:8px}.tile small{color:var(--hint);font-weight:700;font-size:12px}
+.tile.red{border-color:var(--red);box-shadow:0 4px 0 var(--red2)}.tile.yel{border-color:var(--yel);box-shadow:0 4px 0 var(--yel2)}
+.coll{display:flex;gap:12px;align-items:center;background:var(--sec);border:2px solid var(--line);border-radius:14px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
+.coll img{width:64px;height:36px;object-fit:contain;flex:none}.coll .sy{width:64px;text-align:center;color:var(--hint);font-weight:900;flex:none}
+.coll b{display:block;font-weight:900;font-size:14px}.coll small{color:var(--hint);font-weight:700;font-size:12px}
+.coll .st{flex:none;font-size:11px;font-weight:900;padding:4px 9px;border-radius:999px;background:#0a1328;color:var(--hint);border:1px solid var(--line)}
+.coll .st.on{background:var(--yel);color:#1a1a1a;border-color:#fff3b0}.coll .st.mine{background:#163a1f;color:#9fe3ad;border-color:#2d7a3e}
+.seg{display:flex;background:#0a1328;border-radius:999px;padding:3px;margin-bottom:10px;border:2px solid var(--line)}.seg button{flex:1;border:0;border-radius:999px;padding:8px;background:transparent;color:var(--hint);font:800 13px "Nunito",sans-serif}.seg button.on{background:var(--yel);color:#1a1a1a}
+.warn{background:#3a2a0a;border:2px solid var(--warn);color:#ffd9a0;border-radius:12px;padding:9px 12px;font-size:13px;font-weight:700;margin:8px 0}
 </style>
 </head>
 <body>
 <header>
-  <div class="title"><span class="ball"></span>PokéBot 30th <small id="upd">…</small></div>
-  <nav>
-    <button data-tab="check" class="on">Checklist</button>
-    <button data-tab="found">Trovati</button>
-    <button data-tab="chase">Inseguimento</button>
-    <button data-tab="prices">Prezzi</button>
-    <button data-tab="settings">Impostazioni</button>
-  </nav>
+  <div class="title"><button id="back" class="back hidden" aria-label="Indietro">‹</button><span class="ball"></span><span id="ttl">Pokébot</span><small id="upd">…</small></div>
 </header>
 <main>
-  <section id="tab-check">
+  <section id="tab-home">
+    <div class="tiles">
+      <div class="tile red" data-go="coll"><span class="ic">📚</span><div><b>Collezioni</b><small id="t-coll">…</small></div></div>
+      <div class="tile yel" data-go="chase"><span class="ic">🏃</span><div><b>Inseguite</b><small id="t-chase">…</small></div></div>
+      <div class="tile" data-go="found"><span class="ic">🔎</span><div><b>Trovati</b><small id="t-found">…</small></div></div>
+      <div class="tile" data-go="settings"><span class="ic">⚙️</span><div><b>Impostazioni</b><small id="t-set">…</small></div></div>
+    </div>
+    <p class="hint" id="home-hint" style="margin-top:14px"></p>
+  </section>
+
+  <section id="tab-coll" class="hidden">
+    <div class="card-row"><input id="qc" type="search" placeholder="Cerca una collezione…"></div>
+    <div id="coll-list"><p class="hint">Carico il catalogo…</p></div>
+  </section>
+
+  <section id="tab-check" class="hidden">
+    <div id="check-head"></div>
     <div class="card-row">
       <input id="q" type="search" placeholder="Cerca nome o numero…">
       <select id="rar"><option value="">Tutte le rarità</option></select>
@@ -78,11 +101,6 @@ a{color:var(--link);text-decoration:none}
     <div class="card-row" id="setpills"></div>
     <p class="hint">Le carte che <b>hai</b> sono accese, quelle che <b>mancano</b> restano al buio. Tocca una carta per cambiarla: ogni tocco diventa un comando per il bot.</p>
     <div id="grid" class="grid"></div>
-  </section>
-
-  <section id="tab-found" class="hidden">
-    <div class="card-row"><input id="qf" type="search" placeholder="Filtra per carta…"><span class="pill" id="fcount"></span></div>
-    <div id="folders"></div>
   </section>
 
   <section id="tab-chase" class="hidden">
@@ -98,13 +116,20 @@ a{color:var(--link);text-decoration:none}
     <div id="chase-found"></div>
   </section>
 
-  <section id="tab-prices" class="hidden">
-    <div id="progress"></div>
-    <h2>Quanto manca</h2>
-    <div id="cost"></div>
-    <h2>Prezzi per carta</h2>
-    <p class="hint">Minimo, mediana e massimo degli annunci visti. Tocca una riga per aprire la cartella.</p>
-    <table id="ptable"><thead><tr><th>Carta</th><th class="r">Min</th><th class="r">Mediana</th><th class="r">Max</th><th class="r">N</th></tr></thead><tbody></tbody></table>
+  <section id="tab-found" class="hidden">
+    <div class="seg"><button data-seg="ann" class="on">Annunci</button><button data-seg="prz">Prezzi</button></div>
+    <div id="seg-ann">
+      <div class="card-row"><input id="qf" type="search" placeholder="Filtra per carta…"><span class="pill" id="fcount"></span></div>
+      <div id="folders"></div>
+    </div>
+    <div id="seg-prz" class="hidden">
+      <div id="progress"></div>
+      <h2>Quanto manca</h2>
+      <div id="cost"></div>
+      <h2>Prezzi per carta</h2>
+      <p class="hint">Minimo, mediana e massimo degli annunci visti. Tocca una riga per aprire la cartella.</p>
+      <table id="ptable"><thead><tr><th>Carta</th><th class="r">Min</th><th class="r">Mediana</th><th class="r">Max</th><th class="r">N</th></tr></thead><tbody></tbody></table>
+    </div>
   </section>
 
   <section id="tab-settings" class="hidden">
@@ -127,7 +152,12 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const eur = (v) => v == null ? "n.d." : v.toLocaleString("it-IT", { style: "currency", currency: "EUR" });
 const SRC = { ebay: "eBay.it", vinted: "Vinted", wallapop: "Wallapop" };
+const HOME_SETS = ["me55", "me55c"];  // la collezione "di casa": 30th Celebration + Classic Collection
+const CATALOG_URL = "https://cdn.jsdelivr.net/gh/PokemonTCG/pokemon-tcg-data@master/sets/en.json";
+const CARDS_URL = (id) => `https://cdn.jsdelivr.net/gh/PokemonTCG/pokemon-tcg-data@master/cards/en/${id}.json`;
 let state = null, cards = [], byId = {}, wanted = new Set(), pending = new Set(), filterSet = "";
+let catalog = null, curSet = "home", extra = {};  // extra[id] = { meta, cards, wanted:Set, active, loaded }
+const stack = [];
 
 function toast(msg, ms = 2200) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), ms); }
 function openLink(u) { if (tg && tg.openLink) tg.openLink(u); else window.open(u, "_blank"); }
@@ -149,48 +179,152 @@ async function load() {
     state = await r.json();
   } catch (e) {
     $("#upd").textContent = "stato non disponibile";
-    $("#grid").innerHTML = '<p class="err">Il bot non ha ancora pubblicato lo stato. Riprova tra un minuto.</p>';
+    $("#home-hint").innerHTML = '<span class="err">Il bot non ha ancora pubblicato lo stato. Riprova tra un minuto.</span>';
     return;
   }
   cards = state.sets.flatMap((s) => s.cards.map((c) => ({ ...c, set: s.id, setName: s.name, printed: s.printed_total })));
   byId = Object.fromEntries(cards.map((c) => [c.id, c]));
   wanted = new Set(state.wanted);
+  for (const c of (state.collections || [])) {
+    extra[c.id] = { meta: { id: c.id, name: c.name, series: c.series, logo: c.logo, symbol: c.symbol, total: c.total, printed_total: c.printed_total },
+      cards: c.cards.map((k) => ({ ...k, set: c.id, setName: c.name, printed: c.printed_total, code: k.number })), wanted: new Set(c.wanted), active: c.active, loaded: true };
+  }
   const d = new Date(state.generated_at * 1000);
   $("#upd").textContent = "aggiornato " + d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
   renderAll();
 }
 
-function renderAll() { renderChecklist(); renderFound(); renderChase(); renderPrices(); renderSettings(); }
+function renderAll() { renderHome(); renderCollections(); renderChecklist(); renderFound(); renderChase(); renderPrices(); renderSettings(); }
+
+/* ---------- Home ---------- */
+function renderHome() {
+  const nExtraActive = Object.values(extra).filter((e) => e.active).length;
+  $("#t-coll").textContent = `30th Celebration · ${wanted.size} mancanti` + (nExtraActive ? ` · +${nExtraActive} attive` : "");
+  const ws = state.watches || [];
+  $("#t-chase").textContent = ws.length ? `${ws.length} attiv${ws.length === 1 ? "o" : "i"} · ${ws.reduce((a, w) => a + (w.found || 0), 0)} nuovi` : "nessuno attivo";
+  $("#t-found").textContent = `${state.found.length} annunci · ${state.completion.percent.toFixed(0)}% set`;
+  const s = state.settings;
+  $("#t-set").textContent = s.paused ? "⏸ in pausa" : `ogni ${s.interval_minutes} min · ${(s.sources || []).length} fonti`;
+  const lr = state.last_run;
+  $("#home-hint").textContent = lr ? `Ultimo giro ${new Date(lr.started_at * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}: ${lr.listings_seen} annunci letti, ${lr.matches} segnalati.` : "";
+}
+document.querySelectorAll(".tile").forEach((t) => t.onclick = () => showTab(t.dataset.go));
+
+/* ---------- Collezioni ---------- */
+async function loadCatalog() {
+  try { const c = JSON.parse(localStorage.getItem("catalog") || "null"); if (c && Date.now() - c.ts < 86400e3) { catalog = c.sets; return; } } catch (e) {}
+  try {
+    const r = await fetch(CATALOG_URL); const raw = await r.json();
+    catalog = raw.map((s) => ({ id: s.id, name: s.name, series: s.series || "", total: s.total || 0, printed_total: s.printedTotal, release: (s.releaseDate || "").replace(/\//g, "-"),
+      logo: (s.images || {}).logo || "", symbol: (s.images || {}).symbol || "" })).sort((a, b) => (b.release || "").localeCompare(a.release || ""));
+    try { localStorage.setItem("catalog", JSON.stringify({ ts: Date.now(), sets: catalog })); } catch (e) {}
+  } catch (e) { catalog = []; }
+}
+function renderCollections() {
+  if (!state) return;
+  const q = $("#qc").value.trim().toLowerCase();
+  const row = (m, status, go, sub) => `<div class="coll" data-go="${esc(go)}">${m.logo ? `<img loading="lazy" src="${esc(m.logo)}" alt="">` : `<span class="sy">${esc((m.id || "").toUpperCase().slice(0, 5))}</span>`}
+      <div style="flex:1;min-width:0"><b>${esc(m.name)}</b><small>${esc(sub)}</small></div>${status}</div>`;
+  let html = "";
+  const mine = [];
+  if (!q || "30th celebration classic".includes(q)) mine.push(row({ id: "me55", name: "30th Celebration", logo: ((catalog || []).find((s) => s.id === "me55") || {}).logo || "" },
+    '<span class="st mine">🔎 di casa</span>', "home", `${cards.length} carte (con Classic Collection) · ${wanted.size} mancanti`));
+  for (const e of Object.values(extra)) {
+    if (q && !e.meta.name.toLowerCase().includes(q)) continue;
+    mine.push(row(e.meta, e.active ? '<span class="st on">🔎 attiva</span>' : '<span class="st">💤 spenta</span>', e.meta.id, `${e.cards.length} carte · ${e.wanted.size} mancanti`));
+  }
+  html += `<h2>Le tue</h2>${mine.join("") || '<p class="hint">Nessuna.</p>'}`;
+  if (!catalog) html += '<h2>Tutte</h2><p class="hint">Carico il catalogo…</p>';
+  else {
+    const list = catalog.filter((s) => !HOME_SETS.includes(s.id) && !extra[s.id] && (!q || s.name.toLowerCase().includes(q) || s.series.toLowerCase().includes(q) || s.id.includes(q)));
+    const bySeries = {};
+    list.forEach((s) => (bySeries[s.series || "Altro"] ||= []).push(s));
+    html += `<h2>Tutte (${list.length})</h2>` + Object.entries(bySeries).map(([ser, ss]) => `<h3>${esc(ser)}</h3>` +
+      ss.map((s) => row(s, '<span class="st">non seguita</span>', s.id, `${s.total} carte · ${(s.release || "").slice(0, 4)}`)).join("")).join("");
+  }
+  $("#coll-list").innerHTML = html;
+  $("#coll-list").querySelectorAll(".coll").forEach((el) => el.onclick = () => openSet(el.dataset.go));
+}
+$("#qc").oninput = renderCollections;
+
+async function openSet(id) {
+  curSet = id;
+  if (id !== "home" && !extra[id]) {
+    const meta = (catalog || []).find((s) => s.id === id);
+    extra[id] = { meta: meta || { id, name: id }, cards: [], wanted: new Set(), active: false, loaded: false };
+    showTab("check");
+    try {
+      const r = await fetch(CARDS_URL(id)); const raw = await r.json();
+      extra[id].cards = raw.map((k) => ({ id: k.id, number: String(k.number), name: k.name, rarity: k.rarity || "", image: (k.images || {}).small || "", set: id, setName: extra[id].meta.name, printed: meta ? meta.printed_total : null, code: String(k.number) }));
+    } catch (e) { toast("Collezione non scaricabile adesso"); }
+    extra[id].loaded = true;
+    if (curSet === id) { renderChecklist(); renderCollections(); }
+    return;
+  }
+  showTab("check");
+}
 
 /* ---------- Checklist ---------- */
+function curCards() { return curSet === "home" ? cards : ((extra[curSet] || {}).cards || []); }
+function isMissing(c) { return curSet === "home" ? wanted.has(c.id) : extra[curSet].wanted.has(c.number); }
 function renderChecklist() {
-  const rar = $("#rar");
-  if (rar.options.length <= 1) [...new Set(cards.map((c) => c.rarity))].sort().forEach((r) => rar.insertAdjacentHTML("beforeend", `<option>${esc(r)}</option>`));
-  const pills = $("#setpills");
-  pills.innerHTML = state.sets.map((s) => {
-    const miss = s.cards.filter((c) => wanted.has(c.id)).length;
-    return `<span class="pill ${filterSet === s.id ? "on" : ""}" data-set="${s.id}">${esc(s.name)} · ${miss}/${s.cards.length} mancanti</span>`;
-  }).join("") + `<span class="pill">Mancanti <b>${wanted.size}</b>/${cards.length}</span>`;
-  pills.querySelectorAll("[data-set]").forEach((p) => p.onclick = () => { filterSet = filterSet === p.dataset.set ? "" : p.dataset.set; renderChecklist(); });
+  if (!state) return;
+  const list0 = curCards();
+  const rar = $("#rar"), rvPrev = rar.value;
+  rar.innerHTML = '<option value="">Tutte le rarità</option>' + [...new Set(list0.map((c) => c.rarity).filter(Boolean))].sort().map((r) => `<option>${esc(r)}</option>`).join("");
+  rar.value = rvPrev;
+  const pills = $("#setpills"), head = $("#check-head");
+  if (curSet === "home") {
+    head.innerHTML = "";
+    pills.innerHTML = state.sets.map((s) => {
+      const miss = s.cards.filter((c) => wanted.has(c.id)).length;
+      return `<span class="pill ${filterSet === s.id ? "on" : ""}" data-set="${s.id}">${esc(s.name)} · ${miss}/${s.cards.length} mancanti</span>`;
+    }).join("") + `<span class="pill">Mancanti <b>${wanted.size}</b>/${cards.length}</span>`;
+    pills.querySelectorAll("[data-set]").forEach((p) => p.onclick = () => { filterSet = filterSet === p.dataset.set ? "" : p.dataset.set; renderChecklist(); });
+  } else {
+    const e = extra[curSet];
+    pills.innerHTML = `<span class="pill">Mancanti <b>${e.wanted.size}</b>/${e.cards.length || e.meta.total || "?"}</span>` + (e.meta.printed_total ? `<span class="pill">numerazione /${e.meta.printed_total}</span>` : "");
+    head.innerHTML = `<div class="set" style="border:0;padding-top:0"><label>Ricerca sui marketplace<small>${e.active ? "attiva: il bot cerca le mancanti di questa collezione a ogni giro" : "spenta: la checklist resta, il bot non la cerca"}</small></label>
+        <button class="sw ${e.active ? "on" : ""}" id="coll-sw"></button></div>` +
+      (e.active ? "" : '<div class="warn">⚠️ Attivare altre collezioni aggiunge ricerche e notifiche a ogni giro. Per ora conviene tenere accesa solo la 30th.</div>') +
+      (!e.loaded ? '<p class="hint">Carico le carte…</p>' : "") +
+      (e.loaded && e.cards.length && !e.wanted.size ? `<div class="card-row"><span class="hint" style="flex:1">Nuova collezione: tocca le carte che ti mancano, oppure</span><button class="btn sec" id="coll-all">Mi mancano tutte</button></div>` : "");
+    const allBtn = $("#coll-all");
+    if (allBtn) allBtn.onclick = async () => { if (await sendCmd(`/collezione ${curSet} tutte`)) { e.cards.forEach((c) => e.wanted.add(c.number)); toast("Segnate tutte mancanti"); renderChecklist(); renderCollections(); } };
+    $("#coll-sw").onclick = async () => {
+      const on = !e.active;
+      if (on && !confirm(`Attivare la ricerca per ${e.meta.name}? Il bot cercherà anche le sue carte mancanti a ogni giro.`)) return;
+      if (await sendCmd(`/collezione ${curSet} ${on ? "attiva" : "disattiva"}`)) { e.active = on; toast(on ? "Ricerca attivata" : "Ricerca spenta"); renderChecklist(); renderCollections(); renderHome(); }
+    };
+  }
   const q = $("#q").value.trim().toLowerCase(), rv = rar.value;
-  const list = cards.filter((c) => (!filterSet || c.set === filterSet) && (!rv || c.rarity === rv) &&
-    (!q || c.name.toLowerCase().includes(q) || c.number.toLowerCase().includes(q) || c.code.includes(q)));
+  const list = list0.filter((c) => (curSet !== "home" || !filterSet || c.set === filterSet) && (!rv || c.rarity === rv) &&
+    (!q || c.name.toLowerCase().includes(q) || c.number.toLowerCase().includes(q) || (c.code || "").includes(q)));
   $("#grid").innerHTML = list.map((c) => `
-    <div class="c ${wanted.has(c.id) ? "miss" : ""} ${pending.has(c.id) ? "pending" : ""}" data-id="${c.id}">
-      ${wanted.has(c.id) ? '<span class="tag">MANCA</span>' : ""}
+    <div class="c ${isMissing(c) ? "miss" : ""} ${pending.has(c.id) ? "pending" : ""}" data-id="${c.id}">
+      ${isMissing(c) ? '<span class="tag">MANCA</span>' : ""}
       <img loading="lazy" src="${esc(c.image)}" alt="">
-      <div class="n">${c.printed ? "#" + esc(c.number) + "/" + c.printed : esc(c.code) + " · #" + esc(c.number)}</div>
+      <div class="n">${c.printed ? "#" + esc(c.number) + "/" + c.printed : (curSet === "home" ? esc(c.code) + " · " : "") + "#" + esc(c.number)}</div>
       <div class="nm">${esc(c.name)}</div>
-    </div>`).join("");
+    </div>`).join("") || (curSet !== "home" && !extra[curSet].loaded ? "" : '<p class="hint">Nessuna carta.</p>');
   $("#grid").querySelectorAll(".c").forEach((el) => el.onclick = () => toggle(el.dataset.id));
 }
 async function toggle(id) {
-  const c = byId[id]; const willWant = !wanted.has(id);
-  pending.add(id); renderChecklist();
-  const ok = await sendCmd((willWant ? "/aggiungi " : "/rimuovi ") + c.code);
-  pending.delete(id);
-  if (ok) { willWant ? wanted.add(id) : wanted.delete(id); toast((willWant ? "Segnata mancante: " : "Segnata presa: ") + c.name); }
-  renderChecklist();
+  if (curSet === "home") {
+    const c = byId[id]; const willWant = !wanted.has(id);
+    pending.add(id); renderChecklist();
+    const ok = await sendCmd((willWant ? "/aggiungi " : "/rimuovi ") + c.code);
+    pending.delete(id);
+    if (ok) { willWant ? wanted.add(id) : wanted.delete(id); toast((willWant ? "Segnata mancante: " : "Segnata presa: ") + c.name); }
+  } else {
+    const e = extra[curSet]; const c = e.cards.find((k) => k.id === id); if (!c) return;
+    const willWant = !e.wanted.has(c.number);
+    pending.add(id); renderChecklist();
+    const ok = await sendCmd(`/collezione ${curSet} ${willWant ? "manca" : "ho"} ${c.number}`);
+    pending.delete(id);
+    if (ok) { willWant ? e.wanted.add(c.number) : e.wanted.delete(c.number); toast((willWant ? "Segnata mancante: " : "Segnata presa: ") + c.name); }
+  }
+  renderChecklist(); renderHome();
 }
 $("#q").oninput = renderChecklist; $("#rar").onchange = renderChecklist;
 
@@ -226,7 +360,11 @@ function renderFound() {
   $("#folders").querySelectorAll(".lst").forEach((el) => el.onclick = () => openLink(el.dataset.url));
 }
 $("#qf").oninput = renderFound;
-function openFolder(id) { showTab("found"); $("#qf").value = ""; renderFound(); const f = $(`.folder[data-key="${id}"]`); if (f) { f.querySelector(".bd").classList.remove("hidden"); f.scrollIntoView({ behavior: "smooth" }); } }
+function openFolder(id) { showTab("found"); setSeg("ann"); $("#qf").value = ""; renderFound(); const f = $(`.folder[data-key="${id}"]`); if (f) { f.querySelector(".bd").classList.remove("hidden"); f.scrollIntoView({ behavior: "smooth" }); } }
+
+
+function setSeg(name) { document.querySelectorAll(".seg button").forEach((b) => b.classList.toggle("on", b.dataset.seg === name)); $("#seg-ann").classList.toggle("hidden", name !== "ann"); $("#seg-prz").classList.toggle("hidden", name !== "prz"); }
+document.querySelectorAll(".seg button").forEach((b) => b.onclick = () => setSeg(b.dataset.seg));
 
 /* ---------- Inseguimento ---------- */
 function renderChase() {
@@ -262,11 +400,12 @@ $("#chase-go").onclick = async () => {
 };
 $("#chase-card").onkeydown = (e) => { if (e.key === "Enter") $("#chase-go").click(); };
 
+
 /* ---------- Prezzi / progresso ---------- */
 function renderPrices() {
   const c = state.completion, p = state.prices;
   $("#progress").innerHTML = `
-    <h2>Progresso set</h2>
+    <h2>Progresso 30th Celebration</h2>
     <div class="bar"><i style="width:${c.percent.toFixed(0)}%"></i></div>
     <div class="kpi">
       <div><b>${c.owned}/${c.total}</b><span>carte possedute (${c.percent.toFixed(0)}%)</span></div>
@@ -283,6 +422,7 @@ function renderPrices() {
     || '<tr><td colspan="5" class="hint">Nessun prezzo ancora.</td></tr>';
   $("#ptable tbody").querySelectorAll("tr[data-id]").forEach((tr) => tr.onclick = () => openFolder(tr.dataset.id));
 }
+
 
 /* ---------- Impostazioni ---------- */
 function renderSettings() {
@@ -320,14 +460,21 @@ function renderSettings() {
   document.querySelectorAll("[data-cmd].btn").forEach((b) => b.onclick = async () => { if (await sendCmd(b.dataset.cmd)) toast("Inviato " + b.dataset.cmd + ": guarda la chat"); });
 }
 
-/* ---------- tabs ---------- */
-function showTab(name) {
-  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
-  ["check", "found", "chase", "prices", "settings"].forEach((t) => $("#tab-" + t).classList.toggle("hidden", t !== name));
+
+/* ---------- navigazione ---------- */
+const TITLES = { home: "Pokébot", coll: "Collezioni", chase: "Inseguite", found: "Trovati", settings: "Impostazioni" };
+function showTab(name, push = true) {
+  const cur = document.querySelector("main > section:not(.hidden)");
+  if (push && cur) stack.push(cur.id.replace("tab-", ""));
+  ["home", "coll", "check", "chase", "found", "settings"].forEach((t) => $("#tab-" + t).classList.toggle("hidden", t !== name));
+  $("#ttl").textContent = name === "check" ? (curSet === "home" ? "30th Celebration" : ((extra[curSet] || {}).meta || {}).name || curSet) : TITLES[name];
+  $("#back").classList.toggle("hidden", name === "home");
+  if (name === "check") renderChecklist();
   window.scrollTo(0, 0);
 }
-document.querySelectorAll("nav button").forEach((b) => b.onclick = () => showTab(b.dataset.tab));
-load();
+$("#back").onclick = () => { let prev = stack.pop() || "home"; if (prev === "check") prev = "coll"; showTab(prev, false); if (prev === "home") stack.length = 0; };
+if (tg && tg.BackButton) { tg.BackButton.onClick(() => $("#back").click()); new MutationObserver(() => $("#back").classList.contains("hidden") ? tg.BackButton.hide() : tg.BackButton.show()).observe($("#back"), { attributes: true }); }
+load().then(loadCatalog).then(renderCollections);
 setInterval(load, 90000);
 </script>
 </body>

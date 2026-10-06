@@ -53,6 +53,8 @@ GitHub disattiva i workflow pianificati dopo 60 giorni senza attività sul repos
 
 ### Mini App dentro Telegram
 
+La home "Pokébot" ha quattro sezioni: **Collezioni** (la 30th Celebration più tutte le altre collezioni del catalogo pubblico, ognuna con la sua checklist: carte possedute accese, mancanti al buio), **Inseguite**, **Trovati** (annunci e prezzi) e **Impostazioni**. Le altre collezioni si possono spuntare liberamente, ma il bot le cerca solo se le attivi dalla loro pagina (interruttore "Ricerca sui marketplace"): per non essere sommersi conviene tenere accesa solo la 30th.
+
 Con il ponte attivo, accanto alla chat compare il pulsante **App**: apre una pagina dentro Telegram con la checklist
 grafica (tocchi una carta per segnarla mancante o presa), le cartelle degli annunci trovati con foto e prezzi divisi
 per marketplace, i prezzi per carta con progresso e stima di spesa, e le impostazioni con interruttori.
