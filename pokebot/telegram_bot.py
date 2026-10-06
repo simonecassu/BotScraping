@@ -53,13 +53,14 @@ HELP = """<b>Comandi</b>
 /intervallo 20 – ogni quanti minuti fare la ricerca
 /max 5 – per ogni carta, quanti annunci (i più economici) ricevere a ogni giro
 /cerca – ricerca immediata · /cerca 145 – una carta: tutto ciò che è in vendita adesso, dal più economico
-/insegui 151 – per 6 ore cerca la 151 ogni 5 minuti e ti avvisa appena spunta un annuncio nuovo · /insegui – quali sono attivi · /insegui stop
+/insegui 151 – per 6 ore cerca la 151 ogni 5 minuti e ti avvisa appena spunta un annuncio nuovo
+/insegui 151 2h · /insegui 151 2h ogni 10m · /insegui 131 151 – durata, frequenza, più carte · /insegui – attivi · /insegui stop
 /resetvisti – rinotifica anche gli annunci già visti
 Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
-MENU_VERSION = 9
+MENU_VERSION = 10
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -76,7 +77,7 @@ MENU_COMMANDS = [
     ("esporta", "File Excel con checklist, storico annunci e prezzi"),
     ("immagini", "Immagine della carta nei messaggi: /immagini on | off"),
     ("cerca", "Cerca subito tutto, oppure una carta mirata: /cerca 145"),
-    ("insegui", "Per 6 ore cerca una carta ogni 5 minuti: /insegui 151"),
+    ("insegui", "Cerca una carta ogni 5 minuti per 6 ore: /insegui 151 (o /insegui 151 2h ogni 10m)"),
     ("intervallo", "Ogni quanti minuti cercare: /intervallo 20"),
     ("max", "Quanti annunci (i piu' economici) per carta in ogni giro: /max 5"),
     ("soglia", "Percentuale minima di carte mancanti nei lotti: /soglia 50"),
@@ -414,18 +415,20 @@ class CommandHandler:
             if unknown:
                 msg += "\n❓ Non capiti: " + html.escape(" ".join(unknown))
             return Reply(msg)
-        cards, unknown = self.resolve(a)
+        card_args, duration, every = watch.parse_watch_args(a)
+        cards, unknown = self.resolve(card_args)
         if not cards:
-            return Reply("Carta non riconosciuta. Es. <code>/insegui 151</code> oppure <code>/insegui c4</code>.")
+            return Reply("Carta non riconosciuta. Es. <code>/insegui 151</code>, <code>/insegui c4 2h</code>, <code>/insegui 151 2h ogni 10m</code>.")
         active = watch.list_watches(self.db)
         room = watch.MAX_WATCHES - len({cid for cid in active if cid not in {c.id for c in cards}})
         cards = cards[:max(0, room)]
         if not cards:
             return Reply(f"Al massimo {watch.MAX_WATCHES} inseguimenti insieme: ferma qualcosa con /insegui stop.")
         for c in cards:
-            w = watch.add_watch(self.db, c.id)
+            w = watch.add_watch(self.db, c.id, duration, every)
         names = ", ".join(html.escape(c.label) for c in cards)
-        lines = [f"🏃 Inseguo <b>{names}</b>: ogni 5 minuti per 6 ore (fino alle {watch.fmt_time(w['until'])}).",
+        lines = [f"🏃 Inseguo <b>{names}</b>: ogni {watch.fmt_duration(every)} per {watch.fmt_duration(duration)} "
+                 f"(fino alle {watch.fmt_time(w['until'])}).",
                  "Primo controllo tra pochi secondi, poi ti avviso solo quando spunta un annuncio nuovo. Alla fine, il riepilogo."]
         if unknown:
             lines.append("❓ Non capiti: " + html.escape(" ".join(unknown)))

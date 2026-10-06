@@ -44,7 +44,7 @@ Il bot si sveglia ogni 5 minuti sui server di GitHub (ricerca completa ogni 20 m
 | `/esporta` | file Excel con checklist, storico annunci e prezzi |
 | `/immagini on` · `off` | immagine della carta nei messaggi raggruppati |
 | `/cerca` · `/cerca 145` · `/resetvisti` | ricerca immediata · ricerca mirata di una carta (tutto ciò che è in vendita ora, dal più economico) · rinotifica gli annunci già visti |
-| `/insegui 151` · `/insegui` · `/insegui stop` | per 6 ore cerca quella carta a ogni sveglia del bot (5 minuti) e avvisa solo sugli annunci nuovi, poi manda il riepilogo · elenco degli attivi · ferma tutti (o `/insegui stop 151`) |
+| `/insegui 151` · `/insegui 151 2h ogni 10m` · `/insegui` · `/insegui stop` | per 6 ore cerca quella carta a ogni sveglia del bot (5 minuti) e avvisa solo sugli annunci nuovi, poi manda il riepilogo; durata (max 48h) e frequenza (min 5 min) a scelta, più carte insieme · elenco degli attivi · ferma tutti (o `/insegui stop 151`) |
 
 Lo stato (carte mancanti, annunci già visti) è salvato nel branch `bot-state`.
 Solo la chat che ha scritto `/start` per prima può comandare il bot. Aggiungendo il secret `TELEGRAM_CHAT_ID`

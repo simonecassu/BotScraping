@@ -1,8 +1,11 @@
-"""Inseguimenti: `/insegui 151` cerca quella carta a ogni sveglia del bot (5 minuti) per 6 ore, avvisando sui soli annunci nuovi."""
+"""Inseguimenti: `/insegui 151` cerca quella carta a ogni sveglia del bot (5 minuti) per 6 ore, avvisando sui soli annunci nuovi.
+
+Varianti: `/insegui 151 2h` (durata), `/insegui 151 2h ogni 10m` (frequenza), più carte insieme."""
 from __future__ import annotations
 
 import html
 import logging
+import re
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -13,9 +16,53 @@ from .db import Database
 
 log = logging.getLogger(__name__)
 
-DURATION_S = 6 * 3600  # un inseguimento dura 6 ore
-EVERY_S = 5 * 60  # controllo a ogni sveglia del bot
+DURATION_S = 6 * 3600  # durata di default
+MAX_DURATION_S = 48 * 3600
+EVERY_S = 5 * 60  # frequenza di default e minima (il bot si sveglia ogni 5 minuti)
 MAX_WATCHES = 10
+
+_DURATION_RE = re.compile(r"^(\d+(?:[.,]\d+)?)\s*(m|min|minuti|h|ore|ora|g|gg|giorni|giorno|d)$", re.I)
+
+
+def parse_duration(token: str) -> int | None:
+    """'6h' → 21600, '30m' → 1800, '2g' → 172800. None se non è una durata."""
+    m = _DURATION_RE.match(token.strip().lower())
+    if not m:
+        return None
+    n = float(m.group(1).replace(",", "."))
+    unit = m.group(2)
+    if unit.startswith("m"):
+        return int(n * 60)
+    if unit.startswith(("h", "o")):
+        return int(n * 3600)
+    return int(n * 86400)
+
+
+def parse_watch_args(args: str) -> tuple[str, int, int]:
+    """Separa carte, durata e frequenza: '151 2h ogni 10m' → ('151', 7200, 600). Default 6 ore ogni 5 minuti."""
+    tokens = args.replace(",", " ").split()
+    cards: list[str] = []
+    duration = DURATION_S
+    every = EVERY_S
+    i = 0
+    while i < len(tokens):
+        t = tokens[i].lower()
+        if t == "ogni" and i + 1 < len(tokens):
+            nxt = tokens[i + 1]
+            d = parse_duration(nxt) or (int(nxt) * 60 if nxt.isdigit() else None)
+            if d:
+                every = d
+                i += 2
+                continue
+        d = parse_duration(t)
+        if d is not None:
+            duration = d
+        else:
+            cards.append(tokens[i])
+        i += 1
+    duration = max(EVERY_S, min(MAX_DURATION_S, duration))
+    every = max(EVERY_S, min(duration, every))
+    return " ".join(cards), duration, every
 
 def fmt_duration(seconds: int) -> str:
     seconds = int(seconds)
@@ -64,14 +111,15 @@ def clear_watches(db: Database) -> int:
 def describe(index: CardIndex, db: Database) -> str:
     watches = list_watches(db)
     if not watches:
-        return "Nessun inseguimento attivo. Es. <code>/insegui 151</code>: per 6 ore cerco la 151 ogni 5 minuti."
+        return ("Nessun inseguimento attivo. Es. <code>/insegui 151</code>: per 6 ore cerco la 151 ogni 5 minuti. "
+                "Varianti: <code>/insegui 151 2h</code>, <code>/insegui 151 2h ogni 10m</code>.")
     lines = [f"🏃 <b>Inseguimenti attivi</b> ({len(watches)})"]
     now = time.time()
     for cid, w in sorted(watches.items(), key=lambda kv: kv[1]["until"]):
         card = index.by_id.get(cid)
         label = html.escape(card.label if card else cid)
         left = max(0, int(w["until"] - now))
-        lines.append(f"• {label} · ancora {fmt_duration(left) if left >= 60 else 'pochi secondi'} "
+        lines.append(f"• {label} · ogni {fmt_duration(int(w['every']))} · ancora {fmt_duration(left) if left >= 60 else 'pochi secondi'} "
                      f"(fino alle {fmt_time(w['until'])}) · controlli: {w.get('checks', 0)} · nuovi: {w.get('found', 0)}")
     lines.append("\n/insegui stop 151 per fermarne uno · /insegui stop per fermarli tutti")
     return "\n".join(lines)

@@ -18,14 +18,21 @@ def test_insegui_command(index):
     h = CommandHandler(index, db)
     assert "Nessun inseguimento" in h.handle("/insegui").text
     r = h.handle("/insegui 151")
-    assert "Inseguo" in r.text and "ogni 5 minuti per 6 ore" in r.text and r.run_search is False
+    assert "Inseguo" in r.text and "ogni 5 min per 6 ore" in r.text and r.run_search is False
     w = watch.list_watches(db)
     assert set(w) == {"me55-151"} and w["me55-151"]["every"] == 300
     assert 6 * 3600 - 5 <= w["me55-151"]["until"] - w["me55-151"]["started"] <= 6 * 3600
     assert "/cerca 151" not in r.text
     assert "in vendita adesso" in h.handle("/cerca 151").text or "Carta" in h.handle("/cerca 151").text  # /cerca resta la ricerca mirata
-    h.handle("/insegui c4")
+    r = h.handle("/insegui c4 2h ogni 10m")
+    assert "ogni 10 min per 2 ore" in r.text
+    w = watch.list_watches(db)[index.by_code["c4"].id]
+    assert w["every"] == 600 and 7200 - 5 <= w["until"] - w["started"] <= 7200
     assert "Inseguimenti attivi</b> (2)" in h.handle("/insegui").text
+    assert watch.parse_watch_args("151 2h ogni 10m") == ("151", 7200, 600)
+    assert watch.parse_watch_args("c4 3g") == ("c4", 48 * 3600, 300)  # tetto 48 ore
+    assert watch.parse_watch_args("c4 10m ogni 1h") == ("c4", 600, 600)  # la frequenza non supera la durata
+    assert watch.parse_watch_args("131 151") == ("131 151", 6 * 3600, 300)
     assert "inseguimenti 2" in h.handle("/stato").text
     assert "Fermato" in h.handle("/insegui stop c4").text and set(watch.list_watches(db)) == {"me55-151"}
     assert "Fermati 1" in h.handle("/insegui stop").text and not watch.list_watches(db)
