@@ -81,25 +81,6 @@ L'indirizzo del worker mostra lo stato del ponte; aggiungendo `/reset` lo disatt
 a ogni giro). Con il ponte attivo, se mandi più comandi in pochi secondi mettili in **un solo messaggio, uno per riga**.
 Il file del worker è `deploy/cloudflare-worker.js`, la sua configurazione `deploy/wrangler.toml`.
 
-### In due (o più): inviti
-
-Il primo che scrive `/start` al bot ne diventa il proprietario. Per aggiungere un'altra persona (la tua ragazza, un amico) il proprietario scrive `/invita`: il bot risponde con un codice monouso valido 48 ore, da far incollare all'altra persona come `/start CODICE`. Da quel momento riceve le stesse notifiche, gestisce la stessa checklist e può aprire la Mini App. `/utenti` mostra chi è collegato, `/espelli ID` scollega qualcuno. Estranei senza codice vengono ignorati.
-
-### Versione completa e versione lite
-
-Lo stesso codice gira in due modalità, scelte con la variabile `POKEBOT_TIER` (Settings → Secrets and variables → Actions → **Variables**):
-
-| | completa (default) | lite (`POKEBOT_TIER=lite`) |
-|---|---|---|
-| Ricerca | ogni 20 min (`/intervallo`) | ogni 60 min |
-| Annunci per carta | 5 (`/max`) | 3 |
-| Foto venditori / collage | sì | no |
-| Avvisi affare 🔥, ore silenziose | sì | no |
-| Excel (`/esporta`), Mini App, inviti | sì | no |
-| Checklist, storico, prezzi, progresso, `/cerca` | sì | sì |
-
-Per offrire la lite gratis a chiunque basta che la persona faccia un fork del repository, imposti i tre segreti (`TELEGRAM_BOT_TOKEN` del suo bot, `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`) e la variabile `POKEBOT_TIER=lite`, poi scriva `/start` al suo bot: gira sui suoi minuti gratuiti di GitHub Actions, con le sue chiavi, senza costi per nessuno. Il ponte Cloudflare è facoltativo anche per la lite.
-
 ## Avvio rapido su PC
 
 ```bash

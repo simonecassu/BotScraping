@@ -22,10 +22,6 @@ EBAY_CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET", "").strip()
 
 TIMEZONE = os.getenv("POKEBOT_TIMEZONE", "Europe/Rome")
 
-# Versione: "full" (tutto) oppure "lite" (ricerca più rada, meno annunci, senza extra). Vedi README.
-TIER = os.getenv("POKEBOT_TIER", "full").strip().lower() or "full"
-LITE = TIER == "lite"
-
 WEB_HOST = os.getenv("POKEBOT_HOST", "0.0.0.0")
 WEB_PORT = int(os.getenv("POKEBOT_PORT", "8080"))
 WEB_SECRET = os.getenv("POKEBOT_SECRET", "pokebot-dev-secret")
@@ -74,19 +70,3 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "notify_unverifiable_lots": False,
     "only_italy": True,
 }
-
-# Preset "lite": stessi comandi base, ma ricerca ogni ora, 3 annunci per carta, niente foto/collage né avvisi affare.
-LITE_SETTINGS: dict[str, object] = {
-    "interval_minutes": 60,
-    "max_per_card": 3,
-    "images": False,
-    "deal_pct": 0,
-    "max_messages_per_run": 5,
-    "per_card_batch": 8,
-}
-if LITE:
-    DEFAULT_SETTINGS.update(LITE_SETTINGS)
-
-# Comandi riservati alla versione completa.
-LITE_LOCKED_COMMANDS = {"/esporta", "/export", "/excel", "/affari", "/affare", "/immagini", "/foto", "/max", "/massimo",
-                        "/invita", "/utenti", "/espelli", "/notte", "/silenzio"}

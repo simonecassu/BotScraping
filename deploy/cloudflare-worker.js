@@ -52,24 +52,16 @@ async function verifyInitData(env, initData) {
   }
 }
 
-async function readState(env) {
+async function ownerChatId(env) {
+  if (env.TELEGRAM_CHAT_ID) return String(env.TELEGRAM_CHAT_ID);
   try {
     const r = await fetch(STATE_URL(env) + "?t=" + Date.now(), { cf: { cacheTtl: 0 } });
-    if (r.ok) return await r.json();
+    if (r.ok) {
+      const st = await r.json();
+      if (st.owner_chat_id) return String(st.owner_chat_id);
+    }
   } catch {}
-  return null;
-}
-
-// Chat autorizzate: proprietario (secret TELEGRAM_CHAT_ID o primo /start) più le persone invitate con /invita.
-async function allowedChatIds(env) {
-  const st = await readState(env);
-  const ids = new Set();
-  if (env.TELEGRAM_CHAT_ID) ids.add(String(env.TELEGRAM_CHAT_ID));
-  if (st) {
-    if (st.owner_chat_id) ids.add(String(st.owner_chat_id));
-    for (const c of st.chat_ids || []) ids.add(String(c));
-  }
-  return { ids, lite: !!(st && st.tier === "lite") };
+  return "";
 }
 
 async function telegram(env, method, body) {
@@ -111,10 +103,6 @@ export default {
 
     // Mini App: pagina statica
     if (url.pathname === "/app" || url.pathname.startsWith("/app/")) {
-      if (url.pathname === "/app" || url.pathname === "/app/") {
-        const { lite } = await allowedChatIds(env);
-        if (lite) return page("🔒 Versione lite", "<p>La Mini App fa parte della versione completa. Usa i comandi in chat (/aiuto).</p>");
-      }
       // la radice degli asset serve index.html senza redirect (un /index.html esplicito verrebbe rediretto a "/")
       const path = url.pathname === "/app" || url.pathname === "/app/" ? "/" : url.pathname.slice(4);
       const res = await env.ASSETS.fetch(new Request(new URL(path, url.origin), { headers: request.headers }));
@@ -138,11 +126,11 @@ export default {
       }
       const user = await verifyInitData(env, body.initData);
       if (!user) return Response.json({ ok: false, error: "non autenticato" }, { status: 401 });
-      const { ids } = await allowedChatIds(env);
-      if (!ids.has(String(user.id))) return Response.json({ ok: false, error: "non sei tra le persone collegate al bot (chiedi un /invita)" }, { status: 403 });
+      const owner = await ownerChatId(env);
+      if (!owner || String(user.id) !== owner) return Response.json({ ok: false, error: "non sei il proprietario del bot" }, { status: 403 });
       const text = String(body.text || "").trim().slice(0, 4000);
       if (!text.startsWith("/")) return Response.json({ ok: false, error: "comando non valido" }, { status: 400 });
-      const gh = await dispatch(env, { event_type: "telegram", client_payload: { chat_id: String(user.id), text } });
+      const gh = await dispatch(env, { event_type: "telegram", client_payload: { chat_id: owner, text } });
       return Response.json({ ok: gh.status === 204, status: gh.status });
     }
 
