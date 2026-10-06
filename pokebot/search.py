@@ -45,7 +45,9 @@ def build_queries(index: CardIndex, wanted_ids: set[str], settings: dict, db: Da
             card = index.by_id.get(cid)
             if not card:
                 continue
-            if card.printed_total:
+            if card.set_id not in ("me55", "me55c"):
+                queries.append(f"pokemon {card.name} {card.number}/{card.printed_total or ''} {card.set_name}".replace("/ ", " "))
+            elif card.printed_total:
                 queries.append(f"{card.name} {card.number}/{card.printed_total}")
             else:
                 queries.append(f"{card.name} classic collection pokemon 30th")
@@ -64,6 +66,12 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
     report = RunReport(started_at=time.time())
     settings = db.get_settings()
     wanted = db.wanted_ids()
+    # altre collezioni attivate con /collezione <id> attiva: si aggiungono all'indice e alle carte cercate
+    from . import collections as coll
+    extra_sets, extra_ids = coll.active_search_sets(db)
+    if extra_sets:
+        index = CardIndex(list(index.sets) + extra_sets)
+        wanted = wanted | extra_ids
     report.wanted_count = len(wanted)
     run_id = db.start_run()
     if not wanted:

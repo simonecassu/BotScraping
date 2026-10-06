@@ -56,6 +56,9 @@ class CardSet:
     cards: list[Card] = field(default_factory=list)
     # richiede che il testo dell'annuncio contenga una di queste parole per considerare i nomi del set
     context_keywords: list[str] = field(default_factory=list)
+    series: str = ""
+    logo: str = ""
+    symbol: str = ""
 
 
 class CardIndex:
@@ -100,37 +103,44 @@ class CardIndex:
         return next((s for s in self.sets if s.id == set_id), None)
 
 
+def set_from_raw(raw: dict) -> CardSet:
+    """Costruisce un set dal nostro JSON (data/sets/*.json o quello scaricato dal catalogo pubblico)."""
+    cs = CardSet(
+        id=raw["id"],
+        name=raw["name"],
+        name_it=raw.get("name_it", raw["name"]),
+        printed_total=raw.get("printed_total"),
+        total=raw.get("total", len(raw["cards"])),
+        release=raw.get("release", ""),
+        context_keywords=raw.get("context_keywords", []),
+        series=raw.get("series", ""),
+        logo=raw.get("logo", ""),
+        symbol=raw.get("symbol", ""),
+    )
+    for c in raw["cards"]:
+        cs.cards.append(
+            Card(
+                id=c["id"],
+                set_id=cs.id,
+                set_name=cs.name,
+                number=str(c["number"]),
+                name=c["name"],
+                rarity=c.get("rarity", ""),
+                supertype=c.get("supertype", ""),
+                image=c.get("image", ""),
+                image_large=c.get("image_large", ""),
+                printed_total=cs.printed_total,
+            )
+        )
+    return cs
+
+
 def load_sets(sets_dir: Path | None = None, aliases_path: Path | None = None) -> CardIndex:
     sets_dir = sets_dir or config.SETS_DIR
     aliases_path = aliases_path or (config.DATA_DIR / "aliases.json")
     sets: list[CardSet] = []
     for path in sorted(sets_dir.glob("*.json")):
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        cs = CardSet(
-            id=raw["id"],
-            name=raw["name"],
-            name_it=raw.get("name_it", raw["name"]),
-            printed_total=raw.get("printed_total"),
-            total=raw.get("total", len(raw["cards"])),
-            release=raw.get("release", ""),
-            context_keywords=raw.get("context_keywords", []),
-        )
-        for c in raw["cards"]:
-            cs.cards.append(
-                Card(
-                    id=c["id"],
-                    set_id=cs.id,
-                    set_name=cs.name,
-                    number=str(c["number"]),
-                    name=c["name"],
-                    rarity=c.get("rarity", ""),
-                    supertype=c.get("supertype", ""),
-                    image=c.get("image", ""),
-                    image_large=c.get("image_large", ""),
-                    printed_total=cs.printed_total,
-                )
-            )
-        sets.append(cs)
+        sets.append(set_from_raw(json.loads(path.read_text(encoding="utf-8"))))
     aliases: dict[str, list[str]] = {}
     if aliases_path.exists():
         aliases = json.loads(aliases_path.read_text(encoding="utf-8"))

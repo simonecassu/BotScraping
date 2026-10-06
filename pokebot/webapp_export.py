@@ -6,6 +6,7 @@ import time
 
 from . import stats as pstats
 from . import watch
+from . import collections as coll
 from .cards import CardIndex
 from .db import Database
 from .scrapers.base import parse_price
@@ -65,6 +66,7 @@ def build_state(index: CardIndex, db: Database, max_found: int = 1000) -> dict:
                      "every": w.get("every"), "checks": w.get("checks", 0), "found": w.get("found", 0)}
                     for cid, w in watch.list_watches(db).items()],
         "watch_found": list(reversed(watch.found_log(db))),
+        "collections": coll.export(db),
     }
 
 

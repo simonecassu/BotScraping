@@ -55,12 +55,13 @@ HELP = """<b>Comandi</b>
 /cerca – ricerca immediata · /cerca 145 – una carta: tutto ciò che è in vendita adesso, dal più economico
 /insegui 151 – per 6 ore cerca la 151 ogni 5 minuti e ti avvisa appena spunta un annuncio nuovo
 /insegui 151 2h · /insegui 151 2h ogni 10m · /insegui 131 151 – durata, frequenza, più carte · /insegui – attivi · /insegui stop
+/collezione – altre collezioni (dalla Mini App: Collezioni) · /collezione sv8 – scarica · /collezione sv8 manca 4 7 · /collezione sv8 attiva – ⚠️ la cerca anche
 /resetvisti – rinotifica anche gli annunci già visti
 Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
-MENU_VERSION = 10
+MENU_VERSION = 11
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -78,6 +79,7 @@ MENU_COMMANDS = [
     ("immagini", "Immagine della carta nei messaggi: /immagini on | off"),
     ("cerca", "Cerca subito tutto, oppure una carta mirata: /cerca 145"),
     ("insegui", "Cerca una carta ogni 5 minuti per 6 ore: /insegui 151 (o /insegui 151 2h ogni 10m)"),
+    ("collezione", "Altre collezioni: /collezione sv8, /collezione sv8 manca 4 7, /collezione sv8 attiva"),
     ("intervallo", "Ogni quanti minuti cercare: /intervallo 20"),
     ("max", "Quanti annunci (i piu' economici) per carta in ogni giro: /max 5"),
     ("soglia", "Percentuale minima di carte mancanti nei lotti: /soglia 50"),
@@ -261,6 +263,8 @@ class CommandHandler:
             return Reply("🔎 Ok, cerco adesso.", run_search=True)
         if cmd == "/insegui":
             return self._chase(args)
+        if cmd in ("/collezione", "/collezioni", "/set"):
+            return self._collection(args)
         if cmd == "/resetvisti":
             if args.strip().lower() != "conferma":
                 return Reply("⚠️ Questo rinotifica <b>tutti</b> gli annunci già visti (possono essere centinaia).\n"
@@ -397,6 +401,89 @@ class CommandHandler:
             lines.append("\nSenza prezzo: " + html.escape(", ".join(self.index.code_of[c.id] for c in comp.unpriced[:30]))
                          + (" …" if len(comp.unpriced) > 30 else ""))
         return Reply("\n".join(lines))
+
+    def _collection(self, args: str) -> Reply:
+        """/collezione – elenco · /collezione sv8 – scarica/info · … manca|ho N… · … attiva|disattiva · … svuota."""
+        from . import collections as coll
+        a = args.strip()
+        home = {s.id for s in self.index.sets}
+        if not a:
+            lines = ["📚 <b>Collezioni</b>"]
+            for s_ in self.index.sets:
+                lines.append(f"• <code>{s_.id}</code> {html.escape(s_.name)} · {len(s_.cards)} carte · 🔎 ricerca attiva (di casa)")
+            act = set(coll.active_ids(self.db))
+            for cs in coll.loaded_sets(self.db):
+                n = len(coll.wanted_numbers(self.db, cs.id))
+                lines.append(f"• <code>{cs.id}</code> {html.escape(cs.name)} · {len(cs.cards)} carte · mancanti {n} · "
+                             + ("🔎 ricerca attiva" if cs.id in act else "💤 ricerca spenta"))
+            lines.append("\nTutte le collezioni si sfogliano dalla Mini App (Collezioni). Comandi: <code>/collezione sv8</code>, "
+                         "<code>/collezione sv8 manca 4 7</code>, <code>/collezione sv8 ho 4</code>, <code>/collezione sv8 attiva</code>.")
+            return Reply("\n".join(lines))
+        set_id, _, rest = a.partition(" ")
+        set_id = set_id.lower().strip()
+        rest = rest.strip()
+        if set_id in home:
+            return Reply("Quella è una collezione di casa: usa i comandi normali (/mancanti, /aggiungi 131, /rimuovi 131).")
+        try:
+            cs = coll.get_set(self.db, set_id)
+        except KeyError:
+            return Reply(f"Collezione <code>{html.escape(set_id)}</code> non trovata nel catalogo. Sfogliale dalla Mini App.")
+        except Exception as exc:  # noqa: BLE001
+            return Reply(f"⚠️ Non riesco a scaricare la collezione adesso ({html.escape(str(exc)[:80])}). Riprova tra poco.")
+        if not rest:
+            n = len(coll.wanted_numbers(self.db, cs.id))
+            on = cs.id in coll.active_ids(self.db)
+            return Reply(f"📚 <b>{html.escape(cs.name)}</b> (<code>{cs.id}</code>) · {len(cs.cards)} carte"
+                         f"{' · numerazione /' + str(cs.printed_total) if cs.printed_total else ''}\nMancanti segnate: <b>{n}</b> · "
+                         + ("🔎 ricerca attiva" if on else "💤 ricerca spenta") +
+                         f"\n\n<code>/collezione {cs.id} manca 4 7</code> · <code>/collezione {cs.id} ho 4</code> · "
+                         f"<code>/collezione {cs.id} {'disattiva' if on else 'attiva'}</code>")
+        verb, _, nums = rest.partition(" ")
+        verb = verb.lower()
+        if verb in ("attiva", "on", "cerca"):
+            coll.set_active(self.db, cs.id, True)
+            n = len(coll.wanted_numbers(self.db, cs.id))
+            return Reply(f"🔎 Ricerca attiva per <b>{html.escape(cs.name)}</b> ({n} mancanti). ⚠️ Ogni collezione attiva aggiunge "
+                         "ricerche e notifiche a ogni giro: tienine poche accese. <code>/collezione "
+                         f"{cs.id} disattiva</code> per spegnerla.")
+        if verb in ("disattiva", "off", "spegni"):
+            coll.set_active(self.db, cs.id, False)
+            return Reply(f"💤 Ricerca spenta per <b>{html.escape(cs.name)}</b>: la checklist resta.")
+        if verb in ("svuota", "reset"):
+            coll.mark(self.db, cs.id, sorted(coll.wanted_numbers(self.db, cs.id)), False)
+            return Reply(f"🧹 Nessuna mancante per {html.escape(cs.name)}.")
+        if verb in ("manca", "mancano", "aggiungi", "ho", "trovata", "rimuovi", "presa", "tutte"):
+            if verb == "tutte":
+                numbers = [c.number for c in cs.cards]
+                want = True
+            else:
+                want = verb in ("manca", "mancano", "aggiungi")
+                tokens = nums.replace(",", " ").split()
+                by_num = {c.number.lower(): c for c in cs.cards}
+                numbers, bad = [], []
+                for t in tokens:
+                    if "-" in t and all(x.isdigit() for x in t.split("-", 1)):
+                        lo, hi = (int(x) for x in t.split("-", 1))
+                        numbers += [str(i) for i in range(lo, hi + 1) if str(i) in by_num]
+                    elif t.lower() in by_num:
+                        numbers.append(by_num[t.lower()].number)
+                    else:
+                        bad.append(t)
+                if not numbers:
+                    return Reply(f"Nessun numero valido per {html.escape(cs.name)}. Es. <code>/collezione {cs.id} manca 4 7 10-12</code>.")
+            coll.mark(self.db, cs.id, numbers, want)
+            n = len(coll.wanted_numbers(self.db, cs.id))
+            names = ", ".join(html.escape(next(c.name for c in cs.cards if c.number == x) + " " + x) for x in numbers[:6])
+            more = f" e altre {len(numbers) - 6}" if len(numbers) > 6 else ""
+            msg = f"{'🃏 Mancanti' if want else '✅ Prese'}: {names}{more}\n{html.escape(cs.name)}: ora {n} mancanti"
+            if not want or cs.id in coll.active_ids(self.db):
+                pass
+            else:
+                msg += " · 💤 ricerca spenta (<code>/collezione " + cs.id + " attiva</code> per cercarle)"
+            if verb != "tutte" and bad:
+                msg += "\n❓ Non capiti: " + html.escape(" ".join(bad))
+            return Reply(msg)
+        return Reply(f"Non ho capito. Usa <code>/collezione {cs.id} manca 4 7</code>, <code>ho 4</code>, <code>attiva</code>, <code>disattiva</code>.")
 
     def _chase(self, args: str) -> Reply:
         """/insegui 151 – per 6 ore cerca quella carta ogni 5 minuti; /insegui – elenco; /insegui stop [carte]."""
