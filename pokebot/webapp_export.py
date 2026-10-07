@@ -12,7 +12,7 @@ from .db import Database
 from .scrapers.base import parse_price
 
 SETTING_KEYS = ["interval_minutes", "lot_min_ratio", "max_price", "max_per_card", "sources", "language",
-                "deal_pct", "images", "paused", "quiet_hours", "per_card_queries", "only_italy"]
+                "deal_pct", "images", "paused", "quiet_hours", "per_card_queries", "only_italy", "home_active"]
 
 
 def build_state(index: CardIndex, db: Database, max_found: int = 1000) -> dict:

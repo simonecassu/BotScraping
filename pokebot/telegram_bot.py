@@ -55,13 +55,13 @@ HELP = """<b>Comandi</b>
 /cerca – ricerca immediata · /cerca 145 – una carta: tutto ciò che è in vendita adesso, dal più economico
 /insegui 151 – per 6 ore cerca la 151 ogni 5 minuti e ti avvisa appena spunta un annuncio nuovo
 /insegui 151 2h · /insegui 151 2h ogni 10m · /insegui 131 151 – durata, frequenza, più carte · /insegui – attivi · /insegui stop
-/collezione – altre collezioni (dalla Mini App: Collezioni) · /collezione sv8 – scarica · /collezione sv8 manca 4 7 · /collezione sv8 attiva – ⚠️ la cerca anche
+/collezione – altre collezioni (partono da "mi mancano tutte") · /collezione sv8 ho 4 7 – segna le possedute · /collezione sv8 attiva – ⚠️ la cerca anche · /collezione me55 disattiva – spegne la 30th
 /resetvisti – rinotifica anche gli annunci già visti
 Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
-MENU_VERSION = 11
+MENU_VERSION = 12
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -79,7 +79,7 @@ MENU_COMMANDS = [
     ("immagini", "Immagine della carta nei messaggi: /immagini on | off"),
     ("cerca", "Cerca subito tutto, oppure una carta mirata: /cerca 145"),
     ("insegui", "Cerca una carta ogni 5 minuti per 6 ore: /insegui 151 (o /insegui 151 2h ogni 10m)"),
-    ("collezione", "Altre collezioni: /collezione sv8, /collezione sv8 manca 4 7, /collezione sv8 attiva"),
+    ("collezione", "Altre collezioni: /collezione sv8 ho 4 7 (possedute), /collezione sv8 attiva"),
     ("intervallo", "Ogni quanti minuti cercare: /intervallo 20"),
     ("max", "Quanti annunci (i piu' economici) per carta in ogni giro: /max 5"),
     ("soglia", "Percentuale minima di carte mancanti nei lotti: /soglia 50"),
@@ -409,21 +409,32 @@ class CommandHandler:
         home = {s.id for s in self.index.sets}
         if not a:
             lines = ["📚 <b>Collezioni</b>"]
+            home_on = self.db.get_settings().get("home_active", True)
             for s_ in self.index.sets:
-                lines.append(f"• <code>{s_.id}</code> {html.escape(s_.name)} · {len(s_.cards)} carte · 🔎 ricerca attiva (di casa)")
+                lines.append(f"• <code>{s_.id}</code> {html.escape(s_.name)} · {len(s_.cards)} carte · "
+                             + ("🔎 ricerca attiva" if home_on else "💤 ricerca spenta"))
             act = set(coll.active_ids(self.db))
             for cs in coll.loaded_sets(self.db):
                 n = len(coll.wanted_numbers(self.db, cs.id))
                 lines.append(f"• <code>{cs.id}</code> {html.escape(cs.name)} · {len(cs.cards)} carte · mancanti {n} · "
                              + ("🔎 ricerca attiva" if cs.id in act else "💤 ricerca spenta"))
-            lines.append("\nTutte le collezioni si sfogliano dalla Mini App (Collezioni). Comandi: <code>/collezione sv8</code>, "
-                         "<code>/collezione sv8 manca 4 7</code>, <code>/collezione sv8 ho 4</code>, <code>/collezione sv8 attiva</code>.")
+            lines.append("\nPer le altre collezioni il punto di partenza è \"mi mancano tutte\": segna quelle che hai. "
+                         "Dalla Mini App (Collezioni) oppure: <code>/collezione sv8 ho 4 7</code>, <code>/collezione sv8 manca 4</code>, "
+                         "<code>/collezione sv8 attiva</code>.")
             return Reply("\n".join(lines))
         set_id, _, rest = a.partition(" ")
         set_id = set_id.lower().strip()
         rest = rest.strip()
         if set_id in home:
-            return Reply("Quella è una collezione di casa: usa i comandi normali (/mancanti, /aggiungi 131, /rimuovi 131).")
+            v = rest.split()[0].lower() if rest else ""
+            if v in ("attiva", "on", "cerca"):
+                self.db.save_settings({"home_active": True})
+                return Reply("🔎 Ricerca attiva per la 30th Celebration.")
+            if v in ("disattiva", "off", "spegni"):
+                self.db.save_settings({"home_active": False})
+                return Reply("💤 Ricerca spenta per la 30th Celebration: la checklist resta, il bot non la cerca finché non la riaccendi.")
+            return Reply("Per la 30th usa i comandi normali (/mancanti, /aggiungi 131, /rimuovi 131); "
+                         "<code>/collezione me55 disattiva</code> spegne la sua ricerca.")
         try:
             cs = coll.get_set(self.db, set_id)
         except KeyError:
@@ -449,11 +460,11 @@ class CommandHandler:
         if verb in ("disattiva", "off", "spegni"):
             coll.set_active(self.db, cs.id, False)
             return Reply(f"💤 Ricerca spenta per <b>{html.escape(cs.name)}</b>: la checklist resta.")
-        if verb in ("svuota", "reset"):
-            coll.mark(self.db, cs.id, sorted(coll.wanted_numbers(self.db, cs.id)), False)
-            return Reply(f"🧹 Nessuna mancante per {html.escape(cs.name)}.")
+        if verb in ("svuota", "reset", "lehotutte", "complete"):
+            coll.mark(self.db, cs.id, [c.number for c in cs.cards], False)
+            return Reply(f"🧹 {html.escape(cs.name)}: segnata completa, nessuna mancante.")
         if verb in ("manca", "mancano", "aggiungi", "ho", "trovata", "rimuovi", "presa", "tutte"):
-            if verb == "tutte":
+            if verb == "tutte":  # "mi mancano tutte": è già il punto di partenza, qui azzera le possedute
                 numbers = [c.number for c in cs.cards]
                 want = True
             else:

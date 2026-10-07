@@ -26,15 +26,17 @@ def test_download_mark_activate(index, monkeypatch):
     cs = coll.get_set(db, "sv8")
     assert cs.name == "Surging Sparks" and cs.printed_total == 191 and len(cs.cards) == 3 and cs.logo == "https://l/sv8.png"
     assert coll.loaded_ids(db) == ["sv8"] and coll.get_set(db, "sv8", download=False).id == "sv8"
-    coll.mark(db, "sv8", ["4", "7"], True)
+    assert coll.wanted_numbers(db, "sv8") == {"1", "4", "7"}  # punto di partenza: mi mancano tutte
+    coll.mark(db, "sv8", ["1", "7"], False)  # possedute
+    coll.mark(db, "sv8", ["7"], True)  # ripensamento: manca
+    assert coll.owned_numbers(db, "sv8") == {"1"} and coll.wanted_numbers(db, "sv8") == {"4", "7"}
     coll.mark(db, "sv8", ["7"], False)
-    assert coll.wanted_numbers(db, "sv8") == {"4"}
     assert coll.active_search_sets(db) == ([], set())  # spenta: non si cerca
     coll.set_active(db, "sv8", True)
     sets, ids = coll.active_search_sets(db)
     assert [s.id for s in sets] == ["sv8"] and ids == {"sv8-4"}
     ex = coll.export(db)[0]
-    assert ex["active"] and ex["wanted"] == ["4"] and ex["cards"][0]["name"] == "Exeggcute"
+    assert ex["active"] and ex["wanted"] == ["4"] and ex["owned"] == ["1", "7"] and ex["cards"][0]["name"] == "Exeggcute"
 
 
 def test_collection_command(index, monkeypatch):
@@ -44,13 +46,15 @@ def test_collection_command(index, monkeypatch):
     h = CommandHandler(index, db)
     assert "30th Celebration" in h.handle("/collezione").text
     assert "Surging Sparks" in h.handle("/collezione sv8").text and "ricerca spenta" in h.handle("/collezione sv8").text
-    r = h.handle("/collezione sv8 manca 4 7 99")
-    assert "Durant ex 4" in r.text and "Non capiti: 99" in r.text and "ricerca spenta" in r.text
-    assert coll.wanted_numbers(db, "sv8") == {"4", "7"}
-    assert "Prese" in h.handle("/collezione sv8 ho 7").text and coll.wanted_numbers(db, "sv8") == {"4"}
+    r = h.handle("/collezione sv8 ho 1 7 99")
+    assert "Exeggcute 1" in r.text and "Non capiti: 99" in r.text
+    assert coll.wanted_numbers(db, "sv8") == {"4"}
+    assert "Mancanti" in h.handle("/collezione sv8 manca 7").text and coll.wanted_numbers(db, "sv8") == {"4", "7"}
     assert "⚠️" in h.handle("/collezione sv8 attiva").text and coll.active_ids(db) == ["sv8"]
     assert "spenta" in h.handle("/collezione sv8 disattiva").text and coll.active_ids(db) == []
-    assert "di casa" in h.handle("/collezione me55 manca 1").text
+    assert "comandi normali" in h.handle("/collezione me55 manca 1").text
+    assert "spenta" in h.handle("/collezione me55 disattiva").text and db.get_settings()["home_active"] is False
+    assert "attiva" in h.handle("/collezione me55 attiva").text and db.get_settings()["home_active"] is True
     monkeypatch.setattr(coll, "_get_json", lambda urls: CATALOG)
     assert "non trovata" in h.handle("/collezione xyz").text
 
@@ -64,7 +68,7 @@ def test_search_includes_active_extra_sets(index, monkeypatch):
     db.save_settings({"sources": ["fake"], "generic_queries": [], "per_card_queries": True, "quiet_hours": None, "deal_pct": 0})
     db.set_wanted("me55-131", True)
     coll.get_set(db, "sv8")
-    coll.mark(db, "sv8", ["7"], True)
+    coll.mark(db, "sv8", ["1", "4"], False)  # possedute: resta mancante solo la 7
     scr = FakeScraper([Listing("fake", "p", "Pikachu ex 7/191 Surging Sparks", "https://f/1", price=20.0, price_text="20 €")])
     n = FakeNotifier()
     run_search(index, db, n, {"fake": scr})
@@ -74,3 +78,15 @@ def test_search_includes_active_extra_sets(index, monkeypatch):
     rep = run_search(index, db, n, {"fake": scr2})
     assert any("Pikachu ex 7/191 Surging Sparks" in q for q in scr2.queries) and rep.wanted_count == 2
     assert [l.key for l, _ in n.sent] == ["fake:p2"]
+
+
+def test_home_active_off_skips_30th(index, monkeypatch):
+    from pokebot.search import run_search
+    from pokebot.scrapers.base import Listing
+    from tests.test_search import FakeNotifier, FakeScraper
+    db = _db()
+    db.save_settings({"sources": ["fake"], "generic_queries": [], "per_card_queries": True, "quiet_hours": None, "home_active": False})
+    db.set_wanted("me55-131", True)
+    scr = FakeScraper([Listing("fake", "x", "Lapras 131/128 30th", "https://f/1", price=10.0, price_text="10 €")])
+    rep = run_search(index, db, FakeNotifier(), {"fake": scr})
+    assert rep.wanted_count == 0 and not scr.queries

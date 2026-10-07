@@ -65,7 +65,7 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
                scrapers: dict | None = None, dry_run: bool = False) -> RunReport:
     report = RunReport(started_at=time.time())
     settings = db.get_settings()
-    wanted = db.wanted_ids()
+    wanted = db.wanted_ids() if settings.get("home_active", True) else set()
     # altre collezioni attivate con /collezione <id> attiva: si aggiungono all'indice e alle carte cercate
     from . import collections as coll
     extra_sets, extra_ids = coll.active_search_sets(db)

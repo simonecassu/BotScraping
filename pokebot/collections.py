@@ -1,7 +1,8 @@
-"""Altre collezioni: catalogo pubblico (pokemon-tcg-data), download su richiesta, mancanti e attivazione per set.
+"""Altre collezioni: catalogo pubblico (pokemon-tcg-data), download su richiesta, possedute e attivazione per set.
 
-Le collezioni "di casa" (data/sets) restano quelle del bot. Le altre si scaricano con /collezione <id>, si spuntano
-con /collezione <id> manca|ho N..., e vengono cercate solo se attivate con /collezione <id> attiva.
+Le collezioni "di casa" (data/sets) restano quelle del bot. Per tutte le altre il punto di partenza è "mi mancano
+tutte": si segnano le carte possedute con /collezione <id> ho N..., e vengono cercate solo se attivate con
+/collezione <id> attiva. La 30th si spegne/accende con /collezione me55 disattiva|attiva (impostazione home_active).
 """
 from __future__ import annotations
 
@@ -102,17 +103,31 @@ def loaded_sets(db: Database) -> list[CardSet]:
     return out
 
 
+def owned_numbers(db: Database, set_id: str) -> set[str]:
+    """Carte possedute di una collezione extra. Il punto di partenza è "mi mancano tutte": si segnano quelle che si hanno."""
+    o = db.get_kv("extra_owned", {}) or {}
+    return {str(n) for n in o.get(set_id, [])}
+
+
 def wanted_numbers(db: Database, set_id: str) -> set[str]:
-    w = db.get_kv("extra_wanted", {}) or {}
-    return {str(n) for n in w.get(set_id, [])}
+    """Mancanti = tutte le carte della collezione meno quelle possedute (serve il set scaricato)."""
+    cs = get_set(db, set_id, download=False)
+    if not cs:
+        return set()
+    return {c.number for c in cs.cards} - owned_numbers(db, set_id)
+
+
+def _sorted(nums) -> list[str]:
+    return sorted(nums, key=lambda n: (0 if n.isdigit() else 1, int(n) if n.isdigit() else 0, n))
 
 
 def mark(db: Database, set_id: str, numbers: list[str], wanted: bool) -> None:
-    w = db.get_kv("extra_wanted", {}) or {}
-    cur = {str(n) for n in w.get(set_id, [])}
-    cur = cur | set(numbers) if wanted else cur - set(numbers)
-    w[set_id] = sorted(cur, key=lambda n: (0 if n.isdigit() else 1, int(n) if n.isdigit() else 0, n))
-    db.set_kv("extra_wanted", w)
+    """wanted=True → mancanti (tolte dalle possedute); wanted=False → possedute."""
+    o = db.get_kv("extra_owned", {}) or {}
+    cur = {str(n) for n in o.get(set_id, [])}
+    cur = cur - set(numbers) if wanted else cur | set(numbers)
+    o[set_id] = _sorted(cur)
+    db.set_kv("extra_owned", o)
 
 
 def active_ids(db: Database) -> list[str]:
@@ -148,6 +163,6 @@ def export(db: Database) -> list[dict]:
     for cs in loaded_sets(db):
         out.append({"id": cs.id, "name": cs.name, "series": cs.series, "logo": cs.logo, "symbol": cs.symbol,
                     "printed_total": cs.printed_total, "total": cs.total, "release": cs.release, "active": cs.id in act,
-                    "wanted": sorted(wanted_numbers(db, cs.id)),
+                    "owned": _sorted(owned_numbers(db, cs.id)), "wanted": _sorted(wanted_numbers(db, cs.id)),
                     "cards": [{"id": c.id, "number": c.number, "name": c.name, "rarity": c.rarity, "image": c.image} for c in cs.cards]})
     return out

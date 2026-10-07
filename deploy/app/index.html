@@ -156,7 +156,7 @@ const HOME_SETS = ["me55", "me55c"];  // la collezione "di casa": 30th Celebrati
 const CATALOG_URL = "https://cdn.jsdelivr.net/gh/PokemonTCG/pokemon-tcg-data@master/sets/en.json";
 const CARDS_URL = (id) => `https://cdn.jsdelivr.net/gh/PokemonTCG/pokemon-tcg-data@master/cards/en/${id}.json`;
 let state = null, cards = [], byId = {}, wanted = new Set(), pending = new Set(), filterSet = "";
-let catalog = null, curSet = "home", extra = {};  // extra[id] = { meta, cards, wanted:Set, active, loaded }
+let catalog = null, curSet = "home", extra = {};  // extra[id] = { meta, cards, owned:Set, active, loaded } (mancano tutte tranne le possedute)
 const stack = [];
 
 function toast(msg, ms = 2200) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), ms); }
@@ -187,7 +187,7 @@ async function load() {
   wanted = new Set(state.wanted);
   for (const c of (state.collections || [])) {
     extra[c.id] = { meta: { id: c.id, name: c.name, series: c.series, logo: c.logo, symbol: c.symbol, total: c.total, printed_total: c.printed_total },
-      cards: c.cards.map((k) => ({ ...k, set: c.id, setName: c.name, printed: c.printed_total, code: k.number })), wanted: new Set(c.wanted), active: c.active, loaded: true };
+      cards: c.cards.map((k) => ({ ...k, set: c.id, setName: c.name, printed: c.printed_total, code: k.number })), owned: new Set(c.owned || []), active: c.active, loaded: true };
   }
   const d = new Date(state.generated_at * 1000);
   $("#upd").textContent = "aggiornato " + d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
@@ -227,11 +227,13 @@ function renderCollections() {
       <div style="flex:1;min-width:0"><b>${esc(m.name)}</b><small>${esc(sub)}</small></div>${status}</div>`;
   let html = "";
   const mine = [];
+  const st = (on) => on ? '<span class="st on">🔎 attiva</span>' : '<span class="st">💤 spenta</span>';
   if (!q || "30th celebration classic".includes(q)) mine.push(row({ id: "me55", name: "30th Celebration", logo: ((catalog || []).find((s) => s.id === "me55") || {}).logo || "" },
-    '<span class="st mine">🔎 di casa</span>', "home", `${cards.length} carte (con Classic Collection) · ${wanted.size} mancanti`));
+    st(state.settings.home_active !== false), "home", `${cards.length} carte (con Classic Collection) · ${wanted.size} mancanti`));
   for (const e of Object.values(extra)) {
     if (q && !e.meta.name.toLowerCase().includes(q)) continue;
-    mine.push(row(e.meta, e.active ? '<span class="st on">🔎 attiva</span>' : '<span class="st">💤 spenta</span>', e.meta.id, `${e.cards.length} carte · ${e.wanted.size} mancanti`));
+    const miss = e.cards.length ? e.cards.length - e.owned.size : (e.meta.total || "?");
+    mine.push(row(e.meta, st(e.active), e.meta.id, `${e.cards.length || e.meta.total || "?"} carte · ${miss} mancanti`));
   }
   html += `<h2>Le tue</h2>${mine.join("") || '<p class="hint">Nessuna.</p>'}`;
   if (!catalog) html += '<h2>Tutte</h2><p class="hint">Carico il catalogo…</p>';
@@ -240,7 +242,7 @@ function renderCollections() {
     const bySeries = {};
     list.forEach((s) => (bySeries[s.series || "Altro"] ||= []).push(s));
     html += `<h2>Tutte (${list.length})</h2>` + Object.entries(bySeries).map(([ser, ss]) => `<h3>${esc(ser)}</h3>` +
-      ss.map((s) => row(s, '<span class="st">non seguita</span>', s.id, `${s.total} carte · ${(s.release || "").slice(0, 4)}`)).join("")).join("");
+      ss.map((s) => row(s, '<span class="st">💤 spenta</span>', s.id, `${s.total} carte · tutte mancanti · ${(s.release || "").slice(0, 4)}`)).join("")).join("");
   }
   $("#coll-list").innerHTML = html;
   $("#coll-list").querySelectorAll(".coll").forEach((el) => el.onclick = () => openSet(el.dataset.go));
@@ -251,7 +253,7 @@ async function openSet(id) {
   curSet = id;
   if (id !== "home" && !extra[id]) {
     const meta = (catalog || []).find((s) => s.id === id);
-    extra[id] = { meta: meta || { id, name: id }, cards: [], wanted: new Set(), active: false, loaded: false };
+    extra[id] = { meta: meta || { id, name: id }, cards: [], owned: new Set(), active: false, loaded: false };
     showTab("check");
     try {
       const r = await fetch(CARDS_URL(id)); const raw = await r.json();
@@ -266,7 +268,8 @@ async function openSet(id) {
 
 /* ---------- Checklist ---------- */
 function curCards() { return curSet === "home" ? cards : ((extra[curSet] || {}).cards || []); }
-function isMissing(c) { return curSet === "home" ? wanted.has(c.id) : extra[curSet].wanted.has(c.number); }
+function isMissing(c) { return curSet === "home" ? wanted.has(c.id) : !extra[curSet].owned.has(c.number); }
+function searchSwitch(on, hint) { return `<div class="set" style="border:0;padding-top:0"><label>Ricerca sui marketplace<small>${hint}</small></label><button class="sw ${on ? "on" : ""}" id="coll-sw"></button></div>`; }
 function renderChecklist() {
   if (!state) return;
   const list0 = curCards();
@@ -275,7 +278,11 @@ function renderChecklist() {
   rar.value = rvPrev;
   const pills = $("#setpills"), head = $("#check-head");
   if (curSet === "home") {
-    head.innerHTML = "";
+    const on = state.settings.home_active !== false;
+    head.innerHTML = searchSwitch(on, on ? "attiva: il bot cerca le mancanti della 30th a ogni giro" : "spenta: la checklist resta, il bot non la cerca");
+    $("#coll-sw").onclick = async () => {
+      if (await sendCmd(`/collezione me55 ${on ? "disattiva" : "attiva"}`)) { state.settings.home_active = !on; toast(on ? "Ricerca spenta" : "Ricerca attivata"); renderChecklist(); renderCollections(); renderHome(); }
+    };
     pills.innerHTML = state.sets.map((s) => {
       const miss = s.cards.filter((c) => wanted.has(c.id)).length;
       return `<span class="pill ${filterSet === s.id ? "on" : ""}" data-set="${s.id}">${esc(s.name)} · ${miss}/${s.cards.length} mancanti</span>`;
@@ -283,14 +290,12 @@ function renderChecklist() {
     pills.querySelectorAll("[data-set]").forEach((p) => p.onclick = () => { filterSet = filterSet === p.dataset.set ? "" : p.dataset.set; renderChecklist(); });
   } else {
     const e = extra[curSet];
-    pills.innerHTML = `<span class="pill">Mancanti <b>${e.wanted.size}</b>/${e.cards.length || e.meta.total || "?"}</span>` + (e.meta.printed_total ? `<span class="pill">numerazione /${e.meta.printed_total}</span>` : "");
-    head.innerHTML = `<div class="set" style="border:0;padding-top:0"><label>Ricerca sui marketplace<small>${e.active ? "attiva: il bot cerca le mancanti di questa collezione a ogni giro" : "spenta: la checklist resta, il bot non la cerca"}</small></label>
-        <button class="sw ${e.active ? "on" : ""}" id="coll-sw"></button></div>` +
+    const miss = e.cards.length - e.owned.size;
+    pills.innerHTML = `<span class="pill">Mancanti <b>${e.cards.length ? miss : (e.meta.total || "?")}</b>/${e.cards.length || e.meta.total || "?"}</span><span class="pill">Possedute <b>${e.owned.size}</b></span>` + (e.meta.printed_total ? `<span class="pill">numerazione /${e.meta.printed_total}</span>` : "");
+    head.innerHTML = searchSwitch(e.active, e.active ? "attiva: il bot cerca le mancanti di questa collezione a ogni giro" : "spenta: la checklist resta, il bot non la cerca") +
       (e.active ? "" : '<div class="warn">⚠️ Attivare altre collezioni aggiunge ricerche e notifiche a ogni giro. Per ora conviene tenere accesa solo la 30th.</div>') +
       (!e.loaded ? '<p class="hint">Carico le carte…</p>' : "") +
-      (e.loaded && e.cards.length && !e.wanted.size ? `<div class="card-row"><span class="hint" style="flex:1">Nuova collezione: tocca le carte che ti mancano, oppure</span><button class="btn sec" id="coll-all">Mi mancano tutte</button></div>` : "");
-    const allBtn = $("#coll-all");
-    if (allBtn) allBtn.onclick = async () => { if (await sendCmd(`/collezione ${curSet} tutte`)) { e.cards.forEach((c) => e.wanted.add(c.number)); toast("Segnate tutte mancanti"); renderChecklist(); renderCollections(); } };
+      (e.loaded && e.cards.length && !e.owned.size ? '<p class="hint">Si parte da <b>mi mancano tutte</b>: tocca le carte che hai e si accendono.</p>' : "");
     $("#coll-sw").onclick = async () => {
       const on = !e.active;
       if (on && !confirm(`Attivare la ricerca per ${e.meta.name}? Il bot cercherà anche le sue carte mancanti a ogni giro.`)) return;
@@ -318,11 +323,11 @@ async function toggle(id) {
     if (ok) { willWant ? wanted.add(id) : wanted.delete(id); toast((willWant ? "Segnata mancante: " : "Segnata presa: ") + c.name); }
   } else {
     const e = extra[curSet]; const c = e.cards.find((k) => k.id === id); if (!c) return;
-    const willWant = !e.wanted.has(c.number);
+    const willOwn = !e.owned.has(c.number);
     pending.add(id); renderChecklist();
-    const ok = await sendCmd(`/collezione ${curSet} ${willWant ? "manca" : "ho"} ${c.number}`);
+    const ok = await sendCmd(`/collezione ${curSet} ${willOwn ? "ho" : "manca"} ${c.number}`);
     pending.delete(id);
-    if (ok) { willWant ? e.wanted.add(c.number) : e.wanted.delete(c.number); toast((willWant ? "Segnata mancante: " : "Segnata presa: ") + c.name); }
+    if (ok) { willOwn ? e.owned.add(c.number) : e.owned.delete(c.number); toast((willOwn ? "Ce l'hai: " : "Segnata mancante: ") + c.name); }
   }
   renderChecklist(); renderHome();
 }

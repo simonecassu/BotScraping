@@ -69,4 +69,5 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "per_card_batch": 20,  # quante carte mancanti cercare singolarmente per ciclo (a rotazione)
     "notify_unverifiable_lots": False,
     "only_italy": True,
+    "home_active": True,  # ricerca della collezione di casa (30th); si spegne dalla Mini App o con /collezione me55 disattiva
 }
