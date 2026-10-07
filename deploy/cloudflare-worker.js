@@ -60,10 +60,16 @@ async function readState(env) {
   return null;
 }
 
-async function ownerChatId(env) {
-  if (env.TELEGRAM_CHAT_ID) return String(env.TELEGRAM_CHAT_ID);
+// Chat autorizzate: proprietario (secret TELEGRAM_CHAT_ID o primo /start) più le persone invitate con /invita.
+async function allowedChatIds(env) {
+  const ids = new Set();
+  if (env.TELEGRAM_CHAT_ID) ids.add(String(env.TELEGRAM_CHAT_ID));
   const st = await readState(env);
-  return st && st.owner_chat_id ? String(st.owner_chat_id) : "";
+  if (st) {
+    if (st.owner_chat_id) ids.add(String(st.owner_chat_id));
+    for (const c of st.chat_ids || []) ids.add(String(c));
+  }
+  return ids;
 }
 
 // Ogni 5 minuti: sveglia GitHub solo se c'è qualcosa da fare (inseguimento attivo, ricerca completa dovuta,
@@ -149,11 +155,11 @@ export default {
       }
       const user = await verifyInitData(env, body.initData);
       if (!user) return Response.json({ ok: false, error: "non autenticato" }, { status: 401 });
-      const owner = await ownerChatId(env);
-      if (!owner || String(user.id) !== owner) return Response.json({ ok: false, error: "non sei il proprietario del bot" }, { status: 403 });
+      const ids = await allowedChatIds(env);
+      if (!ids.has(String(user.id))) return Response.json({ ok: false, error: "non sei tra le persone collegate al bot (serve un /invita)" }, { status: 403 });
       const text = String(body.text || "").trim().slice(0, 4000);
       if (!text.startsWith("/")) return Response.json({ ok: false, error: "comando non valido" }, { status: 400 });
-      const gh = await dispatch(env, { event_type: "telegram", client_payload: { chat_id: owner, text } });
+      const gh = await dispatch(env, { event_type: "telegram", client_payload: { chat_id: String(user.id), text } });
       return Response.json({ ok: gh.status === 204, status: gh.status });
     }
 

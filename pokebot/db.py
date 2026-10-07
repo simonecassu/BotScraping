@@ -145,6 +145,33 @@ class Database:
                 ("_" + key, json.dumps(value)),
             )
 
+    # ---- persone collegate (proprietario + invitati) --------------------------
+    def owner_chat_id(self) -> str:
+        return config.TELEGRAM_CHAT_ID or str(self.get_kv("telegram_chat_id", "") or "")
+
+    def chat_ids(self) -> list[str]:
+        """Chat che ricevono le notifiche e possono dare comandi: il proprietario per primo, poi gli invitati."""
+        out: list[str] = []
+        for cid in [self.owner_chat_id(), *(self.get_kv("telegram_extra_chat_ids", []) or [])]:
+            cid = str(cid or "").strip()
+            if cid and cid not in out:
+                out.append(cid)
+        return out
+
+    def add_chat_id(self, chat_id: str) -> None:
+        chat_id = str(chat_id).strip()
+        if not chat_id or chat_id in self.chat_ids():
+            return
+        self.set_kv("telegram_extra_chat_ids", [str(c) for c in (self.get_kv("telegram_extra_chat_ids", []) or [])] + [chat_id])
+
+    def remove_chat_id(self, chat_id: str) -> bool:
+        chat_id = str(chat_id).strip()
+        extra = [str(c) for c in (self.get_kv("telegram_extra_chat_ids", []) or [])]
+        if chat_id not in extra:
+            return False
+        self.set_kv("telegram_extra_chat_ids", [c for c in extra if c != chat_id])
+        return True
+
     def prune(self, seen_days: int = 45, keep_found: int = 2000, keep_runs: int = 50) -> None:
         """Mantiene il database piccolo (utile quando viene salvato su GitHub a ogni esecuzione)."""
         with self.connect() as c:

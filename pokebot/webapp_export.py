@@ -50,7 +50,8 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300) -> dict:
         })
     return {
         "generated_at": time.time(),
-        "owner_chat_id": str(db.get_kv("telegram_chat_id", "") or ""),
+        "owner_chat_id": db.owner_chat_id(),
+        "chat_ids": db.chat_ids(),
         # usati dal ponte per decidere se svegliare GitHub a ogni tick di 5 minuti
         "last_search_ts": float(db.get_kv("last_search_ts", 0) or 0),
         "queued": len(db.queued_found()),

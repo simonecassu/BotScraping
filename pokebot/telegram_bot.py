@@ -55,13 +55,14 @@ HELP = """<b>Comandi</b>
 /cerca – ricerca immediata · /cerca 145 – una carta: tutto ciò che è in vendita adesso, dal più economico
 /insegui 151 – per 6 ore cerca la 151 ogni 5 minuti e ti avvisa appena spunta un annuncio nuovo
 /insegui 151 2h · /insegui 151 2h ogni 10m · /insegui 131 151 – durata, frequenza, più carte · /insegui – attivi · /insegui stop
+/invita – codice per collegare un'altra persona (stesse notifiche, stessa checklist, stessa app) · /utenti · /espelli ID
 /collezione – altre collezioni (partono da "mi mancano tutte") · /collezione sv8 ho 4 7 – segna le possedute · /collezione sv8 attiva – ⚠️ la cerca anche · /collezione me55 disattiva – spegne la 30th
 /resetvisti – rinotifica anche gli annunci già visti
 Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
-MENU_VERSION = 12
+MENU_VERSION = 13
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -79,6 +80,8 @@ MENU_COMMANDS = [
     ("immagini", "Immagine della carta nei messaggi: /immagini on | off"),
     ("cerca", "Cerca subito tutto, oppure una carta mirata: /cerca 145"),
     ("insegui", "Cerca una carta ogni 5 minuti per 6 ore: /insegui 151 (o /insegui 151 2h ogni 10m)"),
+    ("invita", "Codice per collegare un'altra persona alle stesse notifiche"),
+    ("utenti", "Chi e' collegato al bot"),
     ("collezione", "Altre collezioni: /collezione sv8 ho 4 7 (possedute), /collezione sv8 attiva"),
     ("intervallo", "Ogni quanti minuti cercare: /intervallo 20"),
     ("max", "Quanti annunci (i piu' economici) per carta in ogni giro: /max 5"),
@@ -178,15 +181,15 @@ class CommandHandler:
         self.db = db
 
     # ------------------------------------------------------------------
-    def handle(self, text: str) -> Reply:
+    def handle(self, text: str, chat_id: str = "") -> Reply:
         """Un messaggio può contenere più comandi, uno per riga."""
         lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
         if len(lines) <= 1:
-            return self._handle_one(lines[0] if lines else "")
-        replies = [self._handle_one(ln) for ln in lines]
+            return self._handle_one(lines[0] if lines else "", chat_id)
+        replies = [self._handle_one(ln, chat_id) for ln in lines]
         return Reply("\n\n".join(r.text for r in replies), run_search=any(r.run_search for r in replies))
 
-    def _handle_one(self, text: str) -> Reply:
+    def _handle_one(self, text: str, chat_id: str = "") -> Reply:
         text = (text or "").strip()
         if not text.startswith("/"):
             return Reply("Scrivimi un comando, ad esempio /mancanti. Con /aiuto vedi l'elenco.")
@@ -263,6 +266,12 @@ class CommandHandler:
             return Reply("🔎 Ok, cerco adesso.", run_search=True)
         if cmd == "/insegui":
             return self._chase(args)
+        if cmd == "/invita":
+            return self._invite(chat_id)
+        if cmd == "/utenti":
+            return self._users(chat_id)
+        if cmd in ("/espelli", "/rimuoviutente"):
+            return self._kick(chat_id, args)
         if cmd in ("/collezione", "/collezioni", "/set"):
             return self._collection(args)
         if cmd == "/resetvisti":
@@ -401,6 +410,45 @@ class CommandHandler:
             lines.append("\nSenza prezzo: " + html.escape(", ".join(self.index.code_of[c.id] for c in comp.unpriced[:30]))
                          + (" …" if len(comp.unpriced) > 30 else ""))
         return Reply("\n".join(lines))
+
+    # ---- persone collegate ----------------------------------------------------
+    def _is_owner(self, chat_id: str) -> bool:
+        owner = self.db.owner_chat_id()
+        return bool(chat_id) and (not owner or str(chat_id) == owner)
+
+    def _invite(self, chat_id: str) -> Reply:
+        if not self._is_owner(chat_id):
+            return Reply("Solo il proprietario del bot può invitare altre persone.")
+        import secrets
+        code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
+        self.db.set_kv("invite_code", {"code": code, "expires": time.time() + 48 * 3600})
+        return Reply("👥 Codice invito (vale 48 ore, una persona):\n"
+                     f"<code>/start {code}</code>\n\n"
+                     "Falle aprire il bot e incollare quel comando: da lì riceve le stesse notifiche, "
+                     "gestisce la stessa checklist e apre la stessa Mini App dal pulsante App.")
+
+    def _users(self, chat_id: str) -> Reply:
+        ids = self.db.chat_ids()
+        if not ids:
+            return Reply("Nessuno collegato ancora.")
+        lines = [f"👥 <b>Persone collegate</b> ({len(ids)})"]
+        for i, cid in enumerate(ids):
+            lines.append(f"• <code>{cid}</code>{' · proprietario' if i == 0 else ''}{' · tu' if cid == str(chat_id) else ''}")
+        if self._is_owner(chat_id):
+            lines.append("\n/invita per aggiungere qualcuno · /espelli ID per scollegarlo")
+        return Reply("\n".join(lines))
+
+    def _kick(self, chat_id: str, args: str) -> Reply:
+        if not self._is_owner(chat_id):
+            return Reply("Solo il proprietario del bot può scollegare qualcuno.")
+        target = args.strip()
+        if not target.lstrip("-").isdigit():
+            return Reply("Usa <code>/espelli ID</code> con l'ID che vedi in /utenti.")
+        if target == self.db.owner_chat_id():
+            return Reply("Il proprietario non si può scollegare.")
+        if self.db.remove_chat_id(target):
+            return Reply(f"👋 Chat <code>{target}</code> scollegata: non riceve più notifiche né comandi.")
+        return Reply("Quell'ID non è tra le persone collegate (vedi /utenti).")
 
     def _collection(self, args: str) -> Reply:
         """/collezione – elenco · /collezione sv8 – scarica/info · … manca|ho N… · … attiva|disattiva · … svuota."""
@@ -842,7 +890,7 @@ class TelegramCommands:
             if not self._authorized(chat_id, text):
                 log.warning("Messaggio ignorato da chat non autorizzata %s", chat_id)
                 continue
-            reply = self.handler.handle(text)
+            reply = self.handler.handle(text, chat_id)
             want_search = want_search or reply.run_search
             self._deliver(chat_id, reply)
         return want_search
@@ -866,16 +914,30 @@ class TelegramCommands:
         if not self._authorized(chat_id, text):
             log.warning("Comando via ponte ignorato da chat non autorizzata %s", chat_id)
             return False
-        reply = self.handler.handle(text)
+        reply = self.handler.handle(text, chat_id)
         self._deliver(chat_id, reply)
         return reply.run_search
 
     def _authorized(self, chat_id: str, text: str) -> bool:
-        pinned = config.TELEGRAM_CHAT_ID or str(self.db.get_kv("telegram_chat_id", "") or "")
-        if pinned:
-            return chat_id == pinned
-        if text.strip().lower().startswith("/start"):
+        """Proprietario (dall'ambiente o dal primo /start) e persone invitate (`/start CODICE` entro 48 ore)."""
+        chat_id = str(chat_id)
+        allowed = self.db.chat_ids()
+        if chat_id in allowed:
+            return True
+        parts = text.strip().split()
+        if not parts or not parts[0].lower().startswith("/start"):
+            return False
+        if not allowed:
             self.db.set_kv("telegram_chat_id", chat_id)  # il primo che scrive /start diventa il proprietario
             log.info("Chat id Telegram salvato: %s", chat_id)
+            return True
+        if len(parts) < 2:
+            return False
+        inv = self.db.get_kv("invite_code") or {}
+        if (isinstance(inv, dict) and inv.get("code") and parts[1].upper() == str(inv["code"]).upper()
+                and float(inv.get("expires") or 0) > time.time()):
+            self.db.add_chat_id(chat_id)
+            self.db.set_kv("invite_code", None)  # monouso
+            log.info("Nuova persona collegata con invito: %s", chat_id)
             return True
         return False

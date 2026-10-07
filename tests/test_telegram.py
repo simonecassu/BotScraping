@@ -355,3 +355,44 @@ def test_group_uses_listing_photo_album(index, monkeypatch):
     calls.clear()
     n.notify_many(items, images=False)
     assert calls[0][0] == "text"
+
+
+def test_invite_adds_second_person_and_notifier_sends_to_all(index, monkeypatch):
+    from pokebot import config
+    from pokebot.notifier import TelegramNotifier
+    from pokebot.telegram_bot import CommandHandler, TelegramCommands
+
+    monkeypatch.setattr(config, "TELEGRAM_CHAT_ID", "")
+    db = Database(os.path.join(tempfile.mkdtemp(), "t.db"))
+    tc = TelegramCommands(index, db, client=FakeClient([]))
+    assert tc.handle_payload({"chat_id": 7, "text": "/start"}) is False  # proprietario
+    assert tc.handle_payload({"chat_id": 8, "text": "/invita"}) is False  # estraneo: ignorato
+    tc.handle_payload({"chat_id": 7, "text": "/invita"})
+    code = db.get_kv("invite_code")["code"]
+    assert tc.handle_payload({"chat_id": 8, "text": "/start SBAGLIATO"}) is False and db.chat_ids() == ["7"]
+    tc.handle_payload({"chat_id": 8, "text": f"/start {code.lower()}"})
+    assert db.chat_ids() == ["7", "8"] and db.get_kv("invite_code") is None  # monouso
+    assert tc.handle_payload({"chat_id": 8, "text": "/aggiungi 131\n/cerca"}) is True  # ora è collegata
+    tc.handle_payload({"chat_id": 9, "text": f"/start {code}"})
+    assert db.chat_ids() == ["7", "8"]
+
+    h = CommandHandler(index, db)
+    assert "Solo il proprietario" in h.handle("/espelli 8", "8").text
+    assert "proprietario" in h.handle("/utenti", "8").text
+    assert "scollegata" in h.handle("/espelli 8", "7").text and db.chat_ids() == ["7"]
+    assert "non si può" in h.handle("/espelli 7", "7").text
+
+    db.add_chat_id("8")
+    n = TelegramNotifier.from_db(db)
+    n.token = "t"
+    assert n.chat_ids == ["7", "8"] and n.chat_id == "7"
+    posted = []
+
+    class R:
+        status_code = 200
+        text = ""
+
+    import pokebot.notifier as nmod
+    monkeypatch.setattr(nmod.requests, "post", lambda url, **kw: posted.append((url.rsplit("/", 1)[1], kw)) or R())
+    assert n.send("ciao") is True
+    assert sorted(kw["json"]["chat_id"] for _, kw in posted) == ["7", "8"]
