@@ -424,7 +424,7 @@ class CommandHandler:
         self.db.set_kv("invite_code", {"code": code, "expires": time.time() + 48 * 3600})
         return Reply("👥 Codice invito (vale 48 ore, una persona):\n"
                      f"<code>/start {code}</code>\n\n"
-                     "Falle aprire il bot e incollare quel comando: da lì riceve le stesse notifiche, "
+                     "Chi lo riceve apre il bot e incolla quel comando: da lì riceve le stesse notifiche, "
                      "gestisce la stessa checklist e apre la stessa Mini App dal pulsante App.")
 
     def _users(self, chat_id: str) -> Reply:
