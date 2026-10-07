@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -104,23 +105,11 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
     seen_this_run: set[str] = set()
     pending: list[tuple[Listing, "MatchResult"]] = []  # match da notificare a fine ciclo (raggruppati se tanti)
 
-    for name, scraper in scrapers.items():
-        consecutive_errors = 0
-        for q in queries:
-            try:
-                listings = scraper.search(q)
-                consecutive_errors = 0
-            except ScraperError as exc:
-                consecutive_errors += 1
-                log.warning("%s (query: %s)", exc, q)
-                report.errors[name] = str(exc)
-                if consecutive_errors >= 3 or "accesso rifiutato" in str(exc):
-                    break  # marketplace bloccato o giù: inutile insistere in questo ciclo
-                continue
-            except Exception as exc:  # noqa: BLE001
-                log.exception("Errore inatteso in %s", name)
-                report.errors[name] = f"{type(exc).__name__}: {exc}"
-                break
+    # le sorgenti vengono interrogate in parallelo (ognuna con il proprio ritmo), poi gli annunci si valutano in ordine
+    for name, listings_by_query, error in scrape_all(scrapers, queries):
+        if error:
+            report.errors[name] = error
+        for q, listings in listings_by_query:
             report.per_source[name] += len(listings)
             log.debug("%s: %d risultati per '%s'", name, len(listings), q)
             for lst in listings:
@@ -143,6 +132,42 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
     if report.skipped:
         log.info("Scartati: " + "; ".join(f"{n} × {why}" for why, n in report.skipped.most_common()))
     return report
+
+
+def _scrape_source(name: str, scraper, queries: list[str]) -> tuple[str, list[tuple[str, list[Listing]]], str | None]:
+    """Tutte le query su una sorgente; si ferma dopo 3 errori di fila o a un blocco anti-bot."""
+    out: list[tuple[str, list[Listing]]] = []
+    error: str | None = None
+    consecutive_errors = 0
+    for q in queries:
+        try:
+            listings = scraper.search(q)
+            consecutive_errors = 0
+        except ScraperError as exc:
+            consecutive_errors += 1
+            log.warning("%s (query: %s)", exc, q)
+            error = str(exc)
+            if consecutive_errors >= 3 or "accesso rifiutato" in str(exc):
+                break  # marketplace bloccato o giù: inutile insistere in questo ciclo
+            continue
+        except Exception as exc:  # noqa: BLE001
+            log.exception("Errore inatteso in %s", name)
+            error = f"{type(exc).__name__}: {exc}"
+            break
+        out.append((q, listings))
+    return name, out, error
+
+
+def scrape_all(scrapers: dict, queries: list[str]) -> list[tuple[str, list[tuple[str, list[Listing]]], str | None]]:
+    """Interroga le sorgenti in parallelo (un thread per marketplace); restituisce i risultati nell'ordine delle sorgenti."""
+    if not scrapers or not queries:
+        return []
+    if len(scrapers) == 1:
+        name, scraper = next(iter(scrapers.items()))
+        return [_scrape_source(name, scraper, queries)]
+    with ThreadPoolExecutor(max_workers=len(scrapers)) as pool:
+        futures = {name: pool.submit(_scrape_source, name, scraper, queries) for name, scraper in scrapers.items()}
+        return [futures[name].result() for name in scrapers]
 
 
 def _handle_listing(lst: Listing, matcher: Matcher, wanted: set[str], lot_ratio: float, max_price: float,
@@ -328,16 +353,10 @@ def search_card(index: CardIndex, db: Database, card, settings: dict | None = No
                 scrapers[name] = cls(only_italy=bool(settings.get("only_italy", True)))
     found: dict[str, tuple[Listing, MatchResult]] = {}
     errors: dict[str, str] = {}
-    for name, scraper in scrapers.items():
-        for q in card_queries(card):
-            try:
-                listings = scraper.search(q, limit=40)
-            except ScraperError as exc:
-                errors[name] = str(exc)
-                break
-            except Exception as exc:  # noqa: BLE001
-                errors[name] = f"{type(exc).__name__}: {exc}"
-                break
+    for name, listings_by_query, error in scrape_all(scrapers, card_queries(card)):
+        if error:
+            errors[name] = error
+        for _q, listings in listings_by_query:
             for lst in listings:
                 if lst.key in found:
                     continue

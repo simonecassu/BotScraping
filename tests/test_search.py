@@ -232,3 +232,20 @@ def test_deal_cap_and_suspicious(index):
     rep = run_search(index, db, notifier=notifier, scrapers={"fake": FakeScraper(listings)})
     assert rep.deals == 1 and [l.listing_id for l, _ in notifier.deals] == ["b"]
     assert rep.matches == 3  # la mystery box è scartata del tutto
+
+
+def test_scrape_all_runs_sources_in_parallel():
+    import time as _t
+    from pokebot.search import scrape_all
+
+    class Slow(FakeScraper):
+        def search(self, query, limit=60):
+            _t.sleep(0.25)
+            return super().search(query, limit)
+
+    a, b, c = Slow([]), Slow([]), Slow([])
+    t0 = _t.time()
+    out = scrape_all({"a": a, "b": b, "c": c}, ["q1", "q2"])
+    assert _t.time() - t0 < 1.0  # 3 sorgenti × 2 query × 0,25 s = 1,5 s in serie; in parallelo ~0,5 s
+    assert [n for n, _, _ in out] == ["a", "b", "c"] and all(len(r) == 2 and e is None for _, r, e in out)
+    assert a.queries == ["q1", "q2"]
