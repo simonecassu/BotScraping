@@ -15,7 +15,7 @@ SETTING_KEYS = ["interval_minutes", "lot_min_ratio", "max_price", "max_per_card"
                 "deal_pct", "images", "paused", "quiet_hours", "per_card_queries", "only_italy", "home_active"]
 
 
-def build_state(index: CardIndex, db: Database, max_found: int = 1000) -> dict:
+def build_state(index: CardIndex, db: Database, max_found: int = 300) -> dict:
     wanted = db.wanted_ids()
     rows = db.list_found()
     settings = db.get_settings()
@@ -51,6 +51,10 @@ def build_state(index: CardIndex, db: Database, max_found: int = 1000) -> dict:
     return {
         "generated_at": time.time(),
         "owner_chat_id": str(db.get_kv("telegram_chat_id", "") or ""),
+        # usati dal ponte per decidere se svegliare GitHub a ogni tick di 5 minuti
+        "last_search_ts": float(db.get_kv("last_search_ts", 0) or 0),
+        "queued": len(db.queued_found()),
+        "query_stats": db.get_kv("query_stats", {}) or {},
         "wanted": sorted(wanted),
         "settings": {k: settings.get(k) for k in SETTING_KEYS},
         "sets": sets,

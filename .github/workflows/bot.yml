@@ -43,6 +43,7 @@ jobs:
           else
             echo "primo avvio: nessuno stato precedente"
           fi
+          python cli.py db-hash > /tmp/db-hash-before
 
       - name: Comandi Telegram + ricerca
         env:
@@ -64,6 +65,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           test -f data/pokebot.db || exit 0
+          if [ "$(python cli.py db-hash)" = "$(cat /tmp/db-hash-before 2>/dev/null)" ]; then
+            echo "nulla è cambiato: stato non risalvato"; exit 0
+          fi
           rm -rf /tmp/state && mkdir -p /tmp/state && cp data/pokebot.db /tmp/state/
           python cli.py export-json /tmp/state/state.json || echo "export JSON fallito (non bloccante)"
           cd /tmp/state

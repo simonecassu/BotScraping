@@ -249,3 +249,12 @@ def test_scrape_all_runs_sources_in_parallel():
     assert _t.time() - t0 < 1.0  # 3 sorgenti × 2 query × 0,25 s = 1,5 s in serie; in parallelo ~0,5 s
     assert [n for n, _, _ in out] == ["a", "b", "c"] and all(len(r) == 2 and e is None for _, r, e in out)
     assert a.queries == ["q1", "q2"]
+
+
+def test_generic_query_stats_recorded(index):
+    from pokebot.search import record_query_stats
+    db = Database(os.path.join(tempfile.mkdtemp(), "t.db"))
+    record_query_stats(db, {"pokemon 30th": {"new": 4, "matches": 1}})
+    record_query_stats(db, {"pokemon 30th": {"new": 2, "matches": 0}, "altra": {"new": 0, "matches": 0}})
+    st = db.get_kv("query_stats")
+    assert st["pokemon 30th"] == {"runs": 2, "new": 6, "matches": 1} and st["altra"]["runs"] == 1

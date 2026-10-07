@@ -766,6 +766,10 @@ class CommandHandler:
                 lines.append(f"⚠️ {html.escape(k)}: {html.escape(str(v)[:200])}")
         else:
             lines.append("🕒 Nessun ciclo ancora eseguito.")
+        qs = self.db.get_kv("query_stats", {}) or {}
+        if qs:
+            lines.append("🔤 Query generiche (giri · nuovi · segnalati): " + " · ".join(
+                f"<i>{html.escape(q)}</i> {v['runs']}/{v['new']}/{v['matches']}" for q, v in sorted(qs.items(), key=lambda kv: -kv[1]["matches"])))
         return "\n".join(lines)
 
 

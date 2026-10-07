@@ -105,6 +105,8 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
     seen_this_run: set[str] = set()
     pending: list[tuple[Listing, "MatchResult"]] = []  # match da notificare a fine ciclo (raggruppati se tanti)
 
+    generic = {q.strip().lower() for q in settings.get("generic_queries", []) if q.strip()}
+    qstats: dict[str, dict] = {}
     # le sorgenti vengono interrogate in parallelo (ognuna con il proprio ritmo), poi gli annunci si valutano in ordine
     for name, listings_by_query, error in scrape_all(scrapers, queries):
         if error:
@@ -112,6 +114,7 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
         for q, listings in listings_by_query:
             report.per_source[name] += len(listings)
             log.debug("%s: %d risultati per '%s'", name, len(listings), q)
+            new_before, match_before = report.new_listings, report.matches
             for lst in listings:
                 report.listings += 1
                 if lst.key in seen_this_run or db.is_seen(lst.key):
@@ -119,6 +122,12 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
                 seen_this_run.add(lst.key)
                 report.new_listings += 1
                 _handle_listing(lst, matcher, wanted, lot_ratio, max_price, unverifiable, db, report, pending, language)
+            if q.lower() in generic:
+                st = qstats.setdefault(q.lower(), {"new": 0, "matches": 0})
+                st["new"] += report.new_listings - new_before
+                st["matches"] += report.matches - match_before
+    if qstats and not dry_run:
+        record_query_stats(db, qstats)
         if name in report.errors and report.per_source.get(name):
             # qualche query è riuscita: l'errore è parziale, non bloccante
             report.errors[name] = "parziale: " + report.errors[name]
@@ -132,6 +141,17 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
     if report.skipped:
         log.info("Scartati: " + "; ".join(f"{n} × {why}" for why, n in report.skipped.most_common()))
     return report
+
+
+def record_query_stats(db: Database, per_query: dict[str, dict]) -> None:
+    """Accumula, per ogni query generica, quanti annunci nuovi e quanti match ha portato (per potare quelle inutili)."""
+    stats = db.get_kv("query_stats", {}) or {}
+    for q, st in per_query.items():
+        cur = stats.setdefault(q, {"runs": 0, "new": 0, "matches": 0})
+        cur["runs"] += 1
+        cur["new"] += st["new"]
+        cur["matches"] += st["matches"]
+    db.set_kv("query_stats", stats)
 
 
 def _scrape_source(name: str, scraper, queries: list[str]) -> tuple[str, list[tuple[str, list[Listing]]], str | None]:

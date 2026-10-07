@@ -12,8 +12,10 @@ def _db():
     return Database(os.path.join(tempfile.mkdtemp(), "t.db"))
 
 
-def test_insegui_command(index):
+def test_insegui_command(index, monkeypatch):
+    import pokebot.search as search_mod
     from pokebot.telegram_bot import CommandHandler
+    monkeypatch.setattr(search_mod, "search_card", lambda *a, **k: ([], {}))  # /cerca mirato senza rete
     db = _db()
     h = CommandHandler(index, db)
     assert "Nessun inseguimento" in h.handle("/insegui").text

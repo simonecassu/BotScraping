@@ -52,16 +52,39 @@ async function verifyInitData(env, initData) {
   }
 }
 
-async function ownerChatId(env) {
-  if (env.TELEGRAM_CHAT_ID) return String(env.TELEGRAM_CHAT_ID);
+async function readState(env) {
   try {
     const r = await fetch(STATE_URL(env) + "?t=" + Date.now(), { cf: { cacheTtl: 0 } });
-    if (r.ok) {
-      const st = await r.json();
-      if (st.owner_chat_id) return String(st.owner_chat_id);
-    }
+    if (r.ok) return await r.json();
   } catch {}
-  return "";
+  return null;
+}
+
+async function ownerChatId(env) {
+  if (env.TELEGRAM_CHAT_ID) return String(env.TELEGRAM_CHAT_ID);
+  const st = await readState(env);
+  return st && st.owner_chat_id ? String(st.owner_chat_id) : "";
+}
+
+// Ogni 5 minuti: sveglia GitHub solo se c'è qualcosa da fare (inseguimento attivo, ricerca completa dovuta,
+// annunci accumulati da inviare). Senza stato leggibile sveglia comunque, per sicurezza.
+function timerReason(st, nowSec) {
+  if (!st) return "stato non disponibile";
+  const s = st.settings || {};
+  if ((st.watches || []).some((w) => Number(w.until) > nowSec)) return "inseguimento attivo";
+  const interval = Number(s.interval_minutes || 20) * 60;
+  if (nowSec - Number(st.last_search_ts || 0) >= interval - 30) return "ricerca completa dovuta";
+  if (Number(st.queued || 0) > 0 && !s.paused) {
+    const qh = s.quiet_hours;
+    let quiet = false;
+    if (qh && qh.length === 2) {
+      const hour = Number(new Intl.DateTimeFormat("it-IT", { hour: "numeric", hour12: false, timeZone: "Europe/Rome" }).format(new Date(nowSec * 1000)));
+      const [a, b] = [Number(qh[0]), Number(qh[1])];
+      quiet = a < b ? (hour >= a && hour < b) : (hour >= a || hour < b);
+    }
+    if (!quiet) return "annunci accumulati da inviare";
+  }
+  return null;
 }
 
 async function telegram(env, method, body) {
@@ -199,6 +222,11 @@ export default {
 
   // Timer (vedi [triggers] in wrangler.toml): avvia la ricerca periodica su GitHub.
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(dispatch(env, { event_type: "timer", client_payload: { source: "cron", at: new Date(event.scheduledTime).toISOString() } }));
+    ctx.waitUntil((async () => {
+      const st = await readState(env);
+      const reason = timerReason(st, event.scheduledTime / 1000);
+      if (!reason) return; // niente da fare: nessun run su GitHub
+      await dispatch(env, { event_type: "timer", client_payload: { source: "cron", reason, at: new Date(event.scheduledTime).toISOString() } });
+    })());
   },
 };

@@ -17,6 +17,7 @@ import os
 import sys
 import time
 
+from pokebot import config
 from pokebot.cards import load_sets
 from pokebot.db import Database
 from pokebot.matcher import Matcher
@@ -39,12 +40,26 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--asta", action="store_true")
     ej = sub.add_parser("export-json", help="scrive il riepilogo JSON per la Mini App")
     ej.add_argument("path")
+    sub.add_parser("db-hash", help="impronta del contenuto del database (per salvare lo stato solo se cambiato)")
     ac = sub.add_parser("actions", help="comandi Telegram + ricerca + pulizia (per GitHub Actions / cron)")
     ac.add_argument("--force", action="store_true", help="cerca anche se l'intervallo non è ancora passato")
     args = p.parse_args(argv)
 
     logging.basicConfig(level=logging.DEBUG if getattr(args, "verbose", False) else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if args.cmd == "db-hash":
+        import hashlib
+        import sqlite3
+        if not config.DB_PATH.exists():
+            print("nessun-database")
+            return 0
+        con = sqlite3.connect(str(config.DB_PATH))
+        h = hashlib.sha256()
+        for line in con.iterdump():
+            h.update(line.encode("utf-8", "replace"))
+        print(h.hexdigest())
+        return 0
+
     index = load_sets()
     db = Database()
 
