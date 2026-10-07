@@ -102,6 +102,52 @@ async function telegram(env, method, body) {
   return r.json();
 }
 
+const QUEUE_BRANCH = "bot-queue";
+
+async function gh(env, method, path, body) {
+  return fetch(`https://api.github.com${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "pokebot-bridge",
+      "Content-Type": "application/json",
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
+async function ensureQueueBranch(env) {
+  const repo = env.GITHUB_REPO || DEFAULT_REPO;
+  if ((await gh(env, "GET", `/repos/${repo}/git/ref/heads/${QUEUE_BRANCH}`)).ok) return;
+  const info = await (await gh(env, "GET", `/repos/${repo}`)).json();
+  const base = await (await gh(env, "GET", `/repos/${repo}/git/ref/heads/${info.default_branch}`)).json();
+  await gh(env, "POST", `/repos/${repo}/git/refs`, { ref: `refs/heads/${QUEUE_BRANCH}`, sha: base.object.sha });
+}
+
+// Salva il comando come file su GitHub (un file per comando: nessun conflitto), così il bot lo esegue
+// al prossimo giro anche se GitHub cancella un run in attesa doppio. True se salvato.
+async function enqueue(env, cmd) {
+  const repo = env.GITHUB_REPO || DEFAULT_REPO;
+  const name = `queue/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
+  const body = { message: `comando ${cmd.text.slice(0, 40)}`, branch: QUEUE_BRANCH,
+    content: btoa(unescape(encodeURIComponent(JSON.stringify(cmd)))) };
+  let r = await gh(env, "PUT", `/repos/${repo}/contents/${name}`, body);
+  if (r.status === 404 || r.status === 422) {
+    await ensureQueueBranch(env);
+    r = await gh(env, "PUT", `/repos/${repo}/contents/${name}`, body);
+  }
+  return r.ok;
+}
+
+// Mette in coda e sveglia il bot. Se la coda non è scrivibile, il comando viaggia nel payload del dispatch (come prima).
+async function sendCommand(env, chatId, text) {
+  const cmd = { chat_id: String(chatId), text, ts: Date.now() / 1000 };
+  const queued = await enqueue(env, cmd);
+  return dispatch(env, { event_type: "telegram", client_payload: queued ? { queued: true } : cmd });
+}
+
 async function dispatch(env, payload) {
   const repo = env.GITHUB_REPO || DEFAULT_REPO;
   return fetch(`https://api.github.com/repos/${repo}/dispatches`, {
@@ -159,8 +205,8 @@ export default {
       if (!ids.has(String(user.id))) return Response.json({ ok: false, error: "non sei tra le persone collegate al bot (serve un /invita)" }, { status: 403 });
       const text = String(body.text || "").trim().slice(0, 4000);
       if (!text.startsWith("/")) return Response.json({ ok: false, error: "comando non valido" }, { status: 400 });
-      const gh = await dispatch(env, { event_type: "telegram", client_payload: { chat_id: String(user.id), text } });
-      return Response.json({ ok: gh.status === 204, status: gh.status });
+      const res = await sendCommand(env, user.id, text);
+      return Response.json({ ok: res.status === 204, status: res.status });
     }
 
     if (request.method === "GET") {
@@ -217,7 +263,7 @@ export default {
     const chatId = String(msg.chat.id);
     if (env.TELEGRAM_CHAT_ID && chatId !== String(env.TELEGRAM_CHAT_ID)) return new Response("ok");
 
-    const gh = await dispatch(env, { event_type: "telegram", client_payload: { chat_id: chatId, text } });
+    const gh = await sendCommand(env, chatId, text);
 
     const ack = gh.status === 204
       ? "⏳ Ricevuto, avvio il bot: risposta tra circa un minuto."

@@ -72,10 +72,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "actions":
         commands = TelegramCommands(index, db)
         want_search = False
+        from pokebot.queue import GitHubQueue
+        n_queue, want_search = GitHubQueue().drain(commands.handle_payload)  # comandi salvati dal ponte
+        if n_queue:
+            print(f"Comandi dalla coda: {n_queue}")
         payload = _dispatch_payload()
-        if payload is not None:
-            want_search = commands.handle_payload(payload)
-        elif commands.enabled:
+        if payload is not None:  # ponte senza coda (fallback): il comando viaggia nel payload
+            want_search = commands.handle_payload(payload) or want_search
+        elif commands.enabled and not n_queue:
             want_search = commands.poll_once(timeout=0)
         else:
             print("TELEGRAM_BOT_TOKEN mancante: nessun comando letto, nessuna notifica possibile.")

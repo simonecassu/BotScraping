@@ -52,6 +52,7 @@ jobs:
           EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
           EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
           POKEBOT_DISPATCH_PAYLOAD: ${{ toJson(github.event.client_payload) }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # per leggere e svuotare la coda comandi (branch bot-queue)
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             python cli.py actions --force

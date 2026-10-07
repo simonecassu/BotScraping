@@ -158,6 +158,16 @@ const CARDS_URL = (id) => `https://cdn.jsdelivr.net/gh/PokemonTCG/pokemon-tcg-da
 let state = null, cards = [], byId = {}, wanted = new Set(), pending = new Set(), filterSet = "";
 let catalog = null, curSet = "home", extra = {};  // extra[id] = { meta, cards, owned:Set, active, loaded } (mancano tutte tranne le possedute)
 const stack = [];
+const overrides = {};  // scelte fatte da poco (id → {ts, want|own}) da tenere finché lo stato del bot non le riflette (max 4 min)
+const OVERRIDE_MS = 4 * 60e3;
+function applyOverrides() {
+  const now = Date.now();
+  for (const [k, o] of Object.entries(overrides)) {
+    if (now - o.ts > OVERRIDE_MS) { delete overrides[k]; continue; }
+    if (o.set === "home") { o.want ? wanted.add(o.id) : wanted.delete(o.id); }
+    else if (extra[o.set]) { o.own ? extra[o.set].owned.add(o.id) : extra[o.set].owned.delete(o.id); }
+  }
+}
 
 function toast(msg, ms = 2200) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), ms); }
 function openLink(u) { if (tg && tg.openLink) tg.openLink(u); else window.open(u, "_blank"); }
@@ -189,6 +199,7 @@ async function load() {
     extra[c.id] = { meta: { id: c.id, name: c.name, series: c.series, logo: c.logo, symbol: c.symbol, total: c.total, printed_total: c.printed_total },
       cards: c.cards.map((k) => ({ ...k, set: c.id, setName: c.name, printed: c.printed_total, code: k.number })), owned: new Set(c.owned || []), active: c.active, loaded: true };
   }
+  applyOverrides();
   const d = new Date(state.generated_at * 1000);
   $("#upd").textContent = "aggiornato " + d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
   renderAll();
@@ -320,14 +331,14 @@ async function toggle(id) {
     pending.add(id); renderChecklist();
     const ok = await sendCmd((willWant ? "/aggiungi " : "/rimuovi ") + c.code);
     pending.delete(id);
-    if (ok) { willWant ? wanted.add(id) : wanted.delete(id); toast((willWant ? "Segnata mancante: " : "Segnata presa: ") + c.name); }
+    if (ok) { willWant ? wanted.add(id) : wanted.delete(id); overrides["home:" + id] = { ts: Date.now(), set: "home", id, want: willWant }; toast((willWant ? "Segnata mancante: " : "Segnata presa: ") + c.name); }
   } else {
     const e = extra[curSet]; const c = e.cards.find((k) => k.id === id); if (!c) return;
     const willOwn = !e.owned.has(c.number);
     pending.add(id); renderChecklist();
     const ok = await sendCmd(`/collezione ${curSet} ${willOwn ? "ho" : "manca"} ${c.number}`);
     pending.delete(id);
-    if (ok) { willOwn ? e.owned.add(c.number) : e.owned.delete(c.number); toast((willOwn ? "Ce l'hai: " : "Segnata mancante: ") + c.name); }
+    if (ok) { willOwn ? e.owned.add(c.number) : e.owned.delete(c.number); overrides[curSet + ":" + c.number] = { ts: Date.now(), set: curSet, id: c.number, own: willOwn }; toast((willOwn ? "Ce l'hai: " : "Segnata mancante: ") + c.name); }
   }
   renderChecklist(); renderHome();
 }
