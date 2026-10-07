@@ -84,43 +84,19 @@ L'indirizzo del worker mostra lo stato del ponte; aggiungendo `/reset` lo disatt
 a ogni giro). Con il ponte attivo, se mandi più comandi in pochi secondi mettili in **un solo messaggio, uno per riga**.
 Il file del worker è `deploy/cloudflare-worker.js`, la sua configurazione `deploy/wrangler.toml`.
 
-## Avvio rapido su PC
+## Da PC (facoltativo)
 
 ```bash
 git clone <questo repo> && cd BotScraping
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env        # inserisci TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID
-python run.py               # interfaccia su http://localhost:8080
+cp .env.example .env        # TELEGRAM_BOT_TOKEN (+ EBAY_CLIENT_ID / EBAY_CLIENT_SECRET)
+python cli.py cerca --dry-run   # un giro di ricerca senza notifiche
+python cli.py actions           # comandi Telegram + inseguimenti + ricerca, come su GitHub Actions
+python -m pytest -q             # test
 ```
 
-Con Docker: `cp .env.example .env`, compila il file, poi `docker compose up -d`.
-
-### Telegram
-Basta il token di @BotFather in `TELEGRAM_BOT_TOKEN`: al primo `/start` il bot salva da solo la chat.
-`TELEGRAM_CHAT_ID` è facoltativo (se impostato, solo quella chat è accettata).
-Anche su PC i comandi Telegram della tabella qui sopra funzionano, in tempo reale.
-
-## Come si usa
-
-1. **Checklist** (`/`): spunta le carte che **ti mancano** (filtro per nome/numero/rarità, selezione per rarità,
-   "tutte/nessuna/inverti"). Il salvataggio è automatico. Il bot cerca solo quelle.
-2. **Impostazioni** (`/impostazioni`): ogni quanti minuti cercare, prezzo massimo, percentuale minima per i lotti,
-   quali marketplace, query generiche, ricerca per singola carta (es. `Lapras 131/128`, a rotazione per non martellare i siti),
-   parole che identificano il set negli annunci.
-3. **Trovati** (`/trovati`): registro degli annunci notificati con le carte riconosciute, esito dei cicli ed eventuali
-   errori per marketplace (es. blocco anti-bot). Pulsante **Cerca ora** per non aspettare il prossimo ciclo.
-
-Da riga di comando:
-
-```bash
-python cli.py cerca --dry-run                 # un ciclo senza inviare notifiche
-python cli.py cerca                           # un ciclo con notifiche
-python cli.py test-telegram
-python cli.py mancanti
-python cli.py actions                         # un passaggio completo (comandi Telegram + ricerca), per cron
-python cli.py analizza "Lotto 30th: Lapras 131/128, Moltres 130/128"   # come viene classificato un annuncio
-```
+Tutto il resto (checklist, impostazioni, storico, prezzi) si fa da Telegram o dalla Mini App: non c'è più un'interfaccia web locale.
 
 ## Come riconosce le carte
 
@@ -166,6 +142,6 @@ pytest
 
 Struttura: `pokebot/cards.py` (set e indice), `pokebot/matcher.py` (riconoscimento e regole singola/lotto),
 `pokebot/scrapers/` (un modulo per marketplace), `pokebot/search.py` (ciclo di ricerca), `pokebot/notifier.py`
-(Telegram), `pokebot/telegram_bot.py` (comandi Telegram), `pokebot/scheduler.py` (esecuzione periodica),
-`pokebot/web/` (interfaccia Flask), `.github/workflows/bot.yml` (esecuzione su GitHub Actions),
+(Telegram), `pokebot/telegram_bot.py` (comandi Telegram), `pokebot/watch.py` (inseguimenti), `pokebot/collections.py`
+(altre collezioni), `pokebot/webapp_export.py` + `deploy/app/` (Mini App), `.github/workflows/bot.yml` (esecuzione su GitHub Actions),
 `deploy/cloudflare-worker.js` + `deploy/wrangler.toml` (ponte Telegram → GitHub), `.github/workflows/ponte.yml` (ne fa il deploy).

@@ -11,12 +11,10 @@ from typing import Any
 from urllib.parse import urlencode
 
 import requests
-from bs4 import BeautifulSoup
 
 from .. import config
 from .base import BaseScraper, Listing, ScraperError, parse_price
 
-SEARCH_URL = "https://www.ebay.it/sch/i.html"
 TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 BROWSE_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
 
@@ -37,9 +35,9 @@ class EbayScraper(BaseScraper):
         return bool(config.EBAY_CLIENT_ID and config.EBAY_CLIENT_SECRET)
 
     def search(self, query: str, limit: int = 60) -> list[Listing]:
-        if self.use_api:
-            return self._search_api(query, limit)
-        return self._search_html(query, limit)
+        if not self.use_api:
+            raise ScraperError("eBay: servono EBAY_CLIENT_ID e EBAY_CLIENT_SECRET (API Browse); la pagina HTML è bloccata dai server cloud")
+        return self._search_api(query, limit)
 
     # ---- API Browse -----------------------------------------------------
     def _get_token(self) -> str:
@@ -104,51 +102,3 @@ class EbayScraper(BaseScraper):
         return out
 
     # ---- scraping HTML ----------------------------------------------------
-    def _search_html(self, query: str, limit: int) -> list[Listing]:
-        params = {"_nkw": query, "LH_BIN": "1", "_sop": "10", "_ipg": "60"}
-        if self.only_italy:
-            params["LH_PrefLoc"] = "1"
-        resp = self._get(f"{SEARCH_URL}?{urlencode(params)}")
-        return self.parse_html(resp.text)[:limit]
-
-    @staticmethod
-    def parse_html(html: str) -> list[Listing]:
-        soup = BeautifulSoup(html, "html.parser")
-        out: list[Listing] = []
-        for li in soup.select("li.s-item, li.s-card, div.s-item"):
-            link = li.select_one("a.s-item__link, a.s-card__link, a[href*='/itm/']")
-            title_el = li.select_one(".s-item__title, .s-card__title")
-            if not link or not title_el:
-                continue
-            title = title_el.get_text(" ", strip=True)
-            title = title.replace("Nuova inserzione", "").replace("Nuovo annuncio", "").strip()
-            if not title or title.lower().startswith("shop on ebay"):
-                continue
-            href = link.get("href", "")
-            item_id = ""
-            if "/itm/" in href:
-                item_id = href.split("/itm/", 1)[1].split("?", 1)[0].strip("/").split("/")[-1]
-            if not item_id:
-                continue
-            price_el = li.select_one(".s-item__price, .s-card__price")
-            price_text = price_el.get_text(" ", strip=True) if price_el else ""
-            subtitle = li.select_one(".s-item__subtitle, .s-card__subtitle")
-            purchase = li.select_one(".s-item__purchase-options, .s-item__purchaseOptions, .s-item__bids")
-            purchase_text = purchase.get_text(" ", strip=True).lower() if purchase else ""
-            bids = li.select_one(".s-item__bids, .s-item__bidCount")
-            is_auction = bool(bids) or ("offert" in purchase_text and "compralo" not in purchase_text)
-            loc_el = li.select_one(".s-item__location, .s-item__itemLocation")
-            img = li.select_one("img")
-            out.append(Listing(
-                source="ebay",
-                listing_id=item_id,
-                title=title,
-                url=href.split("?", 1)[0],
-                description=subtitle.get_text(" ", strip=True) if subtitle else "",
-                price=parse_price(price_text),
-                price_text=price_text,
-                location=(loc_el.get_text(" ", strip=True).replace("da ", "", 1) if loc_el else ""),
-                image=(img.get("src") or img.get("data-src") or "") if img else "",
-                is_auction=is_auction,
-            ))
-        return out

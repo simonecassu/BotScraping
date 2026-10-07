@@ -22,10 +22,6 @@ EBAY_CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET", "").strip()
 
 TIMEZONE = os.getenv("POKEBOT_TIMEZONE", "Europe/Rome")
 
-WEB_HOST = os.getenv("POKEBOT_HOST", "0.0.0.0")
-WEB_PORT = int(os.getenv("POKEBOT_PORT", "8080"))
-WEB_SECRET = os.getenv("POKEBOT_SECRET", "pokebot-dev-secret")
-
 HTTP_TIMEOUT = float(os.getenv("POKEBOT_HTTP_TIMEOUT", "25"))
 USER_AGENT = os.getenv(
     "POKEBOT_USER_AGENT",
@@ -33,7 +29,7 @@ USER_AGENT = os.getenv(
     "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
 )
 
-# Impostazioni modificabili dall'interfaccia web (valori di default).
+# Impostazioni modificabili da Telegram / Mini App (valori di default).
 DEFAULT_SETTINGS: dict[str, object] = {
     "interval_minutes": 20,
     "lot_min_ratio": 0.5,
