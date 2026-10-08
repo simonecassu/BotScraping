@@ -86,6 +86,12 @@ L'indirizzo del worker mostra lo stato del ponte; aggiungendo `/reset` lo disatt
 a ogni giro). Con il ponte attivo, se mandi più comandi in pochi secondi mettili in **un solo messaggio, uno per riga**.
 Il file del worker è `deploy/cloudflare-worker.js`, la sua configurazione `deploy/wrangler.toml`.
 
+### Ognuno il suo Pokébot, album in comune a scelta
+
+Il primo che scrive `/start` al bot ne diventa il proprietario e con `/invita` genera codici per collegare altre persone (`/start CODICE`). Ogni persona collegata ha il **suo** Pokébot: le sue collezioni, le sue impostazioni (pausa, ore silenziose, foto, affari…), i suoi inseguimenti, la sua Mini App. Condivise sono solo la ricerca (gira una volta per tutti) e lo storico dei prezzi.
+
+Per mettere un album in comune: `/amico` dà un codice; chi lo scrive diventa amico. Poi `/condividi me55 NOME` propone l'album: l'altro tocca **Accetta** e da lì l'album è unico per entrambi (le carte che uno dei due ha contano come prese, ogni spunta vale per tutti). `/esci me55` per uscirne con una copia propria. Dalla Mini App: Impostazioni → Amici, e il pulsante "👥 Condividi" in ogni collezione.
+
 ## Da PC (facoltativo)
 
 ```bash

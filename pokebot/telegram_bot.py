@@ -65,7 +65,7 @@ Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
-MENU_VERSION = 15
+MENU_VERSION = 16
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -87,7 +87,9 @@ MENU_COMMANDS = [
     ("immagini", "Immagine della carta nei messaggi: /immagini on | off"),
     ("cerca", "Cerca subito tutto, oppure una carta mirata: /cerca 145"),
     ("insegui", "Cerca una carta ogni 5 minuti per 6 ore: /insegui 151 (o /insegui 151 2h ogni 10m)"),
-    ("invita", "Codice per collegare un'altra persona alle stesse notifiche"),
+    ("amico", "Il tuo codice amico, o /amico CODICE per aggiungerne uno"),
+    ("condividi", "Album in comune con un amico: /condividi me55 NOME"),
+    ("invita", "Codice per collegare un'altra persona al bot"),
     ("utenti", "Chi e' collegato al bot"),
     ("collezione", "Collezioni seguite; /collezione sv8 passa a quella; /collezione sv8 attiva la cerca"),
     ("intervallo", "Ogni quanti minuti cercare: /intervallo 20"),
@@ -107,6 +109,7 @@ class Reply:
     run_search: bool = False
     buttons: list[list[tuple[str, str]]] | None = None  # righe di pulsanti (etichetta, comando)
     document: tuple[str, bytes] | None = None  # (nome file, contenuto) da inviare come allegato
+    sends: list | None = None  # [(chat_id, testo, pulsanti)] da recapitare ad altre persone (proposte di condivisione)
 
 
 @dataclass
@@ -186,10 +189,46 @@ class CommandHandler:
     def __init__(self, index: CardIndex, db: Database):
         self.index = index
         self.db = db
+        self.chat = ""  # persona che sta parlando (impostata a ogni handle)
+
+    # ---- la persona ---------------------------------------------------------
+    def _settings(self) -> dict:
+        return self.db.settings_for(self.chat)
+
+    def _save(self, values: dict) -> None:
+        """Le impostazioni personali vanno nelle preferenze della persona, le altre sono condivise."""
+        personal = {k: v for k, v in values.items() if k in config.PERSONAL_SETTINGS}
+        shared = {k: v for k, v in values.items() if k not in config.PERSONAL_SETTINGS}
+        if personal:
+            self.db.save_user_prefs(self.chat, personal)
+        if shared:
+            self.db.save_settings(shared)
+
+    def _album(self, set_id: str) -> str:
+        from . import collections as coll
+        return coll.album_for(self.db, self.chat, set_id)
+
+    def _wanted(self) -> set[str]:
+        for s_ in self.scope():
+            self._album(s_.id)  # gli album di casa nascono al primo uso
+        return self.db.wanted_for(self.chat)
+
+    def _set_wanted(self, cards: list, wanted: bool) -> None:
+        by_set: dict[str, list[str]] = {}
+        for c in cards:
+            by_set.setdefault(c.set_id, []).append(c.id)
+        for sid, ids in by_set.items():
+            self.db.set_wanted_bulk(ids, wanted, self._album(sid))
+
+    def _my_sets(self) -> list:
+        """Collezioni della persona: quelle di casa più i suoi album."""
+        albums = self.db.albums_of(self.chat)
+        return [s_ for s_ in self.index.sets if s_.primary or s_.id in albums]
 
     # ------------------------------------------------------------------
     def handle(self, text: str, chat_id: str = "") -> Reply:
         """Un messaggio può contenere più comandi, uno per riga."""
+        self.chat = str(chat_id or "") or self.db.owner_chat_id() or "me"
         lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
         if len(lines) <= 1:
             return self._handle_one(lines[0] if lines else "", chat_id)
@@ -226,10 +265,10 @@ class CommandHandler:
         if cmd in ("/affari", "/affare"):
             return self._deals(args)
         if cmd in ("/pausa", "/stop"):
-            self.db.save_settings({"paused": True})
+            self._save({"paused": True})
             return Reply("⏸ Notifiche in pausa. Continuo a cercare e accumulo: con /riprendi ti mando tutto in un colpo.")
         if cmd in ("/riprendi", "/play", "/riparti"):
-            self.db.save_settings({"paused": False})
+            self._save({"paused": False})
             return Reply("▶️ Notifiche riattivate. Se c'è qualcosa in coda, arriva tra pochi secondi.")
         if cmd in ("/notte", "/silenzio"):
             return self._quiet(args)
@@ -246,10 +285,10 @@ class CommandHandler:
         if cmd in ("/immagini", "/foto"):
             a = args.strip().lower()
             if a in ("on", "si", "sì", "attiva"):
-                self.db.save_settings({"images": True})
+                self._save({"images": True})
                 return Reply("🖼 Immagine della carta attiva nei messaggi.")
             if a in ("off", "no", "disattiva"):
-                self.db.save_settings({"images": False})
+                self._save({"images": False})
                 return Reply("🖼 Immagini disattivate: solo testo.")
             return Reply("Usa <code>/immagini on</code> oppure <code>/immagini off</code>.")
         if cmd == "/soglia":
@@ -269,10 +308,10 @@ class CommandHandler:
         if cmd == "/lingua":
             a = args.strip().lower()
             if a in ("ita", "it", "italiano", "italiana"):
-                self.db.save_settings({"language": "ita"})
+                self._save({"language": "ita"})
                 return Reply("⚙️ Solo annunci italiani: scarto quelli dichiaratamente in francese, inglese, tedesco, spagnolo o giapponese.")
             if a in ("tutte", "tutto", "any", "all"):
-                self.db.save_settings({"language": "tutte"})
+                self._save({"language": "tutte"})
                 return Reply("⚙️ Accetto annunci in qualsiasi lingua.")
             return Reply("Usa <code>/lingua ita</code> oppure <code>/lingua tutte</code>.")
         if cmd == "/cerca":
@@ -281,6 +320,16 @@ class CommandHandler:
             return Reply("🔎 Ok, cerco adesso.", run_search=True)
         if cmd == "/insegui":
             return self._chase(args)
+        if cmd in ("/amico", "/amica"):
+            return self._friends(args)
+        if cmd in ("/amici", "/amiche"):
+            return self._friends_list()
+        if cmd in ("/condividi", "/share"):
+            return self._share(args)
+        if cmd in ("/accetta", "/accetto"):
+            return self._accept(args)
+        if cmd in ("/esci", "/lascia"):
+            return self._leave(args)
         if cmd == "/invita":
             return self._invite(chat_id)
         if cmd == "/utenti":
@@ -302,7 +351,7 @@ class CommandHandler:
     # ---- collezione corrente -------------------------------------------------
     def current(self):
         """La collezione su cui lavorano i comandi (cambia con /collezione <id>)."""
-        cs = self.index.get_set(self.db.current_set())
+        cs = self.index.get_set(self.db.current_set(self.chat))
         return cs or self.index.sets[0]
 
     def scope(self) -> list:
@@ -405,7 +454,7 @@ class CommandHandler:
         cards, unknown = self.resolve(args)
         if not cards:
             return Reply("Non ho riconosciuto nessuna carta in: " + html.escape(args) + "\n/lista per vedere i numeri.")
-        self.db.set_wanted_bulk([c.id for c in cards], wanted)
+        self._set_wanted(cards, wanted)
         verb = "segnate come mancanti" if wanted else "tolte dalle mancanti"
         lines = [f"{'➕' if wanted else '✅'} {len(cards)} carte {verb}:"]
         lines += [self._card_line(c) for c in cards[:40]]
@@ -417,7 +466,7 @@ class CommandHandler:
         return Reply("\n".join(lines))
 
     def _totals_line(self) -> str:
-        wanted = self.db.wanted_ids()
+        wanted = self._wanted()
         scope = self.scope()
         n = sum(1 for s_ in scope for c in s_.cards if c.id in wanted)
         tot = sum(len(s_.cards) for s_ in scope)
@@ -428,7 +477,7 @@ class CommandHandler:
             v = conv(float(args.replace(",", ".").replace("%", "").replace("€", "").strip()))
         except ValueError:
             return Reply("Serve un numero, es. <code>/soglia 50</code> oppure <code>/prezzo 100</code>.")
-        self.db.save_settings({key: v})
+        self._save({key: v})
         return Reply("⚙️ " + fmt(v))
 
     def _set_sources(self, args: str) -> Reply:
@@ -436,7 +485,7 @@ class CommandHandler:
         chosen = [t for t in re.split(r"[\s,]+", args.lower()) if t in SCRAPERS]
         if not chosen:
             return Reply("Fonti disponibili: " + ", ".join(SCRAPERS) + "\nEs. <code>/fonti wallapop vinted ebay</code>")
-        self.db.save_settings({"sources": chosen})
+        self._save({"sources": chosen})
         return Reply("⚙️ Fonti attive: " + ", ".join(chosen))
 
     # ------------------------------------------------------------------
@@ -462,14 +511,14 @@ class CommandHandler:
                 arrow = "📈" if delta > 5 else "📉" if delta < -5 else "➡️"
                 lines.append(f"{arrow} Ultimi 7 giorni: mediana {pstats.fmt_eur(cp.recent_median)} ({delta:+.0f}% rispetto a prima)")
             return Reply("\n".join(lines), buttons=[[("📂 Storico", f"/storico {self.index.code_of[card.id]}")]])
-        comp = pstats.completion(self.scope_index(), self.db.wanted_ids(), rows)
+        comp = pstats.completion(self.scope_index(), self._wanted(), rows)
         if not comp.missing:
             return Reply(f"🎉 Nessuna carta mancante: {html.escape(self.current().name)} completa!")
         lines = [f"💶 <b>Per finire il set</b> ({comp.missing} carte mancanti)",
                  f"Ai prezzi <b>minimi</b> visti: <b>{pstats.fmt_eur(comp.cost_min)}</b> · ai prezzi mediani: {pstats.fmt_eur(comp.cost_median)}",
                  f"Stima su {comp.priced} carte con prezzi visti" + (f"; {len(comp.unpriced)} ancora senza prezzo" if comp.unpriced else "")]
         priced = []
-        for c in sorted((c for c in self.index.by_id.values() if c.id in self.db.wanted_ids()), key=lambda c: c.sort_key):
+        for c in sorted((c for c in self.index.by_id.values() if c.id in self._wanted()), key=lambda c: c.sort_key):
             st = pstats.card_prices(rows, c).overall
             if st.n:
                 priced.append((st.min, c))
@@ -522,57 +571,62 @@ class CommandHandler:
         return Reply("Quell'ID non è tra le persone collegate (vedi /utenti).")
 
     def _collection(self, args: str) -> Reply:
-        """/collezione – elenco · /collezione sv8 – segui (scarica) e rendi corrente · … attiva|disattiva · … ho|manca N… · … tutte|svuota."""
+        """/collezione – le mie · /collezione sv8 – seguila (album mio) e rendila corrente · … attiva|disattiva · … ho|manca N… · … tutte|svuota."""
         from . import collections as coll
         a = args.strip()
-        wanted = self.db.wanted_ids()
-        active = set(self.db.active_sets())
+        active = set(self.db.active_sets(self.chat))
         cur = self.current()
+        albums = self.db.albums_of(self.chat)
         if not a:
-            lines = ["📚 <b>Collezioni seguite</b>"]
-            for s_ in self.index.sets:
+            wanted = self._wanted()
+            lines = ["📚 <b>Le tue collezioni</b>"]
+            for s_ in self._my_sets():
                 n = sum(1 for c in s_.cards if c.id in wanted)
+                album = albums.get(s_.id)
+                others = [m for m in (self.db.album_members(album) if album else []) if m != self.chat]
+                shared = (" · 👥 con " + ", ".join(html.escape(self.db.user_name(m)) for m in others)) if others else ""
                 lines.append(f"{'▶️' if s_.id == cur.id else '•'} <code>{s_.id}</code> {html.escape(s_.name)} · {len(s_.cards)} carte · "
-                             f"mancanti {n} · " + ("🔎 ricerca attiva" if s_.id in active else "💤 ricerca spenta"))
-            lines.append(f"\n▶️ = corrente: /mancanti, /aggiungi 4 7, /ho 4, /progresso, /prezzi lavorano su di lei. "
-                         "<code>/collezione sv8</code> passa a un'altra (la scarica se serve: parte da \"mi mancano tutte\"); "
-                         "<code>/collezione sv8 attiva</code> la fa cercare; <code>sv8:7</code> indica una sua carta da qualsiasi comando.")
+                             f"mancanti {n} · " + ("🔎 ricerca attiva" if s_.id in active else "💤 ricerca spenta") + shared)
+            lines.append("\n▶️ = corrente: /mancanti, /aggiungi 4 7, /ho 4, /progresso, /prezzi lavorano su di lei. "
+                         "<code>/collezione sv8</code> passa a un'altra (scaricata se serve: parte da \"mi mancano tutte\"); "
+                         "<code>/collezione sv8 attiva</code> la fa cercare; <code>/condividi sv8</code> la condivide con un amico.")
             return Reply("\n".join(lines))
         set_id, _, rest = a.partition(" ")
         set_id = set_id.lower().strip()
         if set_id in ("30th", "30", "celebration"):
             set_id = "me55"
         rest = rest.strip()
-        cs = self.index.get_set(set_id)
-        if cs is None:
-            try:
-                cs = coll.get_set(self.db, set_id)
-            except KeyError:
-                return Reply(f"Collezione <code>{html.escape(set_id)}</code> non trovata nel catalogo. Sfogliale dalla Mini App.")
-            except Exception as exc:  # noqa: BLE001
-                return Reply(f"⚠️ Non riesco a scaricare la collezione adesso ({html.escape(str(exc)[:80])}). Riprova tra poco.")
-            self.index.add_set(cs)
+        try:
+            cs, album, created = coll.follow(self.db, self.chat, set_id)
+        except KeyError:
+            return Reply(f"Collezione <code>{html.escape(set_id)}</code> non trovata nel catalogo. Sfogliale dalla Mini App.")
+        except Exception as exc:  # noqa: BLE001
+            return Reply(f"⚠️ Non riesco a scaricare la collezione adesso ({html.escape(str(exc)[:80])}). Riprova tra poco.")
+        self.index.add_set(cs)
         verb, _, nums = rest.partition(" ")
         verb = verb.lower()
+        wanted_album = self.db.wanted_ids([album])
         if not verb:
-            self.db.set_current(cs.id)
-            n = sum(1 for c in cs.cards if c.id in self.db.wanted_ids())
+            self.db.set_current(cs.id, self.chat)
+            n = sum(1 for c in cs.cards if c.id in wanted_album)
             on = cs.id in active
+            others = [m for m in self.db.album_members(album) if m != self.chat]
             return Reply(f"📚 <b>{html.escape(cs.name)}</b> (<code>{cs.id}</code>) è la collezione corrente · {len(cs.cards)} carte"
                          f"{' · numerazione /' + str(cs.printed_total) if cs.printed_total else ''}\nMancanti: <b>{n}</b> · "
-                         + ("🔎 ricerca attiva" if on else "💤 ricerca spenta") +
-                         f"\n\n/mancanti · /aggiungi 4 7 · /ho 4 · /progresso · /prezzi · "
-                         f"<code>/collezione {cs.id} {'disattiva' if on else 'attiva'}</code>")
+                         + ("🔎 ricerca attiva" if on else "💤 ricerca spenta")
+                         + (" · 👥 condivisa con " + ", ".join(html.escape(self.db.user_name(m)) for m in others) if others else "")
+                         + f"\n\n/mancanti · /aggiungi 4 7 · /ho 4 · /progresso · /prezzi · "
+                         f"<code>/collezione {cs.id} {'disattiva' if on else 'attiva'}</code> · <code>/condividi {cs.id}</code>")
         if verb in ("attiva", "on", "cerca"):
-            self.db.set_active(cs.id, True)
-            n = sum(1 for c in cs.cards if c.id in wanted)
-            return Reply(f"🔎 Ricerca attiva per <b>{html.escape(cs.name)}</b> ({n} mancanti). ⚠️ Ogni collezione attiva aggiunge "
-                         f"ricerche e notifiche a ogni giro: tienine poche accese. <code>/collezione {cs.id} disattiva</code> per spegnerla.")
+            self.db.set_active(cs.id, True, self.chat)
+            return Reply(f"🔎 Ricerca attiva per <b>{html.escape(cs.name)}</b> ({len([c for c in cs.cards if c.id in wanted_album])} mancanti). "
+                         f"⚠️ Ogni collezione attiva aggiunge ricerche e notifiche a ogni giro: tienine poche accese. "
+                         f"<code>/collezione {cs.id} disattiva</code> per spegnerla.")
         if verb in ("disattiva", "off", "spegni"):
-            self.db.set_active(cs.id, False)
+            self.db.set_active(cs.id, False, self.chat)
             return Reply(f"💤 Ricerca spenta per <b>{html.escape(cs.name)}</b>: la checklist resta.")
         if verb in ("svuota", "reset", "completa"):
-            coll.mark(self.db, cs, [c.number for c in cs.cards], False)
+            coll.mark(self.db, cs, [c.number for c in cs.cards], False, album)
             return Reply(f"🧹 {html.escape(cs.name)}: segnata completa, nessuna mancante.")
         if verb in ("tutte", "manca", "mancano", "aggiungi", "ho", "trovata", "rimuovi", "presa"):
             if verb == "tutte":
@@ -591,8 +645,8 @@ class CommandHandler:
                         bad.append(t)
                 if not numbers:
                     return Reply(f"Nessun numero valido per {html.escape(cs.name)}. Es. <code>/collezione {cs.id} ho 4 7 10-12</code>.")
-            coll.mark(self.db, cs, numbers, want)
-            n = sum(1 for c in cs.cards if c.id in self.db.wanted_ids())
+            coll.mark(self.db, cs, numbers, want, album)
+            n = len(coll.wanted_numbers(self.db, cs, album))
             names = ", ".join(html.escape(next(c.name for c in cs.cards if c.number == x) + " " + x) for x in numbers[:6])
             more = f" e altre {len(numbers) - 6}" if len(numbers) > 6 else ""
             msg = f"{'🃏 Mancanti' if want else '✅ Prese'}: {names}{more}\n{html.escape(cs.name)}: ora {n} mancanti"
@@ -604,19 +658,131 @@ class CommandHandler:
         return Reply(f"Non ho capito. Usa <code>/collezione {cs.id}</code>, <code>… attiva</code>, <code>… disattiva</code>, "
                      f"<code>… ho 4 7</code>, <code>… manca 4</code>.")
 
+    # ---- amici e album condivisi --------------------------------------------------
+    def _friends(self, args: str) -> Reply:
+        """/amico – il tuo codice amico · /amico CODICE – diventate amici · /amico togli NOME · /amici – elenco."""
+        import secrets
+        a = args.strip()
+        if not a:
+            code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
+            self.db.set_kv(f"friendcode:{code}", {"chat": self.chat, "expires": time.time() + 7 * 86400})
+            return Reply("🤝 Il tuo codice amico (vale 7 giorni):\n"
+                         f"<code>/amico {code}</code>\n\nChi lo scrive al bot diventa tuo amico: potrete condividere album con /condividi.")
+        verb, _, rest = a.partition(" ")
+        if verb.lower() in ("togli", "rimuovi"):
+            target = self._friend_by_name(rest)
+            if not target:
+                return Reply("Amico non trovato: /amici per l'elenco.")
+            self.db.remove_friend(self.chat, target)
+            return Reply(f"👋 {html.escape(self.db.user_name(target))} non è più tra i tuoi amici.")
+        inv = self.db.get_kv(f"friendcode:{verb.upper()}") or {}
+        if not inv or float(inv.get("expires") or 0) < time.time():
+            if self.db.get_kv(f"share:{verb.upper()}"):
+                return self._accept(verb)  # era un codice album
+            return Reply("Codice amico non valido o scaduto.")
+        other = str(inv["chat"])
+        if other == self.chat:
+            return Reply("Quello è il tuo codice 🙂")
+        self.db.add_friend(self.chat, other)
+        self.db.set_kv(f"friendcode:{verb.upper()}", None)
+        return Reply(f"🤝 Ora tu e <b>{html.escape(self.db.user_name(other))}</b> siete amici. "
+                     f"Condividi un album con <code>/condividi me55 {html.escape(self.db.user_name(other))}</code>.")
+
+    def _friend_by_name(self, name: str) -> str | None:
+        name = name.strip().lower()
+        for f in self.db.friends(self.chat):
+            if name and (name == f or name == self.db.user_name(f).lower()):
+                return f
+        return None
+
+    def _friends_list(self) -> Reply:
+        fr = self.db.friends(self.chat)
+        if not fr:
+            return Reply("Nessun amico ancora. /amico ti dà un codice da passare a chi vuoi; chi lo scrive diventa tuo amico.")
+        albums = self.db.albums_of(self.chat)
+        lines = ["🤝 <b>Amici</b>"]
+        for f in fr:
+            shared = [sid for sid, alb in albums.items() if f in self.db.album_members(alb)]
+            lines.append(f"• {html.escape(self.db.user_name(f))}" + (" · 👥 album in comune: " + ", ".join(shared) if shared else ""))
+        lines.append("\n/condividi sv8 NOME per condividere un album · /esci sv8 per uscire da un album condiviso")
+        return Reply("\n".join(lines))
+
+    def _share(self, args: str) -> Reply:
+        """/condividi sv8 NOME – propone a un amico l'album; lui accetta con /accetta."""
+        import secrets
+        from . import collections as coll
+        parts = args.strip().split(maxsplit=1)
+        if not parts:
+            return Reply("Usa <code>/condividi me55 NOME</code> (un amico, vedi /amici) oppure <code>/condividi me55</code> per un codice da passare.")
+        set_id = parts[0].lower()
+        if set_id in ("30th", "30", "celebration"):
+            set_id = "me55"
+        cs = self.index.get_set(set_id)
+        if not cs:
+            return Reply("Collezione non tra le tue: prima <code>/collezione " + html.escape(set_id) + "</code>.")
+        album = coll.album_for(self.db, self.chat, cs.id)
+        code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
+        self.db.set_kv(f"share:{code}", {"album": album, "from": self.chat, "expires": time.time() + 7 * 86400})
+        if len(parts) > 1:
+            target = self._friend_by_name(parts[1])
+            if not target:
+                return Reply("Amico non trovato: /amici per l'elenco, oppure <code>/condividi " + cs.id + "</code> per un codice.")
+            text = (f"👥 <b>{html.escape(self.db.user_name(self.chat))}</b> vuole condividere con te l'album "
+                    f"<b>{html.escape(cs.name)}</b>: diventerebbe unico per tutti e due (le carte che uno dei due ha contano come prese).")
+            return Reply(f"📨 Proposta inviata a {html.escape(self.db.user_name(target))}: quando accetta, l'album diventa unico.",
+                         sends=[(target, text, [[("✅ Accetta", f"/accetta {code}"), ("✖️ No grazie", "/accetta no")]])])
+        return Reply(f"👥 Codice per condividere <b>{html.escape(cs.name)}</b> (vale 7 giorni):\n<code>/accetta {code}</code>\n"
+                     "Chi lo scrive al bot entra nel tuo album: diventa unico per tutti e due.")
+
+    def _accept(self, args: str) -> Reply:
+        code = args.strip().upper()
+        if not code or code == "NO":
+            return Reply("Ok, album non condiviso.")
+        inv = self.db.get_kv(f"share:{code}") or {}
+        if not inv or float(inv.get("expires") or 0) < time.time():
+            return Reply("Codice non valido o scaduto.")
+        album = str(inv["album"])
+        set_id = self.db.album_set(album)
+        if not set_id:
+            return Reply("Quell'album non esiste più.")
+        if str(inv["from"]) == self.chat:
+            return Reply("È un tuo album 🙂")
+        from . import collections as coll
+        cs = coll.get_set(self.db, set_id)
+        self.index.add_set(cs)
+        self.db.join_album(self.chat, album)
+        self.db.add_friend(self.chat, str(inv["from"]))
+        self.db.set_kv(f"share:{code}", None)
+        members = [m for m in self.db.album_members(album) if m != self.chat]
+        n = len(self.db.wanted_ids([album]))
+        other = str(inv["from"])
+        return Reply(f"👥 <b>{html.escape(cs.name)}</b> ora è un album unico con {', '.join(html.escape(self.db.user_name(m)) for m in members)}: "
+                     f"{n} mancanti. Ogni spunta vale per tutti.",
+                     sends=[(other, f"✅ {html.escape(self.db.user_name(self.chat))} ha accettato: <b>{html.escape(cs.name)}</b> è un album unico.", None)])
+
+    def _leave(self, args: str) -> Reply:
+        set_id = args.strip().lower()
+        if set_id in ("30th", "30", "celebration"):
+            set_id = "me55"
+        album = self.db.albums_of(self.chat).get(set_id)
+        if not album or len(self.db.album_members(album)) < 2:
+            return Reply("Quell'album non è condiviso.")
+        self.db.leave_album(self.chat, album)
+        return Reply(f"👋 Sei uscito dall'album condiviso <code>{html.escape(set_id)}</code>: ne hai una copia tutta tua.")
+
     def _chase(self, args: str) -> Reply:
         """/insegui 151 – per 6 ore cerca quella carta ogni 5 minuti; /insegui – elenco; /insegui stop [carte]."""
         from . import watch
         a = args.strip()
         if not a:
-            return Reply(watch.describe(self.index, self.db))
+            return Reply(watch.describe(self.index, self.db, self.chat))
         first, _, rest = a.partition(" ")
         if first.lower() in ("stop", "basta", "ferma", "off"):
             if not rest.strip():
-                n = watch.clear_watches(self.db)
+                n = watch.clear_watches(self.db, self.chat)
                 return Reply(f"⏹ Fermati {n} inseguimenti." if n else "Nessun inseguimento attivo.")
             cards, unknown = self.resolve(rest)
-            stopped = [c.label for c in cards if watch.remove_watch(self.db, c.id)]
+            stopped = [c.label for c in cards if watch.remove_watch(self.db, c.id, self.chat)]
             msg = ("⏹ Fermato: " + ", ".join(html.escape(x) for x in stopped)) if stopped else "Quelle carte non erano inseguite."
             if unknown:
                 msg += "\n❓ Non capiti: " + html.escape(" ".join(unknown))
@@ -625,13 +791,13 @@ class CommandHandler:
         cards, unknown = self.resolve(card_args)
         if not cards:
             return Reply("Carta non riconosciuta. Es. <code>/insegui 151</code>, <code>/insegui c4 2h</code>, <code>/insegui 151 2h ogni 10m</code>.")
-        active = watch.list_watches(self.db)
+        active = watch.list_watches(self.db, self.chat)
         room = watch.MAX_WATCHES - len({cid for cid in active if cid not in {c.id for c in cards}})
         cards = cards[:max(0, room)]
         if not cards:
             return Reply(f"Al massimo {watch.MAX_WATCHES} inseguimenti insieme: ferma qualcosa con /insegui stop.")
         for c in cards:
-            w = watch.add_watch(self.db, c.id, duration, every)
+            w = watch.add_watch(self.db, c.id, duration, every, self.chat)
         names = ", ".join(html.escape(c.label) for c in cards)
         lines = [f"🏃 Inseguo <b>{names}</b>: ogni {watch.fmt_duration(every)} per {watch.fmt_duration(duration)} "
                  f"(fino alle {watch.fmt_time(w['until'])}).",
@@ -648,7 +814,7 @@ class CommandHandler:
         cards, unknown = self.resolve(args)
         if not cards:
             return Reply("Carta non riconosciuta. Es. <code>/cerca 145</code> oppure <code>/cerca c4</code>.")
-        settings = self.db.get_settings()
+        settings = self._settings()
         out: list[str] = []
         for card in cards[:3]:
             items, errors = search_card(self.index, self.db, card, settings)
@@ -680,7 +846,7 @@ class CommandHandler:
         from . import stats as pstats
         cur = self.current()
         cards = [c for s_ in self.scope() for c in s_.cards]
-        v = pstats.collection_value(cards, self.db.wanted_ids(), self._all_price_rows())
+        v = pstats.collection_value(cards, self._wanted(), self._all_price_rows())
         lines = [f"💎 <b>{html.escape(cur.name)}</b>",
                  f"Possiedi {v.owned} carte: valore stimato <b>{pstats.fmt_eur(v.owned_value)}</b> "
                  f"(mediane viste su {v.owned_priced} carte" + (f", {v.owned - v.owned_priced} ancora senza prezzo" if v.owned > v.owned_priced else "") + ")"]
@@ -694,7 +860,7 @@ class CommandHandler:
         from . import shopping, stats as pstats
         cur = self.current()
         cards = [c for s_ in self.scope() for c in s_.cards]
-        sl = shopping.build(cards, self.db.wanted_ids(), self.db.list_found())
+        sl = shopping.build(cards, self._wanted(), self.db.list_found())
         if not sl.picks:
             return Reply(f"🛒 {html.escape(cur.name)}: nessun annuncio recente per le carte mancanti. Il bot continua a cercare.")
         lines = [f"🛒 <b>Lista della spesa · {html.escape(cur.name)}</b>",
@@ -716,7 +882,7 @@ class CommandHandler:
     def _copies(self, args: str) -> Reply:
         from . import stats as pstats
         a = args.strip()
-        copies = self.db.copies()
+        copies = self.db.copies(self.chat)
         if not a:
             mine = [(self.index.by_id[cid], n) for cid, n in copies.items() if cid in self.index.by_id]
             if not mine:
@@ -737,14 +903,14 @@ class CommandHandler:
             return Reply("\n".join(lines))
         verb, _, rest = a.partition(" ")
         if verb.lower() in ("azzera", "reset"):
-            self.db.set_kv("copies", {})
+            self.db.set_kv(f"copies:{self.chat}", {})
             return Reply("🔁 Doppioni azzerati.")
         remove = verb.lower() in ("togli", "rimuovi", "meno", "-")
         cards, unknown = self.resolve(rest if remove else a)
         if not cards:
             return Reply("Carta non riconosciuta. Es. <code>/doppioni 131 132</code> oppure <code>/doppioni togli 131</code>.")
         for c in cards:
-            self.db.set_copies(c.id, copies.get(c.id, 0) + (-1 if remove else 1))
+            self.db.set_copies(c.id, copies.get(c.id, 0) + (-1 if remove else 1), self.chat)
         msg = ("➖ " if remove else "➕ ") + ", ".join(html.escape(c.label) for c in cards[:20])
         if unknown:
             msg += "\n❓ Non capiti: " + html.escape(" ".join(unknown))
@@ -753,9 +919,9 @@ class CommandHandler:
     def _swap(self) -> Reply:
         """Messaggio di scambio pronto da copiare: cerco le mancanti della collezione corrente, offro i doppioni."""
         cur = self.current()
-        wanted = self.db.wanted_ids()
+        wanted = self._wanted()
         want = [c for s_ in self.scope() for c in s_.cards if c.id in wanted]
-        copies = self.db.copies()
+        copies = self.db.copies(self.chat)
         offer = [(self.index.by_id[cid], n) for cid, n in copies.items() if cid in self.index.by_id]
         if not want and not offer:
             return Reply("Niente da scambiare: nessuna mancante nella collezione corrente e nessun doppione (/doppioni).")
@@ -770,7 +936,7 @@ class CommandHandler:
 
     def _progress(self) -> Reply:
         from . import stats as pstats
-        comp = pstats.completion(self.scope_index(), self.db.wanted_ids(), self.db.list_found())
+        comp = pstats.completion(self.scope_index(), self._wanted(), self.db.list_found())
         filled = round(comp.percent / 10)
         bar = "🟩" * filled + "⬜" * (10 - filled)
         lines = [f"📊 <b>{html.escape(self.current().name)}</b>: {comp.owned}/{comp.total} carte ({comp.percent:.0f}%)", bar]
@@ -793,32 +959,32 @@ class CommandHandler:
     def _deals(self, args: str) -> Reply:
         a = args.strip().lower().replace("%", "")
         if a in ("off", "no", "0"):
-            self.db.save_settings({"deal_pct": 0})
+            self._save({"deal_pct": 0})
             return Reply("🔥 Avvisi affare disattivati.")
         if not a:
-            cur = int(self.db.get_settings().get("deal_pct", 60) or 0)
+            cur = int(self._settings().get("deal_pct", 60) or 0)
             return Reply(f"🔥 Avviso affare: {'spento' if not cur else f'sotto il {cur}% della mediana storica'}.\n"
                          "Imposta con <code>/affari 60</code> oppure spegni con <code>/affari off</code>.")
         try:
             v = max(10, min(95, int(float(a))))
         except ValueError:
             return Reply("Serve una percentuale, es. <code>/affari 60</code>, oppure <code>/affari off</code>.")
-        self.db.save_settings({"deal_pct": v})
+        self._save({"deal_pct": v})
         return Reply(f"🔥 Avviso affare attivo: ti scrivo subito se una carta mancante esce sotto il {v}% della sua mediana storica "
                      "(servono almeno 4 prezzi visti per quella carta).")
 
     def _quiet(self, args: str) -> Reply:
         a = args.strip().lower()
         if a in ("off", "no"):
-            self.db.save_settings({"quiet_hours": None})
+            self._save({"quiet_hours": None})
             return Reply("🌙 Ore silenziose disattivate.")
         parts = re.findall(r"\d{1,2}", a)
         if len(parts) != 2:
-            cur = self.db.get_settings().get("quiet_hours")
+            cur = self._settings().get("quiet_hours")
             desc = f"dalle {cur[0]} alle {cur[1]}" if cur else "nessuna"
             return Reply(f"🌙 Ore silenziose: {desc}.\nImposta con <code>/notte 23 8</code> (accumula e manda al mattino) o <code>/notte off</code>.")
         start, end = int(parts[0]) % 24, int(parts[1]) % 24
-        self.db.save_settings({"quiet_hours": [start, end]})
+        self._save({"quiet_hours": [start, end]})
         return Reply(f"🌙 Dalle {start}:00 alle {end}:00 non ti disturbo: accumulo e ti mando tutto al primo giro dopo le {end}:00.")
 
     def _export(self) -> Reply:
@@ -909,7 +1075,7 @@ class CommandHandler:
         return html.escape(f"{label} ({c.rarity})")
 
     def _fmt_missing(self) -> str:
-        wanted = self.db.wanted_ids()
+        wanted = self._wanted()
         scope = self.scope()
         in_scope = [c for s in scope for c in s.cards if c.id in wanted]
         lines = []
@@ -924,7 +1090,7 @@ class CommandHandler:
                 if cs:
                     lines.append(f"\n<b>{html.escape(s.name)}</b> ({len(cs)})")
                     lines += [self._card_line(c) for c in cs]
-        others = [(s, sum(1 for c in s.cards if c.id in wanted)) for s in self.index.sets if s not in scope]
+        others = [(s, sum(1 for c in s.cards if c.id in wanted)) for s in self._my_sets() if s not in scope]
         if others:
             lines.append("\n📚 Altre collezioni: " + " · ".join(f"{html.escape(s.name)} {n}/{len(s.cards)}" for s, n in others)
                          + "\n/collezione &lt;id&gt; per passare a una di loro")
@@ -932,7 +1098,7 @@ class CommandHandler:
 
     def _fmt_list(self, args: str) -> str:
         want_classic = "classic" in args.lower()
-        wanted = self.db.wanted_ids()
+        wanted = self._wanted()
         lines = []
         scope = self.scope()
         if not any(not s.printed_total for s in scope):
@@ -950,7 +1116,7 @@ class CommandHandler:
         return "\n".join(lines)
 
     def _fmt_status(self) -> str:
-        s = self.db.get_settings()
+        s = self._settings()
         runs = self.db.last_runs(1)
         max_price = s["max_price"]
         price_txt = "nessuno" if not max_price else f"{max_price:g} €"
@@ -963,11 +1129,11 @@ class CommandHandler:
         flags.append(f"🔥 affari {'off' if not s.get('deal_pct') else str(int(s['deal_pct'])) + '%'}")
         flags.append(f"🖼 immagini {'on' if s.get('images', True) else 'off'}")
         from .watch import list_watches
-        if list_watches(self.db):
-            flags.append(f"🏃 inseguimenti {len(list_watches(self.db))}")
-        active = set(self.db.active_sets())
-        wanted = self.db.wanted_ids()
-        act_cards = [c for s_ in self.index.sets if s_.id in active for c in s_.cards]
+        if list_watches(self.db, self.chat):
+            flags.append(f"🏃 inseguimenti {len(list_watches(self.db, self.chat))}")
+        active = set(self.db.active_sets(self.chat))
+        wanted = self._wanted()
+        act_cards = [c for s_ in self._my_sets() if s_.id in active for c in s_.cards]
         flags.insert(0, f"📚 {html.escape(self.current().name)} corrente")
         lines = [f"🃏 Mancanti nelle collezioni cercate: <b>{sum(1 for c in act_cards if c.id in wanted)}</b>/{len(act_cards)} · " + " · ".join(flags),
                  f"⚙️ Ricerca ogni {int(s['interval_minutes'])} min · max {int(s.get('max_per_card', 5))} annunci per carta · "
@@ -1056,6 +1222,9 @@ class TelegramCommands:
                 text = msg.get("text") or ""
             chat = msg.get("chat") or {}
             chat_id = str(chat.get("id") or "")
+            frm = (cb.get("from") if cb else msg.get("from")) or {}
+            if chat_id and frm.get("first_name"):
+                self.db.set_user_name(chat_id, str(frm.get("first_name"))[:40])
             if not chat_id or not text:
                 continue
             if not self._authorized(chat_id, text):
@@ -1071,6 +1240,8 @@ class TelegramCommands:
             self.client.send(chat_id, reply.text, reply.buttons)
             if reply.document:
                 self.client.send_document(chat_id, reply.document[0], reply.document[1])
+            for other, text, buttons in (reply.sends or []):
+                self.client.send(other, text, buttons)
         except requests.RequestException as exc:
             log.warning("Telegram invio: %s", exc)
 
@@ -1085,6 +1256,8 @@ class TelegramCommands:
         if not self._authorized(chat_id, text):
             log.warning("Comando via ponte ignorato da chat non autorizzata %s", chat_id)
             return False
+        if payload.get("name"):
+            self.db.set_user_name(chat_id, str(payload["name"])[:40])
         reply = self.handler.handle(text, chat_id)
         self._deliver(chat_id, reply)
         return reply.run_search

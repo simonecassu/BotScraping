@@ -7,6 +7,8 @@ from pokebot.telegram_bot import CommandHandler, TelegramCommands, _chunks
 
 def make(index):
     db = Database(os.path.join(tempfile.mkdtemp(), "t.db"))
+    for sid in ("me55", "me55c"):
+        db.ensure_album("me", sid)  # album di casa già esistenti (vuoti), come per chi arriva dalla versione precedente
     return db, CommandHandler(index, db)
 
 
@@ -38,7 +40,7 @@ def test_settings_commands(index):
     h.handle("/soglia 60")
     h.handle("/prezzo 80")
     h.handle("/fonti vinted ebay")
-    s = db.get_settings()
+    s = db.settings_for("me")
     assert s["lot_min_ratio"] == 0.6 and s["max_price"] == 80 and s["sources"] == ["vinted", "ebay"]
     assert h.handle("/cerca").run_search
     assert "sconosciuto" in h.handle("/boh").text
@@ -140,10 +142,10 @@ def test_handle_payload_from_bridge(index, monkeypatch):
     assert client.sent == []
     assert tc.handle_payload({"chat_id": 7, "text": "/start"}) is False
     assert db.get_kv("telegram_chat_id") == "7"
-    assert tc.handle_payload({"chat_id": 7, "text": "/aggiungi 131\n/cerca"}) is True
-    assert db.wanted_ids() == {"me55-131"}
+    assert tc.handle_payload({"chat_id": 7, "text": "/ho tutte\n/aggiungi 131\n/cerca"}) is True
+    assert db.wanted_for("7") == {"me55-131"} | {i for i in db.wanted_for("7") if i.startswith("me55c-")}
     assert tc.handle_payload({"chat_id": 8, "text": "/rimuovi 131"}) is False  # estraneo
-    assert db.wanted_ids() == {"me55-131"}
+    assert "me55-131" in db.wanted_for("7")
     assert tc.handle_payload(None) is False and tc.handle_payload({}) is False
 
 
@@ -190,7 +192,7 @@ def test_notify_many_one_message_per_card_cheapest_first(index, monkeypatch):
 def test_max_command(index):
     db, h = make(index)
     h.handle("/max 3")
-    assert db.get_settings()["max_per_card"] == 3
+    assert db.settings_for("me")["max_per_card"] == 3
     assert "max 3 annunci" in h.handle("/stato").text
 
 
@@ -235,9 +237,9 @@ def test_callback_query_is_handled(index, monkeypatch):
 def test_language_command_and_status_counts(index):
     db, h = make(index)
     h.handle("/lingua tutte")
-    assert db.get_settings()["language"] == "tutte"
+    assert db.settings_for("me")["language"] == "tutte"
     h.handle("/lingua ita")
-    assert db.get_settings()["language"] == "ita"
+    assert db.settings_for("me")["language"] == "ita"
     run_id = db.start_run()
     db.finish_run(run_id, 10, 1, {}, {"ebay": 6, "vinted": 4})
     st = h.handle("/stato").text
@@ -265,19 +267,19 @@ def test_prices_progress_and_settings_commands(index):
     assert "189/191" in prog and "🟩" in prog and "Illustration Rare: 2/19" in prog and "10,00 €" in prog
     assert "60%" in h.handle("/affari").text
     h.handle("/affari 50")
-    assert db.get_settings()["deal_pct"] == 50
+    assert db.settings_for("me")["deal_pct"] == 50
     h.handle("/affari off")
-    assert db.get_settings()["deal_pct"] == 0
+    assert db.settings_for("me")["deal_pct"] == 0
     h.handle("/pausa")
-    assert db.get_settings()["paused"] is True
+    assert db.settings_for("me")["paused"] is True
     h.handle("/riprendi")
-    assert db.get_settings()["paused"] is False
+    assert db.settings_for("me")["paused"] is False
     h.handle("/notte 23 8")
-    assert db.get_settings()["quiet_hours"] == [23, 8]
+    assert db.settings_for("me")["quiet_hours"] == [23, 8]
     h.handle("/notte off")
-    assert db.get_settings()["quiet_hours"] is None
+    assert db.settings_for("me")["quiet_hours"] is None
     h.handle("/immagini off")
-    assert db.get_settings()["images"] is False
+    assert db.settings_for("me")["images"] is False
     st = h.handle("/stato").text
     assert "affari off" in st and "immagini off" in st
 

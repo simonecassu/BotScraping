@@ -61,7 +61,7 @@ def test_run_watches_notifies_only_new_and_expires(index, monkeypatch):
     # 5 minuti dopo: ricontrolla, ma l'annuncio è già visto → nessuna notifica
     w = watch.list_watches(db)
     w["me55-131"]["last"] -= 600
-    db.set_kv("watches", w)
+    db.set_kv("watches:me", w)
     assert watch.run_watches(index, db, n, {"fake": scr}) == ["Lapras 131/128: 0 nuovi"]
     assert len(n.sent) == 1
 
@@ -69,14 +69,14 @@ def test_run_watches_notifies_only_new_and_expires(index, monkeypatch):
     scr.listings.append(Listing("fake", "L2", "Lapras 131/128 celebration nuova", "https://f/2", price=9.0, price_text="9 €"))
     w = watch.list_watches(db)
     w["me55-131"]["last"] -= 600
-    db.set_kv("watches", w)
+    db.set_kv("watches:me", w)
     watch.run_watches(index, db, n, {"fake": scr})
     assert [l.key for l, _ in n.sent] == ["fake:L1", "fake:L2"]
 
     # scaduta: riepilogo e rimozione
     w = watch.list_watches(db)
     w["me55-131"]["until"] = time.time() - 1
-    db.set_kv("watches", w)
+    db.set_kv("watches:me", w)
     sent_texts = []
     n.send = lambda text, disable_preview=False: sent_texts.append(text) or True
     assert watch.run_watches(index, db, n, {"fake": scr}) == ["Lapras 131/128: terminata"]

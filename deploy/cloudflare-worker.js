@@ -142,8 +142,8 @@ async function enqueue(env, cmd) {
 }
 
 // Mette in coda e sveglia il bot. Se la coda non è scrivibile, il comando viaggia nel payload del dispatch (come prima).
-async function sendCommand(env, chatId, text) {
-  const cmd = { chat_id: String(chatId), text, ts: Date.now() / 1000 };
+async function sendCommand(env, chatId, text, name) {
+  const cmd = { chat_id: String(chatId), text, ts: Date.now() / 1000, name: name || "" };
   const queued = await enqueue(env, cmd);
   return dispatch(env, { event_type: "telegram", client_payload: queued ? { queued: true } : cmd });
 }
@@ -188,7 +188,18 @@ export default {
     }
     // Mini App: stato (sempre fresco, aggira la cache del CDN di GitHub)
     if (url.pathname === "/api/state") {
-      const r = await fetch(STATE_URL(env) + "?t=" + Date.now(), { cf: { cacheTtl: 0 } });
+      // POST con initData: lo stato personale (state-<chat>.json); GET: solo il riepilogo senza dati personali
+      let file = "state.json";
+      if (request.method === "POST") {
+        let body = {};
+        try { body = await request.json(); } catch {}
+        const user = await verifyInitData(env, body.initData);
+        if (!user) return Response.json({ ok: false, error: "non autenticato" }, { status: 401 });
+        const ids = await allowedChatIds(env);
+        if (!ids.has(String(user.id))) return Response.json({ ok: false, error: "non sei tra le persone collegate al bot (serve un /invita)" }, { status: 403 });
+        file = `state-${user.id}.json`;
+      }
+      const r = await fetch(STATE_URL(env).replace("state.json", file) + "?t=" + Date.now(), { cf: { cacheTtl: 0 } });
       return new Response(r.body, { status: r.status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
     }
     // Mini App: comando (solo dal proprietario, firmato da Telegram)
@@ -205,7 +216,7 @@ export default {
       if (!ids.has(String(user.id))) return Response.json({ ok: false, error: "non sei tra le persone collegate al bot (serve un /invita)" }, { status: 403 });
       const text = String(body.text || "").trim().slice(0, 4000);
       if (!text.startsWith("/")) return Response.json({ ok: false, error: "comando non valido" }, { status: 400 });
-      const res = await sendCommand(env, user.id, text);
+      const res = await sendCommand(env, user.id, text, user.first_name || user.username || "");
       return Response.json({ ok: res.status === 204, status: res.status });
     }
 
@@ -263,7 +274,8 @@ export default {
     const chatId = String(msg.chat.id);
     if (env.TELEGRAM_CHAT_ID && chatId !== String(env.TELEGRAM_CHAT_ID)) return new Response("ok");
 
-    const gh = await sendCommand(env, chatId, text);
+    const frm = (update.callback_query ? update.callback_query.from : msg.from) || {};
+    const gh = await sendCommand(env, chatId, text, frm.first_name || frm.username || "");
 
     const ack = gh.status === 204
       ? "⏳ Ricevuto, avvio il bot: risposta tra circa un minuto."

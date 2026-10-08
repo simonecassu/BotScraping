@@ -105,11 +105,20 @@ def get_set(db: Database, set_id: str, download: bool = True) -> CardSet | None:
         ids = loaded_ids(db)
         if set_id not in ids:
             db.set_kv("extra_sets", ids + [set_id])
-        db.set_wanted_bulk([c["id"] for c in raw["cards"]], True)  # punto di partenza: mi mancano tutte
         if not db.get_kv("collections_v2"):
             db.set_kv("collections_v2", True)  # un database che scarica con questo codice è già nel formato nuovo
-        log.info("Collezione %s scaricata: %d carte, tutte mancanti", set_id, len(raw["cards"]))
+        log.info("Collezione %s scaricata: %d carte", set_id, len(raw["cards"]))
     return set_from_raw(raw)
+
+
+def follow(db: Database, chat_id: str, set_id: str) -> tuple[CardSet, str, bool]:
+    """La persona segue la collezione: album suo (creato se manca, parte da "mi mancano tutte").
+    Restituisce (set, album_id, creato_adesso)."""
+    cs = get_set(db, set_id)
+    album, created = db.ensure_album(chat_id, cs.id)
+    if created:
+        db.set_wanted_bulk([c.id for c in cs.cards], True, album)
+    return cs, album, created
 
 
 def loaded_sets(db: Database) -> list[CardSet]:
@@ -122,10 +131,20 @@ def loaded_sets(db: Database) -> list[CardSet]:
 
 
 def load_index(db: Database) -> CardIndex:
-    """Indice di tutte le collezioni seguite: quelle di casa (codici brevi) più quelle scaricate."""
+    """Indice di tutte le collezioni seguite da chiunque: quelle di casa (codici brevi) più quelle scaricate."""
     migrate(db)
     home = load_sets()
     return CardIndex(list(home.sets) + loaded_sets(db), home.aliases)
+
+
+def album_for(db: Database, chat_id: str, set_id: str) -> str:
+    """Album della persona per quella collezione (di casa: creato al volo, tutte mancanti)."""
+    album, created = db.ensure_album(chat_id, set_id)
+    if created:
+        cs = get_set(db, set_id, download=False)
+        if cs:
+            db.set_wanted_bulk([c.id for c in cs.cards], True, album)
+    return album
 
 
 def migrate(db: Database) -> None:
@@ -138,8 +157,9 @@ def migrate(db: Database) -> None:
         if not cs:
             continue
         have = {str(n) for n in owned.get(sid, [])}
-        db.set_wanted_bulk([c.id for c in cs.cards if c.number not in have], True)
-        db.set_wanted_bulk([c.id for c in cs.cards if c.number in have], False)
+        album = db.ensure_album(db.owner_chat_id() or "me", sid)[0]
+        db.set_wanted_bulk([c.id for c in cs.cards if c.number not in have], True, album)
+        db.set_wanted_bulk([c.id for c in cs.cards if c.number in have], False, album)
     if db.get_kv("active_sets") is None:
         settings = db.get_settings()
         active = list(config.HOME_SET_IDS) if settings.get("home_active", True) else []
@@ -148,36 +168,40 @@ def migrate(db: Database) -> None:
     db.set_kv("collections_v2", True)
 
 
-# ---- stato per set ----------------------------------------------------------------------------------------
-def wanted_numbers(db: Database, cs: CardSet) -> set[str]:
-    wanted = db.wanted_ids()
+# ---- stato per album ----------------------------------------------------------------------------------------
+def wanted_numbers(db: Database, cs: CardSet, album: str | None = None) -> set[str]:
+    wanted = db.wanted_ids([album]) if album else db.wanted_ids()
     return {c.number for c in cs.cards if c.id in wanted}
 
 
-def owned_numbers(db: Database, cs: CardSet) -> set[str]:
-    wanted = db.wanted_ids()
+def owned_numbers(db: Database, cs: CardSet, album: str | None = None) -> set[str]:
+    wanted = db.wanted_ids([album]) if album else db.wanted_ids()
     return {c.number for c in cs.cards if c.id not in wanted}
 
 
-def mark(db: Database, cs: CardSet, numbers: list[str], wanted: bool) -> None:
+def mark(db: Database, cs: CardSet, numbers: list[str], wanted: bool, album: str | None = None) -> None:
     by_num = {c.number: c.id for c in cs.cards}
-    db.set_wanted_bulk([by_num[n] for n in numbers if n in by_num], wanted)
+    db.set_wanted_bulk([by_num[n] for n in numbers if n in by_num], wanted, album)
 
 
 def _sorted(nums) -> list[str]:
     return sorted(nums, key=lambda n: (0 if n.isdigit() else 1, int(n) if n.isdigit() else 0, n))
 
 
-def export(db: Database, index: CardIndex) -> list[dict]:
-    """Per la Mini App: le collezioni seguite non di casa, con possedute, mancanti e stato ricerca."""
-    act = set(db.active_sets())
-    wanted = db.wanted_ids()
+def export(db: Database, index: CardIndex, chat_id: str) -> list[dict]:
+    """Per la Mini App di una persona: le sue collezioni non di casa, con possedute, mancanti, stato ricerca, condivisione."""
+    act = set(db.active_sets(chat_id))
+    albums = db.albums_of(chat_id)
     out = []
     for cs in index.sets:
-        if cs.primary:
+        if cs.primary or cs.id not in albums:
             continue
+        album = albums[cs.id]
+        wanted = db.wanted_ids([album])
+        members = [m for m in db.album_members(album) if m != chat_id]
         out.append({"id": cs.id, "name": cs.name, "series": cs.series, "logo": cs.logo, "symbol": cs.symbol,
                     "printed_total": cs.printed_total, "total": cs.total, "release": cs.release, "active": cs.id in act,
+                    "album": album, "shared_with": [{"id": m, "name": db.user_name(m)} for m in members],
                     "owned": _sorted(c.number for c in cs.cards if c.id not in wanted),
                     "wanted": _sorted(c.number for c in cs.cards if c.id in wanted),
                     "cards": [{"id": c.id, "number": c.number, "name": c.name, "rarity": c.rarity, "image": c.image} for c in cs.cards]})

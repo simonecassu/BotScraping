@@ -307,13 +307,22 @@ def _notify_pending(pending: list, db: Database, report: RunReport, dry_run: boo
     else:
         recipients = [(chat, TelegramNotifier(chat_ids=[chat]), db.settings_for(chat)) for chat in db.chat_ids()]
     history = db.list_found()
+    all_pending = pending
     pending_keys = set(found_ids)
     sent_any: set[str] = set()
     deal_keys: set[str] = set()
     for i, (chat, ntf, st) in enumerate(recipients):
         first = i == 0  # i contatori del giro si riferiscono alla prima persona (il proprietario)
+        if chat:  # solo gli annunci che riguardano le carte mancanti nei SUOI album
+            mine = db.wanted_for(chat)
+            pending = [(lst, res) for lst, res in all_pending
+                       if any(c.id in mine for c in (res.wanted + res.possible_wanted))]
+        else:
+            pending = all_pending
+        if not pending:
+            continue
         if notifications_suppressed(st):
-            db.enqueue(chat, list(found_ids.values()))
+            db.enqueue(chat, [found_ids[lst.key] for lst, _ in pending])
             if first:
                 report.queued += len(pending)
             log.info("Notifiche sospese per %s (pausa/notte): %d annunci in coda", chat or "destinatario", len(pending))

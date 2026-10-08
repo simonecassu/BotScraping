@@ -101,55 +101,69 @@ def code_for(index: CardIndex, card) -> str:
 
 
 # ---- stato (kv "watches": {card_id: {...}}) -------------------------------------
-def list_watches(db: Database) -> dict[str, dict]:
-    w = db.get_kv("watches", {}) or {}
+def _chat(db: Database, chat_id: str) -> str:
+    return chat_id or db.owner_chat_id() or "me"
+
+
+def list_watches(db: Database, chat_id: str = "") -> dict[str, dict]:
+    """Inseguimenti di una persona (ognuno ha i suoi)."""
+    w = db.get_kv(f"watches:{_chat(db, chat_id)}", {}) or {}
     return w if isinstance(w, dict) else {}
 
 
-def add_watch(db: Database, card_id: str, duration_s: int = DURATION_S, every_s: int = EVERY_S) -> dict:
-    watches = list_watches(db)
+def all_watches(db: Database) -> list[tuple[str, dict[str, dict]]]:
+    """[(chat_id, inseguimenti)] di tutte le persone collegate."""
+    return [(c, list_watches(db, c)) for c in (db.chat_ids() or ["me"])]
+
+
+def add_watch(db: Database, card_id: str, duration_s: int = DURATION_S, every_s: int = EVERY_S, chat_id: str = "") -> dict:
+    chat_id = _chat(db, chat_id)
+    watches = list_watches(db, chat_id)
     now = time.time()
     watches[card_id] = {"started": now, "until": now + duration_s, "every": every_s, "last": 0, "found": 0, "checks": 0}
-    db.set_kv("watches", watches)
+    db.set_kv(f"watches:{chat_id}", watches)
     return watches[card_id]
 
 
-def remove_watch(db: Database, card_id: str) -> bool:
-    watches = list_watches(db)
+def remove_watch(db: Database, card_id: str, chat_id: str = "") -> bool:
+    chat_id = _chat(db, chat_id)
+    watches = list_watches(db, chat_id)
     if card_id not in watches:
         return False
     del watches[card_id]
-    db.set_kv("watches", watches)
+    db.set_kv(f"watches:{chat_id}", watches)
     return True
 
 
-def clear_watches(db: Database) -> int:
-    n = len(list_watches(db))
-    db.set_kv("watches", {})
+def clear_watches(db: Database, chat_id: str = "") -> int:
+    chat_id = _chat(db, chat_id)
+    n = len(list_watches(db, chat_id))
+    db.set_kv(f"watches:{chat_id}", {})
     return n
 
 
 MAX_FOUND_LOG = 300
 
 
-def record_found(db: Database, card_id: str, listings: list) -> None:
-    """Tiene l'elenco (ultimi 300) degli annunci scovati dagli inseguimenti, per la sezione della Mini App."""
-    log_ = db.get_kv("watch_found", []) or []
+def record_found(db: Database, card_id: str, listings: list, chat_id: str = "") -> None:
+    """Tiene l'elenco (ultimi 300) degli annunci scovati dagli inseguimenti di una persona, per la Mini App."""
+    chat_id = _chat(db, chat_id)
+    log_ = db.get_kv(f"watch_found:{chat_id}", []) or []
     now = time.time()
     for lst in listings:
         log_.append({"key": lst.key, "card": card_id, "ts": now, "title": lst.title, "url": lst.url, "source": lst.source,
                      "price": lst.price_text or (f"{lst.price:.2f} €" if lst.price is not None else ""),
                      "price_num": lst.price, "image": lst.image or "", "location": lst.location or ""})
-    db.set_kv("watch_found", log_[-MAX_FOUND_LOG:])
+    db.set_kv(f"watch_found:{chat_id}", log_[-MAX_FOUND_LOG:])
 
 
-def found_log(db: Database) -> list[dict]:
-    log_ = db.get_kv("watch_found", []) or []
+def found_log(db: Database, chat_id: str = "") -> list[dict]:
+    log_ = db.get_kv(f"watch_found:{_chat(db, chat_id)}", []) or []
     return log_ if isinstance(log_, list) else []
 
 
-def describe(index: CardIndex, db: Database) -> str:
-    watches = list_watches(db)
+def describe(index: CardIndex, db: Database, chat_id: str = "") -> str:
+    watches = list_watches(db, chat_id)
     if not watches:
         return ("Nessun inseguimento attivo. Es. <code>/insegui 151</code>: per 6 ore cerco la 151 ogni 5 minuti. "
                 "Varianti: <code>/insegui 151 2h</code>, <code>/insegui 151 2h ogni 10m</code>.")
@@ -167,18 +181,24 @@ def describe(index: CardIndex, db: Database) -> str:
 
 # ---- esecuzione a ogni sveglia -----------------------------------------------------
 def run_watches(index: CardIndex, db: Database, notifier=None, scrapers: dict | None = None) -> list[str]:
-    """Esegue gli inseguimenti dovuti; notifica subito i soli annunci nuovi; chiude quelli scaduti."""
+    """Esegue gli inseguimenti dovuti di ogni persona, con le sue impostazioni; notifica solo lei."""
     from .notifier import TelegramNotifier
+    out: list[str] = []
+    for chat, watches in all_watches(db):
+        if not watches:
+            continue
+        ntf = notifier or TelegramNotifier(chat_ids=[chat] if chat != "me" else db.chat_ids())
+        out += _run_for(index, db, chat, watches, ntf, scrapers)
+    return out
+
+
+def _run_for(index: CardIndex, db: Database, chat: str, watches: dict, notifier, scrapers: dict | None) -> list[str]:
     from .search import notifications_suppressed, search_card
 
-    watches = list_watches(db)
-    if not watches:
-        return []
-    settings = db.get_settings()
+    settings = db.settings_for(chat)
     if notifications_suppressed(settings):
-        log.info("Inseguimenti rimandati: notifiche in pausa / ore notturne")
+        log.info("Inseguimenti di %s rimandati: notifiche in pausa / ore notturne", chat)
         return ["rimandate (pausa/notte)"]
-    notifier = notifier or TelegramNotifier.from_db(db)
     now = time.time()
     log_lines: list[str] = []
     changed = False
@@ -206,8 +226,8 @@ def run_watches(index: CardIndex, db: Database, notifier=None, scrapers: dict | 
             sent = notifier.notify_many(items, max_per_card=int(settings.get("max_per_card", 5) or 5),
                                         images=bool(settings.get("images", True)))
             w["found"] = int(w.get("found", 0)) + sum(1 for ok in sent if ok)
-            record_found(db, cid, [lst for lst, _ in items])
+            record_found(db, cid, [lst for lst, _ in items], chat)
         log_lines.append(f"{card.label}: {len(items)} nuovi" + (f" (errori: {', '.join(errors)})" if errors else ""))
     if changed:
-        db.set_kv("watches", watches)
+        db.set_kv(f"watches:{chat}", watches)
     return log_lines

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import time
 
+from . import config
 from . import stats as pstats
 from . import watch
 from . import collections as coll
@@ -15,10 +16,15 @@ SETTING_KEYS = ["interval_minutes", "lot_min_ratio", "max_price", "max_per_card"
                 "deal_pct", "images", "paused", "quiet_hours", "per_card_queries", "only_italy", "home_active"]
 
 
-def build_state(index: CardIndex, db: Database, max_found: int = 300) -> dict:
-    wanted = db.wanted_ids()
+def build_state(index: CardIndex, db: Database, max_found: int = 300, chat_id: str = "") -> dict:
+    """Stato per la Mini App di una persona (chat_id); senza chat: il proprietario."""
+    from . import collections as coll
+    chat_id = chat_id or db.owner_chat_id() or "me"
+    for sid in config.HOME_SET_IDS:
+        coll.album_for(db, chat_id, sid)
+    wanted = db.wanted_for(chat_id)
     rows = db.list_found()
-    settings = db.get_settings()
+    settings = db.settings_for(chat_id)
     sets = []
     for s in index.sets:
         if not s.primary:
@@ -42,7 +48,7 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300) -> dict:
     from .cards import CardIndex
     home_index = CardIndex([s for s in index.sets if s.primary], index.aliases)
     comp = pstats.completion(home_index, wanted, rows)
-    active = db.active_sets()
+    active = db.active_sets(chat_id)
     settings = dict(settings, home_active=any(s.id in active for s in home_index.sets))
     runs = db.last_runs(1)
     last = runs[0] if runs else None
@@ -59,6 +65,11 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300) -> dict:
         "generated_at": time.time(),
         "owner_chat_id": db.owner_chat_id(),
         "chat_ids": db.chat_ids(),
+        "me": {"id": chat_id, "name": db.user_name(chat_id)},
+        "friends": [{"id": f, "name": db.user_name(f)} for f in db.friends(chat_id)],
+        "home_album": {sid: {"album": db.albums_of(chat_id).get(sid),
+                             "shared_with": [{"id": m, "name": db.user_name(m)} for m in db.album_members(db.albums_of(chat_id).get(sid, "")) if m != chat_id]}
+                       for sid in config.HOME_SET_IDS},
         # usati dal ponte per decidere se svegliare GitHub a ogni tick di 5 minuti
         "last_search_ts": float(db.get_kv("last_search_ts", 0) or 0),
         "queued": len(db.queued_found()),
@@ -74,42 +85,43 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300) -> dict:
                       "errors": last["errors"], "per_source": last.get("per_source") or {}} if last else None),
         "found": found,
         "watches": [{"card": cid, "label": (lambda c: c.label if c else cid)(watch.resolve_card(index, db, cid)[0]),
+                     "chat": chat_id,
                      "code": (lambda c: watch.code_for(index, c) if c else cid)(watch.resolve_card(index, db, cid)[0]),
                      "started": w.get("started"), "until": w.get("until"),
                      "every": w.get("every"), "checks": w.get("checks", 0), "found": w.get("found", 0)}
-                    for cid, w in watch.list_watches(db).items()],
-        "watch_found": list(reversed(watch.found_log(db))),
-        "collections": coll.export(db, index),
-        "values": _values(index, wanted, all_rows),
-        "shopping": _shopping(index, wanted, rows),
-        "copies": db.copies(),
+                    for cid, w in watch.list_watches(db, chat_id).items()],
+        "watch_found": list(reversed(watch.found_log(db, chat_id))),
+        "collections": coll.export(db, index, chat_id),
+        "values": _values(index, wanted, all_rows, db.albums_of(chat_id)),
+        "shopping": _shopping(index, wanted, rows, db.albums_of(chat_id)),
+        "copies": db.copies(chat_id),
         "active_sets": active,
-        "current_set": db.current_set(),
+        "current_set": db.current_set(chat_id),
     }
 
 
-def _groups(index: CardIndex) -> dict[str, list]:
-    """Collezioni come le vede la Mini App: "home" = quelle di casa insieme, le altre una per una."""
+def _groups(index: CardIndex, albums: dict | None = None) -> dict[str, list]:
+    """Collezioni come le vede la Mini App: "home" = quelle di casa insieme, le altre (della persona) una per una."""
     out: dict[str, list] = {"home": [c for s in index.sets if s.primary for c in s.cards]}
     for s in index.sets:
-        if not s.primary:
+        if not s.primary and (albums is None or s.id in albums):
             out[s.id] = list(s.cards)
     return out
 
 
-def _values(index: CardIndex, wanted: set[str], all_rows: list[dict]) -> dict:
+def _values(index: CardIndex, wanted: set[str], all_rows: list[dict], albums: dict | None = None) -> dict:
     out = {}
-    for key, cards in _groups(index).items():
+    for key, cards in _groups(index, albums).items():
         v = pstats.collection_value(cards, wanted, all_rows)
         out[key] = {"owned": v.owned, "owned_priced": v.owned_priced, "owned_value": round(v.owned_value, 2),
                     "missing": v.missing, "missing_priced": v.missing_priced, "missing_cost": round(v.missing_cost, 2)}
     return out
 
 
-def _shopping(index: CardIndex, wanted: set[str], rows: list[dict]) -> dict:
+def _shopping(index: CardIndex, wanted: set[str], rows: list[dict], albums: dict | None = None) -> dict:
     from . import shopping
     out = {}
-    for key, cards in _groups(index).items():
+    for key, cards in _groups(index, albums).items():
         sl = shopping.build(cards, wanted, rows)
         out[key] = {"total": round(sl.total, 2), "covered": sl.covered, "uncovered": [c.id for c in sl.uncovered],
                     "sellers": [{"label": sl.seller_label(k), "total": round(sum(p.price for p in picks), 2),
@@ -119,6 +131,27 @@ def _shopping(index: CardIndex, wanted: set[str], rows: list[dict]) -> dict:
     return out
 
 
+def build_summary(index: CardIndex, db: Database) -> dict:
+    """state.json: solo ciò che serve al ponte (timer, persone collegate), senza dati personali."""
+    any_watch = [{"until": w.get("until")} for _, ws in watch.all_watches(db) for w in ws.values()]
+    return {
+        "generated_at": time.time(),
+        "owner_chat_id": db.owner_chat_id(),
+        "chat_ids": db.chat_ids(),
+        "last_search_ts": float(db.get_kv("last_search_ts", 0) or 0),
+        "queued": len(db.queued_found()),
+        "watches": any_watch,
+        "settings": {k: db.get_settings().get(k) for k in ("interval_minutes", "paused", "quiet_hours")},
+        "per_user": True,
+    }
+
+
 def write_state(index: CardIndex, db: Database, path: str) -> None:
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(build_state(index, db), fh, ensure_ascii=False, separators=(",", ":"))
+    """Scrive state.json (riepilogo) e state-<chat>.json per ogni persona collegata nella stessa cartella."""
+    import os
+    folder = os.path.dirname(path) or "."
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(build_summary(index, db), f, ensure_ascii=False)
+    for chat in (db.chat_ids() or [db.owner_chat_id() or "me"]):
+        with open(os.path.join(folder, f"state-{chat}.json"), "w", encoding="utf-8") as f:
+            json.dump(build_state(index, db, chat_id=chat), f, ensure_ascii=False)
