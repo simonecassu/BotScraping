@@ -80,9 +80,8 @@ a{color:var(--link);text-decoration:none}
   <section id="tab-home">
     <div class="tiles">
       <div class="tile red" data-go="coll"><span class="ic">📚</span><div><b>Collezioni</b><small id="t-coll">…</small></div></div>
-      <div class="tile yel" data-go="chase"><span class="ic">🏃</span><div><b>Inseguite</b><small id="t-chase">…</small></div></div>
-      <div class="tile" data-go="found"><span class="ic">🔎</span><div><b>Trovati</b><small id="t-found">…</small></div></div>
       <div class="tile" data-go="settings"><span class="ic">⚙️</span><div><b>Impostazioni</b><small id="t-set">…</small></div></div>
+      <div class="tile yel" id="tile-ai"><span class="ic">🧠</span><div><b>Analisi IA</b><small>in arrivo</small></div></div>
     </div>
     <p class="hint" id="home-hint" style="margin-top:14px"></p>
   </section>
@@ -93,6 +92,8 @@ a{color:var(--link);text-decoration:none}
   </section>
 
   <section id="tab-check" class="hidden">
+    <div class="seg" id="cseg"><button data-cseg="check" class="on">Checklist</button><button data-cseg="chase">Inseguiti</button><button data-cseg="found">Trovati</button></div>
+    <div id="cseg-check">
     <div id="check-head"></div>
     <div class="card-row">
       <input id="q" type="search" placeholder="Cerca nome o numero…">
@@ -101,10 +102,9 @@ a{color:var(--link);text-decoration:none}
     <div class="card-row" id="setpills"></div>
     <p class="hint">Le carte che <b>hai</b> sono accese, quelle che <b>mancano</b> restano al buio. Tocca una carta per cambiarla: ogni tocco diventa un comando per il bot.</p>
     <div id="grid" class="grid"></div>
-  </section>
-
-  <section id="tab-chase" class="hidden">
-    <p class="hint">Un inseguimento cerca una carta <b>ogni 5 minuti per 6 ore</b> e ti avvisa in chat solo sugli annunci nuovi.</p>
+  </div>
+    <div id="cseg-chase" class="hidden">
+    <p class="hint">Un inseguimento cerca una carta di questa collezione <b>ogni 5 minuti per 6 ore</b> e ti avvisa in chat solo sugli annunci nuovi.</p>
     <div class="card-row">
       <input id="chase-card" type="search" placeholder="Es. 151 o c4" style="flex:1;min-width:110px">
       <select id="chase-dur"><option value="">6 ore</option><option value="1h">1 ora</option><option value="2h">2 ore</option><option value="12h">12 ore</option><option value="24h">24 ore</option></select>
@@ -114,9 +114,8 @@ a{color:var(--link);text-decoration:none}
     <div id="chase-list"></div>
     <h2>Trovati inseguendo</h2>
     <div id="chase-found"></div>
-  </section>
-
-  <section id="tab-found" class="hidden">
+  </div>
+    <div id="cseg-found" class="hidden">
     <div class="seg"><button data-seg="ann" class="on">Annunci</button><button data-seg="prz">Prezzi</button></div>
     <div id="seg-ann">
       <div class="card-row"><input id="qf" type="search" placeholder="Filtra per carta…"><span class="pill" id="fcount"></span></div>
@@ -130,7 +129,12 @@ a{color:var(--link);text-decoration:none}
       <p class="hint">Minimo, mediana e massimo degli annunci visti. Tocca una riga per aprire la cartella.</p>
       <table id="ptable"><thead><tr><th>Carta</th><th class="r">Min</th><th class="r">Mediana</th><th class="r">Max</th><th class="r">N</th></tr></thead><tbody></tbody></table>
     </div>
+  </div>
   </section>
+
+  
+
+  
 
   <section id="tab-settings" class="hidden">
     <div id="settings"></div>
@@ -205,21 +209,20 @@ async function load() {
   renderAll();
 }
 
-function renderAll() { renderHome(); renderCollections(); renderChecklist(); renderFound(); renderChase(); renderPrices(); renderSettings(); }
+function renderAll() { renderHome(); renderCollections(); renderChecklist(); renderSettings(); if (!$("#tab-check").classList.contains("hidden")) { renderChase(); renderFound(); renderPrices(); } }
 
 /* ---------- Home ---------- */
 function renderHome() {
   const nExtraActive = Object.values(extra).filter((e) => e.active).length;
-  $("#t-coll").textContent = `30th Celebration · ${wanted.size} mancanti` + (nExtraActive ? ` · +${nExtraActive} attive` : "");
   const ws = state.watches || [];
-  $("#t-chase").textContent = ws.length ? `${ws.length} attiv${ws.length === 1 ? "o" : "i"} · ${ws.reduce((a, w) => a + (w.found || 0), 0)} nuovi` : "nessuno attivo";
-  $("#t-found").textContent = `${state.found.length} annunci · ${state.completion.percent.toFixed(0)}% set`;
+  $("#t-coll").textContent = `30th Celebration · ${wanted.size} mancanti` + (nExtraActive ? ` · +${nExtraActive} attive` : "") + (ws.length ? ` · ${ws.length} inseguit${ws.length === 1 ? "a" : "e"}` : "");
   const s = state.settings;
   $("#t-set").textContent = s.paused ? "⏸ in pausa" : `ogni ${s.interval_minutes} min · ${(s.sources || []).length} fonti`;
   const lr = state.last_run;
   $("#home-hint").textContent = lr ? `Ultimo giro ${new Date(lr.started_at * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}: ${lr.listings_seen} annunci letti, ${lr.matches} segnalati.` : "";
 }
-document.querySelectorAll(".tile").forEach((t) => t.onclick = () => showTab(t.dataset.go));
+document.querySelectorAll(".tile[data-go]").forEach((t) => t.onclick = () => showTab(t.dataset.go));
+$("#tile-ai").onclick = () => toast("🧠 Analisi IA: in arrivo");
 
 /* ---------- Collezioni ---------- */
 async function loadCatalog() {
@@ -276,6 +279,17 @@ async function openSet(id) {
   }
   showTab("check");
 }
+
+/* ---------- carte di qualsiasi collezione ---------- */
+function setOf(id) { return String(id).slice(0, String(id).lastIndexOf("-")); }
+function inCurSet(id) { const sid = setOf(id); return curSet === "home" ? HOME_SETS.includes(sid) : sid === curSet; }
+function cardInfo(id) {
+  if (byId[id]) return byId[id];
+  const e = extra[setOf(id)];
+  return e ? e.cards.find((c) => c.id === id) : null;
+}
+function cardTitle(c) { return c.printed ? `${c.name} ${c.number}/${c.printed}` : `${c.name} (${c.set === "me55c" ? "Classic" : c.setName || c.set})`; }
+function chaseCode(c) { return HOME_SETS.includes(c.set) ? c.code : `${c.set}:${c.number}`; }
 
 /* ---------- Checklist ---------- */
 function curCards() { return curSet === "home" ? cards : ((extra[curSet] || {}).cards || []); }
@@ -349,13 +363,17 @@ function renderFound() {
   const q = $("#qf").value.trim().toLowerCase();
   const groups = {};
   let lots = [];
+  let nSet = 0;
   for (const f of state.found) {
-    if (f.kind === "lot") { lots.push(f); continue; }
-    for (const id of (f.sure.length ? f.sure : f.cards)) (groups[id] ||= []).push(f);
+    if (f.kind === "lot") { if (curSet === "home") { lots.push(f); nSet++; } continue; }
+    const ids = (f.sure.length ? f.sure : f.cards).filter(inCurSet);
+    if (ids.length) nSet++;
+    for (const id of ids) (groups[id] ||= []).push(f);
   }
-  const ids = Object.keys(groups).filter((id) => byId[id]).sort((a, b) => cards.indexOf(byId[a]) - cards.indexOf(byId[b]))
-    .filter((id) => !q || byId[id].name.toLowerCase().includes(q) || byId[id].number.includes(q));
-  $("#fcount").textContent = state.found.length + " annunci";
+  const order = curCards();
+  const ids = Object.keys(groups).filter((id) => cardInfo(id)).sort((a, b) => order.indexOf(cardInfo(a)) - order.indexOf(cardInfo(b)))
+    .filter((id) => !q || cardInfo(id).name.toLowerCase().includes(q) || cardInfo(id).number.includes(q));
+  $("#fcount").textContent = nSet + " annunci";
   const folder = (title, img, items, key) => {
     const bySrc = {};
     items.forEach((f) => (bySrc[f.source] ||= []).push(f));
@@ -369,14 +387,14 @@ function renderFound() {
         </div>`).join("")).join("");
     return `<div class="folder" data-key="${key}"><div class="hd">${img ? `<img src="${esc(img)}" alt="">` : ""}<b>${esc(title)}</b><span class="cnt">${items.length} ›</span></div><div class="bd hidden">${body}</div></div>`;
   };
-  let html = ids.map((id) => { const c = byId[id]; return folder(c.printed ? `${c.name} ${c.number}/${c.printed}` : `${c.name} (Classic)`, c.image, groups[id], id); }).join("");
+  let html = ids.map((id) => { const c = cardInfo(id); return folder(cardTitle(c), c.image, groups[id], id); }).join("");
   if (lots.length && !q) html += folder("📦 Lotti con carte mancanti", "", lots, "lot");
   $("#folders").innerHTML = html || '<p class="hint">Nessun annuncio trovato finora.</p>';
   $("#folders").querySelectorAll(".folder .hd").forEach((hd) => hd.onclick = () => hd.nextElementSibling.classList.toggle("hidden"));
   $("#folders").querySelectorAll(".lst").forEach((el) => el.onclick = () => openLink(el.dataset.url));
 }
 $("#qf").oninput = renderFound;
-function openFolder(id) { showTab("found"); setSeg("ann"); $("#qf").value = ""; renderFound(); const f = $(`.folder[data-key="${id}"]`); if (f) { f.querySelector(".bd").classList.remove("hidden"); f.scrollIntoView({ behavior: "smooth" }); } }
+function openFolder(id) { showCseg("found"); setSeg("ann"); $("#qf").value = ""; renderFound(); const f = $(`.folder[data-key="${id}"]`); if (f) { f.querySelector(".bd").classList.remove("hidden"); f.scrollIntoView({ behavior: "smooth" }); } }
 
 
 function setSeg(name) { document.querySelectorAll(".seg button").forEach((b) => b.classList.toggle("on", b.dataset.seg === name)); $("#seg-ann").classList.toggle("hidden", name !== "ann"); $("#seg-prz").classList.toggle("hidden", name !== "prz"); }
@@ -384,20 +402,20 @@ document.querySelectorAll(".seg button").forEach((b) => b.onclick = () => setSeg
 
 /* ---------- Inseguimento ---------- */
 function renderChase() {
-  const ws = state.watches || [], now = Date.now() / 1000;
+  const ws = (state.watches || []).filter((w) => inCurSet(w.card)), now = Date.now() / 1000;
   const left = (sec) => sec < 60 ? "pochi secondi" : sec < 3600 ? Math.round(sec / 60) + " min" : (sec / 3600).toFixed(sec % 3600 ? 1 : 0).replace(".0", "") + " ore";
   const hhmm = (ts) => new Date(ts * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
-  $("#chase-list").innerHTML = ws.length ? ws.sort((a, b) => a.until - b.until).map((w) => { const c = byId[w.card]; return `
+  $("#chase-list").innerHTML = ws.length ? ws.sort((a, b) => a.until - b.until).map((w) => { const c = cardInfo(w.card); return `
     <div class="folder"><div class="hd">${c && c.image ? `<img src="${esc(c.image)}" alt="">` : ""}
       <b>${esc(w.label)}<small class="hint" style="display:block">ogni ${Math.round(w.every / 60)} min · fino alle ${hhmm(w.until)} (ancora ${left(Math.max(0, w.until - now))})<br>${w.checks} controlli · <b>${w.found}</b> annunci nuovi</small></b>
       <button class="btn sec" data-stop="${esc(w.code)}">⏹</button></div></div>`; }).join("")
-    : '<p class="hint">Nessun inseguimento attivo. Scrivi un numero qui sopra e tocca Insegui.</p>';
+    : '<p class="hint">Nessun inseguimento attivo in questa collezione. Scrivi un numero qui sopra e tocca Insegui.</p>';
   $("#chase-list").querySelectorAll("[data-stop]").forEach((b) => b.onclick = async () => { if (await sendCmd("/insegui stop " + b.dataset.stop)) { toast("Fermato: guarda la chat"); b.closest(".folder").style.opacity = .4; } });
-  const fl = state.watch_found || [];
+  const fl = (state.watch_found || []).filter((f) => inCurSet(f.card));
   const groups = {};
   fl.forEach((f) => (groups[f.card] ||= []).push(f));
-  $("#chase-found").innerHTML = fl.length ? Object.keys(groups).map((id) => { const c = byId[id]; const items = groups[id]; return `
-    <div class="folder"><div class="hd">${c && c.image ? `<img src="${esc(c.image)}" alt="">` : ""}<b>${esc(c ? (c.printed ? `${c.name} ${c.number}/${c.printed}` : `${c.name} (Classic)`) : id)}</b><span class="cnt">${items.length} ›</span></div>
+  $("#chase-found").innerHTML = fl.length ? Object.keys(groups).map((id) => { const c = cardInfo(id); const items = groups[id]; return `
+    <div class="folder"><div class="hd">${c && c.image ? `<img src="${esc(c.image)}" alt="">` : ""}<b>${esc(c ? cardTitle(c) : id)}</b><span class="cnt">${items.length} ›</span></div>
       <div class="bd ${Object.keys(groups).length > 1 ? "hidden" : ""}">${items.map((f) => `
         <div class="lst" data-url="${esc(f.url)}">
           ${f.image ? `<img loading="lazy" src="${esc(f.image)}" alt="">` : '<div class="ph">foto n.d.</div>'}
@@ -412,13 +430,37 @@ function renderChase() {
 $("#chase-go").onclick = async () => {
   const v = $("#chase-card").value.trim(), d = $("#chase-dur").value;
   if (!v) { toast("Scrivi il numero della carta"); return; }
-  if (await sendCmd(`/insegui ${v}${d ? " " + d : ""}`)) { toast("Inseguimento avviato: guarda la chat"); $("#chase-card").value = ""; setTimeout(load, 70000); }
+  const target = curSet === "home" ? v : v.split(/\s+/).map((t) => `${curSet}:${t}`).join(" ");
+  if (await sendCmd(`/insegui ${target}${d ? " " + d : ""}`)) { toast("Inseguimento avviato: guarda la chat"); $("#chase-card").value = ""; setTimeout(load, 70000); }
 };
 $("#chase-card").onkeydown = (e) => { if (e.key === "Enter") $("#chase-go").click(); };
 
 
 /* ---------- Prezzi / progresso ---------- */
+function pricesOfSet() {
+  // altre collezioni: min / mediana / max calcolati dagli annunci trovati (la 30th ha le statistiche del bot)
+  const p = {};
+  for (const f of state.found) {
+    if (f.kind === "lot" || f.price_num == null) continue;
+    for (const id of (f.sure.length ? f.sure : f.cards)) if (inCurSet(id)) (p[id] ||= []).push(f.price_num);
+  }
+  const out = {};
+  for (const [id, v] of Object.entries(p)) { v.sort((a, b) => a - b); out[id] = { min: v[0], max: v[v.length - 1], median: v[Math.floor(v.length / 2)], n: v.length }; }
+  return out;
+}
 function renderPrices() {
+  if (curSet !== "home") {
+    const e = extra[curSet], total = e.cards.length || e.meta.total || 0, owned = e.owned.size, pct = total ? 100 * owned / total : 0;
+    $("#progress").innerHTML = `<h2>Progresso ${esc(e.meta.name)}</h2><div class="bar"><i style="width:${pct.toFixed(0)}%"></i></div>
+      <div class="kpi"><div><b>${owned}/${total}</b><span>carte possedute (${pct.toFixed(0)}%)</span></div><div><b>${total - owned}</b><span>mancanti</span></div></div>`;
+    $("#cost").innerHTML = e.active ? '<p class="hint">Stima di spesa disponibile man mano che il bot trova annunci.</p>' : '<p class="hint">Ricerca spenta per questa collezione: accendila dalla checklist per raccogliere prezzi.</p>';
+    const p = pricesOfSet();
+    const rows = e.cards.filter((k) => p[k.id]).sort((a, b) => p[b.id].min - p[a.id].min);
+    $("#ptable tbody").innerHTML = rows.map((k) => { const s = p[k.id]; return `<tr data-id="${k.id}"><td>${!e.owned.has(k.number) ? "⭐ " : ""}${esc(k.name)} <span class="hint">${k.number}${k.printed ? "/" + k.printed : ""}</span></td><td class="r">${eur(s.min)}</td><td class="r">${eur(s.median)}</td><td class="r">${eur(s.max)}</td><td class="r">${s.n}</td></tr>`; }).join("")
+      || '<tr><td colspan="5" class="hint">Nessun prezzo ancora.</td></tr>';
+    $("#ptable tbody").querySelectorAll("tr[data-id]").forEach((tr) => tr.onclick = () => openFolder(tr.dataset.id));
+    return;
+  }
   const c = state.completion, p = state.prices;
   $("#progress").innerHTML = `
     <h2>Progresso 30th Celebration</h2>
@@ -478,14 +520,21 @@ function renderSettings() {
 
 
 /* ---------- navigazione ---------- */
-const TITLES = { home: "Pokébot", coll: "Collezioni", chase: "Inseguite", found: "Trovati", settings: "Impostazioni" };
+const TITLES = { home: "Pokébot", coll: "Collezioni", settings: "Impostazioni" };
+function showCseg(name) {
+  document.querySelectorAll("#cseg button").forEach((b) => b.classList.toggle("on", b.dataset.cseg === name));
+  ["check", "chase", "found"].forEach((t) => $("#cseg-" + t).classList.toggle("hidden", t !== name));
+  if (name === "chase") renderChase();
+  if (name === "found") { renderFound(); renderPrices(); }
+}
+document.querySelectorAll("#cseg button").forEach((b) => b.onclick = () => showCseg(b.dataset.cseg));
 function showTab(name, push = true) {
   const cur = document.querySelector("main > section:not(.hidden)");
   if (push && cur) stack.push(cur.id.replace("tab-", ""));
-  ["home", "coll", "check", "chase", "found", "settings"].forEach((t) => $("#tab-" + t).classList.toggle("hidden", t !== name));
+  ["home", "coll", "check", "settings"].forEach((t) => $("#tab-" + t).classList.toggle("hidden", t !== name));
   $("#ttl").textContent = name === "check" ? (curSet === "home" ? "30th Celebration" : ((extra[curSet] || {}).meta || {}).name || curSet) : TITLES[name];
   $("#back").classList.toggle("hidden", name === "home");
-  if (name === "check") renderChecklist();
+  if (name === "check") { showCseg("check"); renderChecklist(); }
   window.scrollTo(0, 0);
 }
 $("#back").onclick = () => { let prev = stack.pop() || "home"; if (prev === "check") prev = "coll"; showTab(prev, false); if (prev === "home") stack.length = 0; };

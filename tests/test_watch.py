@@ -102,3 +102,24 @@ def test_found_log_and_export(index):
     st = build_state(index, db)
     assert st["watches"][0]["code"] == "131" and st["watches"][0]["found"] == 1 and st["watches"][0]["checks"] == 1
     assert st["watch_found"][0]["key"] == "fake:L1" and st["watch_found"][0]["card"] == "me55-131" and st["watch_found"][0]["image"] == "https://img/1.jpg"
+
+
+def test_chase_card_of_other_collection(index, monkeypatch):
+    from pokebot import collections as coll
+    from pokebot.telegram_bot import CommandHandler
+    from tests.test_collections import _fake_net
+    _fake_net(monkeypatch)
+    db = _db()
+    db.save_settings({"sources": ["fake"], "quiet_hours": None})
+    h = CommandHandler(index, db)
+    r = h.handle("/insegui sv8:7")
+    assert "Pikachu ex 7/191" in r.text and set(watch.list_watches(db)) == {"sv8-7"} and "sv8:7" in r.buttons[0][0][1]
+    assert "sv8:7" in h.handle("/insegui").text or "Pikachu ex" in h.handle("/insegui").text
+    scr = FakeScraper([Listing("fake", "p", "Pikachu ex 7/191 Surging Sparks", "https://f/1", price=20.0, price_text="20 €")])
+    n = FakeNotifier()
+    assert watch.run_watches(index, db, n, {"fake": scr}) == ["Pikachu ex 7/191: 1 nuovi"]
+    assert [l.key for l, _ in n.sent] == ["fake:p"]
+    from pokebot.webapp_export import build_state
+    w = build_state(index, db)["watches"][0]
+    assert w["code"] == "sv8:7" and w["label"] == "Pikachu ex 7/191"
+    assert "Fermato" in h.handle("/insegui stop sv8:7").text and not watch.list_watches(db)

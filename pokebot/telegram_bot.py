@@ -544,6 +544,27 @@ class CommandHandler:
             return Reply(msg)
         return Reply(f"Non ho capito. Usa <code>/collezione {cs.id} manca 4 7</code>, <code>ho 4</code>, <code>attiva</code>, <code>disattiva</code>.")
 
+    def _resolve_any(self, args: str) -> tuple[list, list[str]]:
+        """Come resolve(), più i codici set:numero delle altre collezioni (es. sv8:7)."""
+        from . import collections as coll
+        plain, cards, unknown = [], [], []
+        for t in args.replace(",", " ").split():
+            if ":" in t:
+                sid, _, num = t.partition(":")
+                try:
+                    cs = coll.get_set(self.db, sid.lower())
+                except Exception:  # noqa: BLE001
+                    cs = None
+                card = next((c for c in cs.cards if c.number.lower() == num.lower()), None) if cs else None
+                (cards.append(card) if card else unknown.append(t))
+            else:
+                plain.append(t)
+        if plain:
+            c2, u2 = self.resolve(" ".join(plain))
+            cards += c2
+            unknown += u2
+        return cards, unknown
+
     def _chase(self, args: str) -> Reply:
         """/insegui 151 – per 6 ore cerca quella carta ogni 5 minuti; /insegui – elenco; /insegui stop [carte]."""
         from . import watch
@@ -555,14 +576,14 @@ class CommandHandler:
             if not rest.strip():
                 n = watch.clear_watches(self.db)
                 return Reply(f"⏹ Fermati {n} inseguimenti." if n else "Nessun inseguimento attivo.")
-            cards, unknown = self.resolve(rest)
+            cards, unknown = self._resolve_any(rest)
             stopped = [c.label for c in cards if watch.remove_watch(self.db, c.id)]
             msg = ("⏹ Fermato: " + ", ".join(html.escape(x) for x in stopped)) if stopped else "Quelle carte non erano inseguite."
             if unknown:
                 msg += "\n❓ Non capiti: " + html.escape(" ".join(unknown))
             return Reply(msg)
         card_args, duration, every = watch.parse_watch_args(a)
-        cards, unknown = self.resolve(card_args)
+        cards, unknown = self._resolve_any(card_args)
         if not cards:
             return Reply("Carta non riconosciuta. Es. <code>/insegui 151</code>, <code>/insegui c4 2h</code>, <code>/insegui 151 2h ogni 10m</code>.")
         active = watch.list_watches(self.db)
@@ -578,7 +599,7 @@ class CommandHandler:
                  "Primo controllo tra pochi secondi, poi ti avviso solo quando spunta un annuncio nuovo. Alla fine, il riepilogo."]
         if unknown:
             lines.append("❓ Non capiti: " + html.escape(" ".join(unknown)))
-        code = self.index.code_of[cards[0].id]
+        code = watch.code_for(self.index, cards[0])
         return Reply("\n".join(lines), buttons=[[("⏹ Ferma", f"/insegui stop {code}"), ("🏃 Attivi", "/insegui")]])
 
     def _search_cards(self, args: str) -> Reply:

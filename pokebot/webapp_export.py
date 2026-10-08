@@ -66,8 +66,9 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300) -> dict:
         "last_run": ({"started_at": last["started_at"], "listings_seen": last["listings_seen"], "matches": last["matches"],
                       "errors": last["errors"], "per_source": last.get("per_source") or {}} if last else None),
         "found": found,
-        "watches": [{"card": cid, "label": (index.by_id[cid].label if cid in index.by_id else cid),
-                     "code": index.code_of.get(cid, cid), "started": w.get("started"), "until": w.get("until"),
+        "watches": [{"card": cid, "label": (lambda c: c.label if c else cid)(watch.resolve_card(index, db, cid)[0]),
+                     "code": (lambda c: watch.code_for(index, c) if c else cid)(watch.resolve_card(index, db, cid)[0]),
+                     "started": w.get("started"), "until": w.get("until"),
                      "every": w.get("every"), "checks": w.get("checks", 0), "found": w.get("found", 0)}
                     for cid, w in watch.list_watches(db).items()],
         "watch_found": list(reversed(watch.found_log(db))),

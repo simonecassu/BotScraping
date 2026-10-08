@@ -11,7 +11,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from . import config
-from .cards import CardIndex
+from .cards import CardIndex, Card
 from .db import Database
 
 log = logging.getLogger(__name__)
@@ -79,6 +79,27 @@ def fmt_time(ts: float) -> str:
     return datetime.fromtimestamp(ts, ZoneInfo(config.TIMEZONE)).strftime("%H:%M del %d/%m")
 
 
+def resolve_card(index: CardIndex, db: Database, card_id: str):
+    """Carta e indice da usare per cercarla: di casa (indice del bot) o di un'altra collezione scaricata."""
+    card = index.by_id.get(card_id)
+    if card:
+        return card, index
+    from . import collections as coll
+    set_id = card_id.rsplit("-", 1)[0]
+    cs = coll.get_set(db, set_id, download=False)
+    if not cs:
+        return None, index
+    card = next((c for c in cs.cards if c.id == card_id), None)
+    if not card:
+        return None, index
+    return card, CardIndex(list(index.sets) + [cs])
+
+
+def code_for(index: CardIndex, card) -> str:
+    """Codice per i comandi: numero/c4 per la collezione di casa, set:numero per le altre."""
+    return index.code_of.get(card.id) or f"{card.set_id}:{card.number}"
+
+
 # ---- stato (kv "watches": {card_id: {...}}) -------------------------------------
 def list_watches(db: Database) -> dict[str, dict]:
     w = db.get_kv("watches", {}) or {}
@@ -135,7 +156,7 @@ def describe(index: CardIndex, db: Database) -> str:
     lines = [f"🏃 <b>Inseguimenti attivi</b> ({len(watches)})"]
     now = time.time()
     for cid, w in sorted(watches.items(), key=lambda kv: kv[1]["until"]):
-        card = index.by_id.get(cid)
+        card, _ = resolve_card(index, db, cid)
         label = html.escape(card.label if card else cid)
         left = max(0, int(w["until"] - now))
         lines.append(f"• {label} · ogni {fmt_duration(int(w['every']))} · ancora {fmt_duration(left) if left >= 60 else 'pochi secondi'} "
@@ -162,7 +183,7 @@ def run_watches(index: CardIndex, db: Database, notifier=None, scrapers: dict | 
     log_lines: list[str] = []
     changed = False
     for cid, w in list(watches.items()):
-        card = index.by_id.get(cid)
+        card, idx = resolve_card(index, db, cid)
         if not card:
             del watches[cid]
             changed = True
@@ -177,7 +198,7 @@ def run_watches(index: CardIndex, db: Database, notifier=None, scrapers: dict | 
             continue
         if now - float(w.get("last", 0)) < float(w["every"]) - 30:
             continue
-        items, errors = search_card(index, db, card, settings, scrapers, limit=20, only_new=True)
+        items, errors = search_card(idx, db, card, settings, scrapers, limit=20, only_new=True)
         w["last"] = now
         w["checks"] = int(w.get("checks", 0)) + 1
         changed = True
