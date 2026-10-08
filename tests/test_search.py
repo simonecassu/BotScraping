@@ -258,3 +258,17 @@ def test_generic_query_stats_recorded(index):
     record_query_stats(db, {"pokemon 30th": {"new": 2, "matches": 0}, "altra": {"new": 0, "matches": 0}})
     st = db.get_kv("query_stats")
     assert st["pokemon 30th"] == {"runs": 2, "new": 6, "matches": 1} and st["altra"]["runs"] == 1
+
+
+def test_targeted_search_rejects_sibling_numbers(index):
+    from pokebot.matcher import Matcher
+    from pokebot.search import _refers_to
+    m = Matcher(index)
+    mew158 = index.by_id["me55-158"]
+    ok = lambda title: _refers_to(mew158, m.analyze(title, "", {mew158.id}), title)  # noqa: E731
+    assert ok("Mew ex 158/128 30th")
+    assert ok("Mew ex 30C 158 ita NM 30 anniversario")
+    assert ok("Mew ex 30th")  # nome senza numeri: può essere lei
+    assert not ok("Mew ex (30C 152) 30° Anniversario ita")  # numero di un'altra Mew ex
+    assert not ok("Mew ex 152/128 30th celebration")
+    assert not ok("Lapras 131/128 30th")

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -348,6 +349,23 @@ def _notify_pending(pending: list, notifier: TelegramNotifier, db: Database, rep
         db.mark_seen(lst.key, notified=sent)
 
 
+_BARE_NUM_RE = re.compile(r"(?<![\d/])0*(\d{1,3})(?![\d/])")
+
+
+def _refers_to(card, res, text: str) -> bool:
+    """La ricerca mirata vuole proprio quella carta: numero completo (158/128) oppure nome con numero "nudo" (30C 158)
+    o nome senza numeri; se il testo porta il numero di un'altra carta con lo stesso nome (Mew ex 152) non vale."""
+    if any(r.card.id == card.id for r in res.refs):
+        return True
+    if not any(card.id in {c.id for c in a.candidates} for a in res.ambiguous):
+        return res.notify and card.id in {c.id for c in res.wanted}
+    siblings = {c.number for a in res.ambiguous for c in a.candidates if c.id != card.id and card.id in {x.id for x in a.candidates}}
+    nums = {m.group(1) for m in _BARE_NUM_RE.finditer(text)}
+    if card.number in nums:
+        return True
+    return not (nums & siblings)
+
+
 def card_queries(card, index: CardIndex | None = None) -> list[str]:
     """Ricerca mirata: numero/totale più "nome + suffisso" per ogni suffisso della collezione."""
     cs = index.get_set(card.set_id) if index else None
@@ -385,7 +403,7 @@ def search_card(index: CardIndex, db: Database, card, settings: dict | None = No
                 if lst.key in found:
                     continue
                 res = matcher.analyze(lst.title, lst.description, {card.id}, lot_ratio, False, lst.is_auction, language)
-                hit = res.notify or any(r.card.id == card.id for r in res.refs)
+                hit = _refers_to(card, res, f"{lst.title} {lst.description}")
                 if not hit or (max_price and lst.price is not None and lst.price > max_price):
                     continue
                 found[lst.key] = (lst, res)

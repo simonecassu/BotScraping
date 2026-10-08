@@ -406,16 +406,21 @@ function renderChase() {
   const left = (sec) => sec < 60 ? "pochi secondi" : sec < 3600 ? Math.round(sec / 60) + " min" : (sec / 3600).toFixed(sec % 3600 ? 1 : 0).replace(".0", "") + " ore";
   const hhmm = (ts) => new Date(ts * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
   $("#chase-list").innerHTML = ws.length ? ws.sort((a, b) => a.until - b.until).map((w) => { const c = cardInfo(w.card); return `
-    <div class="folder"><div class="hd">${c && c.image ? `<img src="${esc(c.image)}" alt="">` : ""}
+    <div class="folder" data-open="${esc(w.card)}"><div class="hd">${c && c.image ? `<img src="${esc(c.image)}" alt="">` : ""}
       <b>${esc(w.label)}<small class="hint" style="display:block">ogni ${Math.round(w.every / 60)} min · fino alle ${hhmm(w.until)} (ancora ${left(Math.max(0, w.until - now))})<br>${w.checks} controlli · <b>${w.found}</b> annunci nuovi</small></b>
       <button class="btn sec" data-stop="${esc(w.code)}">⏹</button></div></div>`; }).join("")
     : '<p class="hint">Nessun inseguimento attivo in questa collezione. Scrivi un numero qui sopra e tocca Insegui.</p>';
-  $("#chase-list").querySelectorAll("[data-stop]").forEach((b) => b.onclick = async () => { if (await sendCmd("/insegui stop " + b.dataset.stop)) { toast("Fermato: guarda la chat"); b.closest(".folder").style.opacity = .4; } });
+  $("#chase-list").querySelectorAll("[data-stop]").forEach((b) => b.onclick = async (ev) => { ev.stopPropagation(); if (await sendCmd("/insegui stop " + b.dataset.stop)) { toast("Fermato: guarda la chat"); b.closest(".folder").style.opacity = .4; } });
+  $("#chase-list").querySelectorAll("[data-open]").forEach((el) => el.onclick = () => {
+    const f = $(`#chase-found .folder[data-key="${el.dataset.open}"]`);
+    if (!f) { toast("Ancora nessun annuncio per questa carta"); return; }
+    f.querySelector(".bd").classList.remove("hidden"); f.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
   const fl = (state.watch_found || []).filter((f) => inCurSet(f.card));
   const groups = {};
   fl.forEach((f) => (groups[f.card] ||= []).push(f));
-  $("#chase-found").innerHTML = fl.length ? Object.keys(groups).map((id) => { const c = cardInfo(id); const items = groups[id]; return `
-    <div class="folder"><div class="hd">${c && c.image ? `<img src="${esc(c.image)}" alt="">` : ""}<b>${esc(c ? cardTitle(c) : id)}</b><span class="cnt">${items.length} ›</span></div>
+  $("#chase-found").innerHTML = fl.length ? Object.keys(groups).map((id) => { const c = cardInfo(id); const items = groups[id].slice().sort((a, b) => (b.price_num ?? -1) - (a.price_num ?? -1)); return `
+    <div class="folder" data-key="${esc(id)}"><div class="hd">${c && c.image ? `<img src="${esc(c.image)}" alt="">` : ""}<b>${esc(c ? cardTitle(c) : id)}</b><span class="cnt">${items.length} ›</span></div>
       <div class="bd ${Object.keys(groups).length > 1 ? "hidden" : ""}">${items.map((f) => `
         <div class="lst" data-url="${esc(f.url)}">
           ${f.image ? `<img loading="lazy" src="${esc(f.image)}" alt="">` : '<div class="ph">foto n.d.</div>'}
