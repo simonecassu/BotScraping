@@ -328,6 +328,7 @@ def _notify_pending(pending: list, db: Database, report: RunReport, dry_run: boo
             log.info("Notifiche sospese per %s (pausa/notte): %d annunci in coda", chat or "destinatario", len(pending))
             continue
         delivered, deals = _deliver(pending, ntf, st, history, dry_run, report if first else None, pending_keys)
+        log.info("Consegna a %s: %d annunci, %d inviati", chat or "destinatario", len(pending), len(delivered))
         sent_any |= delivered
         deal_keys |= deals
     db.mark_notified([found_ids[k] for k in sent_any])
@@ -380,7 +381,7 @@ def _deliver(pending: list, notifier: TelegramNotifier, settings: dict, history:
             names = ", ".join(t.replace("🃏 ", "").replace("📦 ", "").replace("❔ ", "") for _, t, _ in skipped_groups[:12])
             overflow_note = (f"⚠️ Giro insolitamente ricco: {len(groups)} carte con novità, inviate le prime {max_msgs}. "
                              f"Le altre ({n_over} annunci) sono nello storico: {names}" + (" …" if len(skipped_groups) > 12 else "") +
-                             "\nUsa /storico o /cerca <carta>.")
+                             "\nUsa /storico o /cerca &lt;carta&gt;.")
             log.info("Tetto messaggi: %d gruppi su %d inviati, %d annunci solo nello storico", max_msgs, len(groups), n_over)
     outcomes = [False] * len(rest)
     if rest and not dry_run:

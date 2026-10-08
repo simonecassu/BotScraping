@@ -72,6 +72,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "actions":
         commands = TelegramCommands(index, db)
+        # ogni persona collegata ha i suoi album di casa (nati "tutte mancanti"): devono esistere nel database salvato
+        for chat in db.chat_ids():
+            for sid in config.HOME_SET_IDS:
+                coll.album_for(db, chat, sid)
         want_search = False
         from pokebot.queue import GitHubQueue
         n_queue, want_search = GitHubQueue().drain(commands.handle_payload)  # comandi salvati dal ponte
