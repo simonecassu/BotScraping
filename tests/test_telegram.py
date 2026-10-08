@@ -165,7 +165,7 @@ def test_notify_many_one_message_per_card_cheapest_first(index, monkeypatch):
     n = TelegramNotifier(token="t", chat_id="1")
     sent = []
     monkeypatch.setattr(n, "send", lambda text, disable_preview=False: sent.append(text) or True)
-    m = Matcher(index, config.DEFAULT_SETTINGS["set_keywords"])
+    m = Matcher(index)
     wanted = {"me55-145", "me55-131", "me55-130"}
     items = []
     for i in range(12):  # 12 Zorua a prezzi decrescenti: 21, 20, ... 10
@@ -336,7 +336,7 @@ def test_group_uses_listing_photo_album(index, monkeypatch):
     monkeypatch.setattr(collage_mod, "build_collage", lambda title, rows: None)  # senza rete: niente collage, si usa l'album
     monkeypatch.setattr(n, "send_photo", lambda url, caption: calls.append(("photo", url, caption)) or True)
     monkeypatch.setattr(n, "send", lambda text, disable_preview=False: calls.append(("text", text)) or True)
-    m = Matcher(index, config.DEFAULT_SETTINGS["set_keywords"])
+    m = Matcher(index)
     items = []
     for i in range(3):
         lst = Listing("vinted", str(i), f"Lapras 131/128 30th n.{i}", f"https://v/{i}", price=10 + i, price_text=f"{10 + i} €",

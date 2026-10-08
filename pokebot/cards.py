@@ -59,31 +59,54 @@ class CardSet:
     series: str = ""
     logo: str = ""
     symbol: str = ""
+    queries: list[str] = field(default_factory=list)  # ricerche generiche sul set (ogni giro completo)
+    card_suffixes: list[str] = field(default_factory=list)  # "{nome} {suffisso}" nelle ricerche mirate
+    card_query: str = ""  # per i set senza numerazione propria: "{nome} {card_query}" nella ricerca a rotazione
+    primary: bool = False  # collezione principale: codici brevi nei comandi (numero, c1..cN); le altre usano set:numero
+
+    @property
+    def keyword(self) -> str:
+        return self.context_keywords[0] if self.context_keywords else self.name
 
 
 class CardIndex:
     def __init__(self, sets: list[CardSet], aliases: dict[str, list[str]] | None = None):
         self.sets = sets
+        self.aliases = aliases or {}
         self.by_id: dict[str, Card] = {}
         self.by_set_number: dict[tuple[str, str], Card] = {}
         self.names: dict[str, list[Card]] = {}  # nome normalizzato -> carte
-        # codice breve per i comandi Telegram: numero per il set principale, c1..cN per gli altri
+        # codice breve per i comandi Telegram: numero per la collezione principale, c1..cN per la sua Classic,
+        # "set:numero" per tutte le altre collezioni (così i numeri non si confondono tra set)
         self.code_of: dict[str, str] = {}
         self.by_code: dict[str, Card] = {}
-        aliases = aliases or {}
         for s in sets:
-            for i, c in enumerate(s.cards, start=1):
-                self.by_id[c.id] = c
-                self.by_set_number[(s.id, c.number)] = c
+            self._index_set(s)
+
+    def add_set(self, cs: CardSet) -> None:
+        """Aggiunge una collezione all'indice già costruito (es. appena scaricata con /collezione)."""
+        if any(s.id == cs.id for s in self.sets):
+            return
+        self.sets.append(cs)
+        self._index_set(cs)
+
+    def _index_set(self, s: CardSet) -> None:
+        aliases = self.aliases
+        for i, c in enumerate(s.cards, start=1):
+            self.by_id[c.id] = c
+            self.by_set_number[(s.id, c.number)] = c
+            if s.primary:
                 code = c.number.lower() if s.printed_total else f"c{i}"
-                self.code_of[c.id] = code
-                self.by_code.setdefault(code, c)
-                for n in self._name_variants(c.name) + [normalize(a) for a in aliases.get(c.id, [])]:
-                    if len(n) < 3:
-                        continue  # nomi di 1-2 lettere (es. "N") darebbero falsi positivi
-                    self.names.setdefault(n, [])
-                    if c not in self.names[n]:
-                        self.names[n].append(c)
+            else:
+                code = f"{s.id}:{c.number.lower()}"
+            self.code_of[c.id] = code
+            self.by_code.setdefault(code, c)
+            for n in self._name_variants(c.name) + [normalize(a) for a in aliases.get(c.id, [])]:
+                if len(n) < 3:
+                    continue  # nomi di 1-2 lettere (es. "N") darebbero falsi positivi
+                self.names.setdefault(n, [])
+                if c not in self.names[n]:
+                    self.names[n].append(c)
 
     @staticmethod
     def _name_variants(name: str) -> list[str]:
@@ -116,6 +139,10 @@ def set_from_raw(raw: dict) -> CardSet:
         series=raw.get("series", ""),
         logo=raw.get("logo", ""),
         symbol=raw.get("symbol", ""),
+        queries=raw.get("queries", []),
+        card_suffixes=raw.get("card_suffixes", []),
+        card_query=raw.get("card_query", ""),
+        primary=bool(raw.get("primary", False)),
     )
     for c in raw["cards"]:
         cs.cards.append(
@@ -140,7 +167,9 @@ def load_sets(sets_dir: Path | None = None, aliases_path: Path | None = None) ->
     aliases_path = aliases_path or (config.DATA_DIR / "aliases.json")
     sets: list[CardSet] = []
     for path in sorted(sets_dir.glob("*.json")):
-        sets.append(set_from_raw(json.loads(path.read_text(encoding="utf-8"))))
+        cs = set_from_raw(json.loads(path.read_text(encoding="utf-8")))
+        cs.primary = True  # le collezioni in data/sets sono quelle "di casa": codici brevi nei comandi
+        sets.append(cs)
     aliases: dict[str, list[str]] = {}
     if aliases_path.exists():
         aliases = json.loads(aliases_path.read_text(encoding="utf-8"))

@@ -343,7 +343,7 @@ async function toggle(id) {
   if (curSet === "home") {
     const c = byId[id]; const willWant = !wanted.has(id);
     pending.add(id); renderChecklist();
-    const ok = await sendCmd((willWant ? "/aggiungi " : "/rimuovi ") + c.code);
+    const ok = await sendCmd((willWant ? "/aggiungi " : "/rimuovi ") + `${c.set}:${c.number}`);  // set:numero: non dipende dalla collezione corrente in chat
     pending.delete(id);
     if (ok) { willWant ? wanted.add(id) : wanted.delete(id); overrides["home:" + id] = { ts: Date.now(), set: "home", id, want: willWant }; toast((willWant ? "Segnata mancante: " : "Segnata presa: ") + c.name); }
   } else {
@@ -430,7 +430,7 @@ function renderChase() {
 $("#chase-go").onclick = async () => {
   const v = $("#chase-card").value.trim(), d = $("#chase-dur").value;
   if (!v) { toast("Scrivi il numero della carta"); return; }
-  const target = curSet === "home" ? v : v.split(/\s+/).map((t) => `${curSet}:${t}`).join(" ");
+  const target = v.split(/\s+/).map((t) => curSet === "home" ? (/^\d+$/.test(t) ? `me55:${t}` : t) : `${curSet}:${t}`).join(" ");
   if (await sendCmd(`/insegui ${target}${d ? " " + d : ""}`)) { toast("Inseguimento avviato: guarda la chat"); $("#chase-card").value = ""; setTimeout(load, 70000); }
 };
 $("#chase-card").onkeydown = (e) => { if (e.key === "Enter") $("#chase-go").click(); };

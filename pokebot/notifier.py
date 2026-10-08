@@ -169,7 +169,7 @@ class TelegramNotifier:
         return self.send_with_image(text, listing.image or card.image, images)
 
     def test_message(self) -> bool:
-        return self.send("✅ PokéBot 30th collegato: riceverai qui gli annunci delle carte mancanti.", True)
+        return self.send("✅ PokéBot collegato: riceverai qui gli annunci delle carte mancanti.", True)
 
 
 def _price_key(listing: Listing) -> float:

@@ -56,13 +56,14 @@ HELP = """<b>Comandi</b>
 /insegui 151 – per 6 ore cerca la 151 ogni 5 minuti e ti avvisa appena spunta un annuncio nuovo
 /insegui 151 2h · /insegui 151 2h ogni 10m · /insegui 131 151 – durata, frequenza, più carte · /insegui – attivi · /insegui stop
 /invita – codice per collegare un'altra persona (stesse notifiche, stessa checklist, stessa app) · /utenti · /espelli ID
-/collezione – altre collezioni (partono da "mi mancano tutte") · /collezione sv8 ho 4 7 – segna le possedute · /collezione sv8 attiva – ⚠️ la cerca anche · /collezione me55 disattiva – spegne la 30th
+/collezione – le collezioni seguite · /collezione sv8 – passa a quella (scaricata al volo, parte da "mi mancano tutte"): da lì /mancanti, /aggiungi, /ho, /progresso, /prezzi lavorano su di lei · /collezione 30th – torna alla 30th
+/collezione sv8 attiva – ⚠️ la cerca anche sui marketplace · /collezione sv8 disattiva · sv8:7 – una sua carta in qualsiasi comando (es. /insegui sv8:7)
 /resetvisti – rinotifica anche gli annunci già visti
 Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
-MENU_VERSION = 13
+MENU_VERSION = 14
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -82,7 +83,7 @@ MENU_COMMANDS = [
     ("insegui", "Cerca una carta ogni 5 minuti per 6 ore: /insegui 151 (o /insegui 151 2h ogni 10m)"),
     ("invita", "Codice per collegare un'altra persona alle stesse notifiche"),
     ("utenti", "Chi e' collegato al bot"),
-    ("collezione", "Altre collezioni: /collezione sv8 ho 4 7 (possedute), /collezione sv8 attiva"),
+    ("collezione", "Collezioni seguite; /collezione sv8 passa a quella; /collezione sv8 attiva la cerca"),
     ("intervallo", "Ogni quanti minuti cercare: /intervallo 20"),
     ("max", "Quanti annunci (i piu' economici) per carta in ogni giro: /max 5"),
     ("soglia", "Percentuale minima di carte mancanti nei lotti: /soglia 50"),
@@ -284,11 +285,36 @@ class CommandHandler:
         return Reply("Comando sconosciuto. /aiuto per l'elenco.")
 
     # ------------------------------------------------------------------
+    # ---- collezione corrente -------------------------------------------------
+    def current(self):
+        """La collezione su cui lavorano i comandi (cambia con /collezione <id>)."""
+        cs = self.index.get_set(self.db.current_set())
+        return cs or self.index.sets[0]
+
+    def scope(self) -> list:
+        """Collezione corrente più le sue "sorelle" (30th → anche la Classic Collection)."""
+        cur = self.current()
+        if cur.primary:
+            return [s for s in self.index.sets if s.primary and (s.id == cur.id or s.id.startswith(cur.id))]
+        return [cur]
+
+    def scope_index(self) -> CardIndex:
+        return CardIndex(self.scope(), self.index.aliases)
+
+    def _by_number(self, n: str) -> Card | None:
+        cur = self.current()
+        if cur.primary:
+            return self.index.by_code.get(n)
+        return self.index.by_set_number.get((cur.id, n))
+
     def resolve(self, args: str) -> tuple[list[Card], list[str]]:
-        """Trasforma '131 132 149-152 c4 ir pikachu' in carte. Restituisce (carte, token non capiti)."""
+        """Trasforma '131 132 149-152 c4 ir pikachu sv8:7' in carte della collezione corrente (o set:numero di altre).
+        Restituisce (carte, token non capiti)."""
         cards: dict[str, Card] = {}
         unknown: list[str] = []
-        main_sets = [s for s in self.index.sets if s.printed_total]
+        scope = self.scope()
+        scope_cards = [c for s in scope for c in s.cards]
+        main_sets = [s for s in scope if s.printed_total]
         tokens = [t for t in re.split(r"[\s,;]+", args.strip().lower()) if t]
         i = 0
         while i < len(tokens):
@@ -297,43 +323,67 @@ class CommandHandler:
             if t in ("tutte", "tutto", "all"):
                 if nxt in ("classic", "classica"):
                     i += 1
-                    for s in self.index.sets:
-                        if not s.printed_total:
-                            cards.update({c.id: c for c in s.cards})
+                    for s_ in scope:
+                        if not s_.printed_total:
+                            cards.update({c.id: c for c in s_.cards})
                 else:
-                    for s in main_sets:
-                        cards.update({c.id: c for c in s.cards})
+                    for s_ in main_sets or scope:
+                        cards.update({c.id: c for c in s_.cards})
             elif t in ("classic", "classica"):
-                for s in self.index.sets:
-                    if not s.printed_total:
-                        cards.update({c.id: c for c in s.cards})
+                for s_ in scope:
+                    if not s_.printed_total:
+                        cards.update({c.id: c for c in s_.cards})
             elif t in RARITY_SHORTCUTS:
                 rar = RARITY_SHORTCUTS[t]
-                cards.update({c.id: c for c in self.index.by_id.values() if c.rarity == rar})
+                cards.update({c.id: c for c in scope_cards if c.rarity == rar})
             elif re.fullmatch(r"\d{1,3}-\d{1,3}", t):
                 a, b = (int(x) for x in t.split("-"))
                 for n in range(min(a, b), max(a, b) + 1):
-                    c = self.index.by_code.get(str(n))
+                    c = self._by_number(str(n))
                     if c:
                         cards[c.id] = c
+            elif self._by_number(t):
+                c = self._by_number(t)
+                cards[c.id] = c
             elif t in self.index.by_code:
                 c = self.index.by_code[t]
                 cards[c.id] = c
+            elif ":" in t:
+                c = self._card_of_other_set(t)
+                if c:
+                    cards[c.id] = c
+                else:
+                    unknown.append(t)
             else:
-                # nome di carta (anche più parole: "pikachu ex")
+                # nome di carta (anche più parole: "pikachu ex"), prima nella collezione corrente poi nelle altre
                 phrase = t
                 if nxt and f"{t} {nxt}" in self.index.names:
                     phrase = f"{t} {nxt}"
                     i += 1
-                hits = [c for c in self.index.by_id.values() if normalize(c.name) == phrase]
+                hits = [c for c in scope_cards if normalize(c.name) == phrase]
                 if not hits:
-                    hits = [c for c in self.index.by_id.values() if phrase in normalize(c.name)]
+                    hits = [c for c in scope_cards if phrase in normalize(c.name)]
+                if not hits:
+                    hits = [c for c in self.index.by_id.values() if normalize(c.name) == phrase]
                 if hits:
                     cards.update({c.id: c for c in hits})
                 else:
                     unknown.append(t)
             i += 1
         return sorted(cards.values(), key=lambda c: c.sort_key), unknown
+
+    def _card_of_other_set(self, token: str) -> Card | None:
+        """'sv8:7': carta di una collezione anche non ancora seguita (la scarica e la aggiunge all'indice)."""
+        from . import collections as coll
+        sid, _, num = token.partition(":")
+        try:
+            cs = coll.get_set(self.db, sid.lower())
+        except Exception:  # noqa: BLE001
+            return None
+        if not cs:
+            return None
+        self.index.add_set(cs)
+        return self.index.by_set_number.get((cs.id, num.lstrip("0") or num))
 
     def _change(self, args: str, wanted: bool) -> Reply:
         if not args:
@@ -349,8 +399,15 @@ class CommandHandler:
             lines.append(f"… e altre {len(cards) - 40}")
         if unknown:
             lines.append("❓ Non capiti: " + html.escape(" ".join(unknown)))
-        lines.append(f"Totale mancanti: <b>{len(self.db.wanted_ids())}</b>/{len(self.index.by_id)}")
+        lines.append(self._totals_line())
         return Reply("\n".join(lines))
+
+    def _totals_line(self) -> str:
+        wanted = self.db.wanted_ids()
+        scope = self.scope()
+        n = sum(1 for s_ in scope for c in s_.cards if c.id in wanted)
+        tot = sum(len(s_.cards) for s_ in scope)
+        return f"{html.escape(self.current().name)}: mancanti <b>{n}</b>/{tot}"
 
     def _set_number(self, args: str, key: str, conv, fmt) -> Reply:
         try:
@@ -391,9 +448,9 @@ class CommandHandler:
                 arrow = "📈" if delta > 5 else "📉" if delta < -5 else "➡️"
                 lines.append(f"{arrow} Ultimi 7 giorni: mediana {pstats.fmt_eur(cp.recent_median)} ({delta:+.0f}% rispetto a prima)")
             return Reply("\n".join(lines), buttons=[[("📂 Storico", f"/storico {self.index.code_of[card.id]}")]])
-        comp = pstats.completion(self.index, self.db.wanted_ids(), rows)
+        comp = pstats.completion(self.scope_index(), self.db.wanted_ids(), rows)
         if not comp.missing:
-            return Reply("🎉 Nessuna carta mancante: set completo!")
+            return Reply(f"🎉 Nessuna carta mancante: {html.escape(self.current().name)} completa!")
         lines = [f"💶 <b>Per finire il set</b> ({comp.missing} carte mancanti)",
                  f"Ai prezzi <b>minimi</b> visti: <b>{pstats.fmt_eur(comp.cost_min)}</b> · ai prezzi mediani: {pstats.fmt_eur(comp.cost_median)}",
                  f"Stima su {comp.priced} carte con prezzi visti" + (f"; {len(comp.unpriced)} ancora senza prezzo" if comp.unpriced else "")]
@@ -451,76 +508,66 @@ class CommandHandler:
         return Reply("Quell'ID non è tra le persone collegate (vedi /utenti).")
 
     def _collection(self, args: str) -> Reply:
-        """/collezione – elenco · /collezione sv8 – scarica/info · … manca|ho N… · … attiva|disattiva · … svuota."""
+        """/collezione – elenco · /collezione sv8 – segui (scarica) e rendi corrente · … attiva|disattiva · … ho|manca N… · … tutte|svuota."""
         from . import collections as coll
         a = args.strip()
-        home = {s.id for s in self.index.sets}
+        wanted = self.db.wanted_ids()
+        active = set(self.db.active_sets())
+        cur = self.current()
         if not a:
-            lines = ["📚 <b>Collezioni</b>"]
-            home_on = self.db.get_settings().get("home_active", True)
+            lines = ["📚 <b>Collezioni seguite</b>"]
             for s_ in self.index.sets:
-                lines.append(f"• <code>{s_.id}</code> {html.escape(s_.name)} · {len(s_.cards)} carte · "
-                             + ("🔎 ricerca attiva" if home_on else "💤 ricerca spenta"))
-            act = set(coll.active_ids(self.db))
-            for cs in coll.loaded_sets(self.db):
-                n = len(coll.wanted_numbers(self.db, cs.id))
-                lines.append(f"• <code>{cs.id}</code> {html.escape(cs.name)} · {len(cs.cards)} carte · mancanti {n} · "
-                             + ("🔎 ricerca attiva" if cs.id in act else "💤 ricerca spenta"))
-            lines.append("\nPer le altre collezioni il punto di partenza è \"mi mancano tutte\": segna quelle che hai. "
-                         "Dalla Mini App (Collezioni) oppure: <code>/collezione sv8 ho 4 7</code>, <code>/collezione sv8 manca 4</code>, "
-                         "<code>/collezione sv8 attiva</code>.")
+                n = sum(1 for c in s_.cards if c.id in wanted)
+                lines.append(f"{'▶️' if s_.id == cur.id else '•'} <code>{s_.id}</code> {html.escape(s_.name)} · {len(s_.cards)} carte · "
+                             f"mancanti {n} · " + ("🔎 ricerca attiva" if s_.id in active else "💤 ricerca spenta"))
+            lines.append(f"\n▶️ = corrente: /mancanti, /aggiungi 4 7, /ho 4, /progresso, /prezzi lavorano su di lei. "
+                         "<code>/collezione sv8</code> passa a un'altra (la scarica se serve: parte da \"mi mancano tutte\"); "
+                         "<code>/collezione sv8 attiva</code> la fa cercare; <code>sv8:7</code> indica una sua carta da qualsiasi comando.")
             return Reply("\n".join(lines))
         set_id, _, rest = a.partition(" ")
         set_id = set_id.lower().strip()
+        if set_id in ("30th", "30", "celebration"):
+            set_id = "me55"
         rest = rest.strip()
-        if set_id in home:
-            v = rest.split()[0].lower() if rest else ""
-            if v in ("attiva", "on", "cerca"):
-                self.db.save_settings({"home_active": True})
-                return Reply("🔎 Ricerca attiva per la 30th Celebration.")
-            if v in ("disattiva", "off", "spegni"):
-                self.db.save_settings({"home_active": False})
-                return Reply("💤 Ricerca spenta per la 30th Celebration: la checklist resta, il bot non la cerca finché non la riaccendi.")
-            return Reply("Per la 30th usa i comandi normali (/mancanti, /aggiungi 131, /rimuovi 131); "
-                         "<code>/collezione me55 disattiva</code> spegne la sua ricerca.")
-        try:
-            cs = coll.get_set(self.db, set_id)
-        except KeyError:
-            return Reply(f"Collezione <code>{html.escape(set_id)}</code> non trovata nel catalogo. Sfogliale dalla Mini App.")
-        except Exception as exc:  # noqa: BLE001
-            return Reply(f"⚠️ Non riesco a scaricare la collezione adesso ({html.escape(str(exc)[:80])}). Riprova tra poco.")
-        if not rest:
-            n = len(coll.wanted_numbers(self.db, cs.id))
-            on = cs.id in coll.active_ids(self.db)
-            return Reply(f"📚 <b>{html.escape(cs.name)}</b> (<code>{cs.id}</code>) · {len(cs.cards)} carte"
-                         f"{' · numerazione /' + str(cs.printed_total) if cs.printed_total else ''}\nMancanti segnate: <b>{n}</b> · "
-                         + ("🔎 ricerca attiva" if on else "💤 ricerca spenta") +
-                         f"\n\n<code>/collezione {cs.id} manca 4 7</code> · <code>/collezione {cs.id} ho 4</code> · "
-                         f"<code>/collezione {cs.id} {'disattiva' if on else 'attiva'}</code>")
+        cs = self.index.get_set(set_id)
+        if cs is None:
+            try:
+                cs = coll.get_set(self.db, set_id)
+            except KeyError:
+                return Reply(f"Collezione <code>{html.escape(set_id)}</code> non trovata nel catalogo. Sfogliale dalla Mini App.")
+            except Exception as exc:  # noqa: BLE001
+                return Reply(f"⚠️ Non riesco a scaricare la collezione adesso ({html.escape(str(exc)[:80])}). Riprova tra poco.")
+            self.index.add_set(cs)
         verb, _, nums = rest.partition(" ")
         verb = verb.lower()
+        if not verb:
+            self.db.set_current(cs.id)
+            n = sum(1 for c in cs.cards if c.id in self.db.wanted_ids())
+            on = cs.id in active
+            return Reply(f"📚 <b>{html.escape(cs.name)}</b> (<code>{cs.id}</code>) è la collezione corrente · {len(cs.cards)} carte"
+                         f"{' · numerazione /' + str(cs.printed_total) if cs.printed_total else ''}\nMancanti: <b>{n}</b> · "
+                         + ("🔎 ricerca attiva" if on else "💤 ricerca spenta") +
+                         f"\n\n/mancanti · /aggiungi 4 7 · /ho 4 · /progresso · /prezzi · "
+                         f"<code>/collezione {cs.id} {'disattiva' if on else 'attiva'}</code>")
         if verb in ("attiva", "on", "cerca"):
-            coll.set_active(self.db, cs.id, True)
-            n = len(coll.wanted_numbers(self.db, cs.id))
+            self.db.set_active(cs.id, True)
+            n = sum(1 for c in cs.cards if c.id in wanted)
             return Reply(f"🔎 Ricerca attiva per <b>{html.escape(cs.name)}</b> ({n} mancanti). ⚠️ Ogni collezione attiva aggiunge "
-                         "ricerche e notifiche a ogni giro: tienine poche accese. <code>/collezione "
-                         f"{cs.id} disattiva</code> per spegnerla.")
+                         f"ricerche e notifiche a ogni giro: tienine poche accese. <code>/collezione {cs.id} disattiva</code> per spegnerla.")
         if verb in ("disattiva", "off", "spegni"):
-            coll.set_active(self.db, cs.id, False)
+            self.db.set_active(cs.id, False)
             return Reply(f"💤 Ricerca spenta per <b>{html.escape(cs.name)}</b>: la checklist resta.")
-        if verb in ("svuota", "reset", "lehotutte", "complete"):
-            coll.mark(self.db, cs.id, [c.number for c in cs.cards], False)
+        if verb in ("svuota", "reset", "completa"):
+            coll.mark(self.db, cs, [c.number for c in cs.cards], False)
             return Reply(f"🧹 {html.escape(cs.name)}: segnata completa, nessuna mancante.")
-        if verb in ("manca", "mancano", "aggiungi", "ho", "trovata", "rimuovi", "presa", "tutte"):
-            if verb == "tutte":  # "mi mancano tutte": è già il punto di partenza, qui azzera le possedute
-                numbers = [c.number for c in cs.cards]
-                want = True
+        if verb in ("tutte", "manca", "mancano", "aggiungi", "ho", "trovata", "rimuovi", "presa"):
+            if verb == "tutte":
+                numbers, want, bad = [c.number for c in cs.cards], True, []
             else:
                 want = verb in ("manca", "mancano", "aggiungi")
-                tokens = nums.replace(",", " ").split()
                 by_num = {c.number.lower(): c for c in cs.cards}
                 numbers, bad = [], []
-                for t in tokens:
+                for t in nums.replace(",", " ").split():
                     if "-" in t and all(x.isdigit() for x in t.split("-", 1)):
                         lo, hi = (int(x) for x in t.split("-", 1))
                         numbers += [str(i) for i in range(lo, hi + 1) if str(i) in by_num]
@@ -529,41 +576,19 @@ class CommandHandler:
                     else:
                         bad.append(t)
                 if not numbers:
-                    return Reply(f"Nessun numero valido per {html.escape(cs.name)}. Es. <code>/collezione {cs.id} manca 4 7 10-12</code>.")
-            coll.mark(self.db, cs.id, numbers, want)
-            n = len(coll.wanted_numbers(self.db, cs.id))
+                    return Reply(f"Nessun numero valido per {html.escape(cs.name)}. Es. <code>/collezione {cs.id} ho 4 7 10-12</code>.")
+            coll.mark(self.db, cs, numbers, want)
+            n = sum(1 for c in cs.cards if c.id in self.db.wanted_ids())
             names = ", ".join(html.escape(next(c.name for c in cs.cards if c.number == x) + " " + x) for x in numbers[:6])
             more = f" e altre {len(numbers) - 6}" if len(numbers) > 6 else ""
             msg = f"{'🃏 Mancanti' if want else '✅ Prese'}: {names}{more}\n{html.escape(cs.name)}: ora {n} mancanti"
-            if not want or cs.id in coll.active_ids(self.db):
-                pass
-            else:
-                msg += " · 💤 ricerca spenta (<code>/collezione " + cs.id + " attiva</code> per cercarle)"
-            if verb != "tutte" and bad:
+            if want and cs.id not in active:
+                msg += f" · 💤 ricerca spenta (<code>/collezione {cs.id} attiva</code> per cercarle)"
+            if bad:
                 msg += "\n❓ Non capiti: " + html.escape(" ".join(bad))
             return Reply(msg)
-        return Reply(f"Non ho capito. Usa <code>/collezione {cs.id} manca 4 7</code>, <code>ho 4</code>, <code>attiva</code>, <code>disattiva</code>.")
-
-    def _resolve_any(self, args: str) -> tuple[list, list[str]]:
-        """Come resolve(), più i codici set:numero delle altre collezioni (es. sv8:7)."""
-        from . import collections as coll
-        plain, cards, unknown = [], [], []
-        for t in args.replace(",", " ").split():
-            if ":" in t:
-                sid, _, num = t.partition(":")
-                try:
-                    cs = coll.get_set(self.db, sid.lower())
-                except Exception:  # noqa: BLE001
-                    cs = None
-                card = next((c for c in cs.cards if c.number.lower() == num.lower()), None) if cs else None
-                (cards.append(card) if card else unknown.append(t))
-            else:
-                plain.append(t)
-        if plain:
-            c2, u2 = self.resolve(" ".join(plain))
-            cards += c2
-            unknown += u2
-        return cards, unknown
+        return Reply(f"Non ho capito. Usa <code>/collezione {cs.id}</code>, <code>… attiva</code>, <code>… disattiva</code>, "
+                     f"<code>… ho 4 7</code>, <code>… manca 4</code>.")
 
     def _chase(self, args: str) -> Reply:
         """/insegui 151 – per 6 ore cerca quella carta ogni 5 minuti; /insegui – elenco; /insegui stop [carte]."""
@@ -576,14 +601,14 @@ class CommandHandler:
             if not rest.strip():
                 n = watch.clear_watches(self.db)
                 return Reply(f"⏹ Fermati {n} inseguimenti." if n else "Nessun inseguimento attivo.")
-            cards, unknown = self._resolve_any(rest)
+            cards, unknown = self.resolve(rest)
             stopped = [c.label for c in cards if watch.remove_watch(self.db, c.id)]
             msg = ("⏹ Fermato: " + ", ".join(html.escape(x) for x in stopped)) if stopped else "Quelle carte non erano inseguite."
             if unknown:
                 msg += "\n❓ Non capiti: " + html.escape(" ".join(unknown))
             return Reply(msg)
         card_args, duration, every = watch.parse_watch_args(a)
-        cards, unknown = self._resolve_any(card_args)
+        cards, unknown = self.resolve(card_args)
         if not cards:
             return Reply("Carta non riconosciuta. Es. <code>/insegui 151</code>, <code>/insegui c4 2h</code>, <code>/insegui 151 2h ogni 10m</code>.")
         active = watch.list_watches(self.db)
@@ -636,10 +661,10 @@ class CommandHandler:
 
     def _progress(self) -> Reply:
         from . import stats as pstats
-        comp = pstats.completion(self.index, self.db.wanted_ids(), self.db.list_found())
+        comp = pstats.completion(self.scope_index(), self.db.wanted_ids(), self.db.list_found())
         filled = round(comp.percent / 10)
         bar = "🟩" * filled + "⬜" * (10 - filled)
-        lines = [f"📊 <b>Progresso set</b>: {comp.owned}/{comp.total} carte ({comp.percent:.0f}%)", bar]
+        lines = [f"📊 <b>{html.escape(self.current().name)}</b>: {comp.owned}/{comp.total} carte ({comp.percent:.0f}%)", bar]
         if comp.missing:
             lines.append(f"\nMancano {comp.missing}:")
             order = ["Common", "Uncommon", "Rare", "Double Rare", "Pikachu Rare", "Illustration Rare",
@@ -653,7 +678,7 @@ class CommandHandler:
                 lines.append(f"\n💶 Stima per finire: <b>{pstats.fmt_eur(comp.cost_min)}</b> ai minimi visti"
                              f" ({comp.priced} carte con prezzo" + (f", {len(comp.unpriced)} senza" if comp.unpriced else "") + ")")
         else:
-            lines.append("🎉 Set completo!")
+            lines.append("🎉 Collezione completa!")
         return Reply("\n".join(lines), buttons=[[("💶 Prezzi", "/prezzi"), ("🃏 Mancanti", "/mancanti")]])
 
     def _deals(self, args: str) -> Reply:
@@ -776,22 +801,34 @@ class CommandHandler:
 
     def _fmt_missing(self) -> str:
         wanted = self.db.wanted_ids()
-        if not wanted:
-            return "Nessuna carta segnata come mancante. Usa /aggiungi (es. <code>/aggiungi tutte</code>) o /lista."
-        lines = [f"🃏 <b>Carte mancanti: {len(wanted)}/{len(self.index.by_id)}</b>"]
-        for s in self.index.sets:
-            ordered = sorted(s.cards, key=lambda c: c.sort_key) if s.printed_total else s.cards
-            cs = [c for c in ordered if c.id in wanted]
-            if cs:
-                lines.append(f"\n<b>{html.escape(s.name)}</b> ({len(cs)})")
-                lines += [self._card_line(c) for c in cs]
+        scope = self.scope()
+        in_scope = [c for s in scope for c in s.cards if c.id in wanted]
+        lines = []
+        if not in_scope:
+            lines.append(f"🃏 <b>{html.escape(self.current().name)}</b>: nessuna carta mancante. "
+                         "Usa /aggiungi (es. <code>/aggiungi tutte</code>) o /lista.")
+        else:
+            lines.append(f"🃏 <b>Carte mancanti: {len(in_scope)}/{sum(len(s.cards) for s in scope)}</b>")
+            for s in scope:
+                ordered = sorted(s.cards, key=lambda c: c.sort_key) if s.printed_total else s.cards
+                cs = [c for c in ordered if c.id in wanted]
+                if cs:
+                    lines.append(f"\n<b>{html.escape(s.name)}</b> ({len(cs)})")
+                    lines += [self._card_line(c) for c in cs]
+        others = [(s, sum(1 for c in s.cards if c.id in wanted)) for s in self.index.sets if s not in scope]
+        if others:
+            lines.append("\n📚 Altre collezioni: " + " · ".join(f"{html.escape(s.name)} {n}/{len(s.cards)}" for s, n in others)
+                         + "\n/collezione &lt;id&gt; per passare a una di loro")
         return "\n".join(lines)
 
     def _fmt_list(self, args: str) -> str:
         want_classic = "classic" in args.lower()
         wanted = self.db.wanted_ids()
         lines = []
-        for s in self.index.sets:
+        scope = self.scope()
+        if not any(not s.printed_total for s in scope):
+            want_classic = False
+        for s in scope:
             if bool(s.printed_total) == want_classic:
                 continue
             lines.append(f"<b>{html.escape(s.name)}</b> – {len(s.cards)} carte (✗ = ti manca)")
@@ -799,7 +836,7 @@ class CommandHandler:
             for c in ordered:
                 mark = "✗ " if c.id in wanted else ""
                 lines.append(mark + self._card_line(c))
-        if not want_classic:
+        if not want_classic and any(not s.printed_total for s in scope):
             lines.append("\nPer la Classic Collection: /lista classic")
         return "\n".join(lines)
 
@@ -819,7 +856,11 @@ class CommandHandler:
         from .watch import list_watches
         if list_watches(self.db):
             flags.append(f"🏃 inseguimenti {len(list_watches(self.db))}")
-        lines = [f"🃏 Mancanti: <b>{len(self.db.wanted_ids())}</b>/{len(self.index.by_id)} · " + " · ".join(flags),
+        active = set(self.db.active_sets())
+        wanted = self.db.wanted_ids()
+        act_cards = [c for s_ in self.index.sets if s_.id in active for c in s_.cards]
+        flags.insert(0, f"📚 {html.escape(self.current().name)} corrente")
+        lines = [f"🃏 Mancanti nelle collezioni cercate: <b>{sum(1 for c in act_cards if c.id in wanted)}</b>/{len(act_cards)} · " + " · ".join(flags),
                  f"⚙️ Ricerca ogni {int(s['interval_minutes'])} min · max {int(s.get('max_per_card', 5))} annunci per carta · "
                  f"soglia lotti {s['lot_min_ratio'] * 100:.0f}% · prezzo max {price_txt} · lingua: {s.get('language', 'ita')} · "
                  f"fonti: {', '.join(s['sources'])}"]

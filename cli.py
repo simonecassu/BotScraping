@@ -27,7 +27,7 @@ from pokebot.telegram_bot import TelegramCommands
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="PokéBot 30th")
+    p = argparse.ArgumentParser(description="PokéBot")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("cerca", help="esegui un ciclo di ricerca")
     s.add_argument("--dry-run", action="store_true", help="non inviare notifiche")
@@ -60,8 +60,9 @@ def main(argv: list[str] | None = None) -> int:
         print(h.hexdigest())
         return 0
 
-    index = load_sets()
     db = Database()
+    from pokebot import collections as coll
+    index = coll.load_index(db)  # collezioni di casa + quelle seguite
 
     if args.cmd == "cerca":
         rep = run_search(index, db, dry_run=args.dry_run)
@@ -120,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "analizza":
         settings = db.get_settings()
-        m = Matcher(index, settings["set_keywords"])
+        m = Matcher(index)
         res = m.analyze(args.titolo, args.descrizione, db.wanted_ids(), float(settings["lot_min_ratio"]),
                         bool(settings["notify_unverifiable_lots"]), args.asta)
         print(f"tipo: {res.kind}  notifica: {res.notify}  motivo: {res.reason}")

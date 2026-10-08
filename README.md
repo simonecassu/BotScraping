@@ -28,7 +28,9 @@ Il bot si sveglia ogni 5 minuti sui server di GitHub (ricerca completa ogni 20 m
 | Comando | Effetto |
 |---|---|
 | `/mancanti` | elenco delle carte che ti mancano |
-| `/aggiungi 131 132 149-152 c4` | segna come mancanti (numeri, intervalli, `c1..c30` per la Classic) |
+| `/collezione` · `/collezione sv8` · `/collezione 30th` | collezioni seguite · passa a un'altra collezione del catalogo (scaricata al volo, parte da "mi mancano tutte"): da lì tutti i comandi lavorano su di lei · torna alla 30th |
+| `/collezione sv8 attiva` · `disattiva` | il bot cerca (o smette di cercare) anche quella collezione; una sua carta si indica ovunque come `sv8:7` |
+| `/aggiungi 131 132 149-152 c4` | segna come mancanti nella collezione corrente (numeri, intervalli, `c1..c30` per la Classic) |
 | `/aggiungi ir` · `sir` · `pr` · `pikachu ex` · `tutte` · `classic` | per rarità, per nome, tutto il set |
 | `/rimuovi 131` (o `/ho 131`) | trovata: toglila |
 | `/lista` · `/lista classic` | tutte le carte con i numeri |

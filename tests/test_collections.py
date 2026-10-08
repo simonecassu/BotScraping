@@ -25,18 +25,31 @@ def test_download_mark_activate(index, monkeypatch):
     db = _db()
     cs = coll.get_set(db, "sv8")
     assert cs.name == "Surging Sparks" and cs.printed_total == 191 and len(cs.cards) == 3 and cs.logo == "https://l/sv8.png"
+    assert cs.context_keywords == ["surging sparks", "ssp"] and cs.queries[0] == "pokemon Surging Sparks" and not cs.primary
     assert coll.loaded_ids(db) == ["sv8"] and coll.get_set(db, "sv8", download=False).id == "sv8"
-    assert coll.wanted_numbers(db, "sv8") == {"1", "4", "7"}  # punto di partenza: mi mancano tutte
-    coll.mark(db, "sv8", ["1", "7"], False)  # possedute
-    coll.mark(db, "sv8", ["7"], True)  # ripensamento: manca
-    assert coll.owned_numbers(db, "sv8") == {"1"} and coll.wanted_numbers(db, "sv8") == {"4", "7"}
-    coll.mark(db, "sv8", ["7"], False)
-    assert coll.active_search_sets(db) == ([], set())  # spenta: non si cerca
-    coll.set_active(db, "sv8", True)
-    sets, ids = coll.active_search_sets(db)
-    assert [s.id for s in sets] == ["sv8"] and ids == {"sv8-4"}
-    ex = coll.export(db)[0]
-    assert ex["active"] and ex["wanted"] == ["4"] and ex["owned"] == ["1", "7"] and ex["cards"][0]["name"] == "Exeggcute"
+    assert coll.wanted_numbers(db, cs) == {"1", "4", "7"}  # punto di partenza: mi mancano tutte
+    coll.mark(db, cs, ["1", "7"], False)  # possedute
+    coll.mark(db, cs, ["7"], True)  # ripensamento: manca
+    assert coll.owned_numbers(db, cs) == {"1"} and coll.wanted_numbers(db, cs) == {"4", "7"}
+    idx = coll.load_index(db)
+    assert [s.id for s in idx.sets] == ["me55", "me55c", "sv8"] and idx.code_of["sv8-7"] == "sv8:7" and idx.code_of["me55-131"] == "131"
+    assert db.active_sets() == ["me55", "me55c"]
+    db.set_active("sv8", True)
+    ex = coll.export(db, idx)[0]
+    assert ex["active"] and ex["wanted"] == ["4", "7"] and ex["owned"] == ["1"] and ex["cards"][0]["name"] == "Exeggcute"
+
+
+def test_migration_from_owned_lists(index, monkeypatch):
+    _fake_net(monkeypatch)
+    db = _db()
+    raw = coll.fetch_set_raw(db, "sv8")
+    db.set_kv("set_json:sv8", raw)
+    db.set_kv("extra_sets", ["sv8"])
+    db.set_kv("extra_owned", {"sv8": ["1"]})
+    db.set_kv("extra_active", ["sv8"])
+    db.save_settings({"home_active": False})
+    coll.load_index(db)
+    assert db.wanted_ids() == {"sv8-4", "sv8-7"} and db.active_sets() == ["sv8"] and db.get_kv("collections_v2") is True
 
 
 def test_collection_command(index, monkeypatch):
@@ -44,22 +57,31 @@ def test_collection_command(index, monkeypatch):
     from pokebot.telegram_bot import CommandHandler
     db = _db()
     h = CommandHandler(index, db)
-    assert "30th Celebration" in h.handle("/collezione").text
-    assert "Surging Sparks" in h.handle("/collezione sv8").text and "ricerca spenta" in h.handle("/collezione sv8").text
+    assert "30th Celebration" in h.handle("/collezione").text and "▶️" in h.handle("/collezione").text
+    r = h.handle("/collezione sv8")  # scarica, aggiunge all'indice, diventa corrente
+    assert "Surging Sparks" in r.text and "corrente" in r.text and "ricerca spenta" in r.text
+    assert db.current_set() == "sv8" and index.get_set("sv8") is not None and db.wanted_ids() >= {"sv8-1", "sv8-4", "sv8-7"}
+    # i comandi normali lavorano sulla collezione corrente
+    assert "Pikachu ex" in h.handle("/mancanti").text and "Altre collezioni" in h.handle("/mancanti").text
+    r = h.handle("/ho 1 7")
+    assert "Exeggcute" in r.text and "Surging Sparks: mancanti <b>1</b>/3" in r.text
+    assert "Surging Sparks" in h.handle("/progresso").text and "2/3" in h.handle("/progresso").text
+    assert "Pikachu ex" in h.handle("/aggiungi 7").text and db.wanted_ids() >= {"sv8-7"}
     r = h.handle("/collezione sv8 ho 1 7 99")
-    assert "Exeggcute 1" in r.text and "Non capiti: 99" in r.text
-    assert coll.wanted_numbers(db, "sv8") == {"4"}
-    assert "Mancanti" in h.handle("/collezione sv8 manca 7").text and coll.wanted_numbers(db, "sv8") == {"4", "7"}
-    assert "⚠️" in h.handle("/collezione sv8 attiva").text and coll.active_ids(db) == ["sv8"]
-    assert "spenta" in h.handle("/collezione sv8 disattiva").text and coll.active_ids(db) == []
-    assert "comandi normali" in h.handle("/collezione me55 manca 1").text
-    assert "spenta" in h.handle("/collezione me55 disattiva").text and db.get_settings()["home_active"] is False
-    assert "attiva" in h.handle("/collezione me55 attiva").text and db.get_settings()["home_active"] is True
+    assert "Exeggcute 1" in r.text and "Non capiti: 99" in r.text and coll.wanted_numbers(db, index.get_set("sv8")) == {"4"}
+    assert "⚠️" in h.handle("/collezione sv8 attiva").text and "sv8" in db.active_sets()
+    assert "spenta" in h.handle("/collezione sv8 disattiva").text and "sv8" not in db.active_sets()
+    # si torna alla 30th; una carta di un'altra collezione si indica come set:numero
+    assert "corrente" in h.handle("/collezione 30th").text and db.current_set() == "me55"
+    assert "Lapras" in h.handle("/aggiungi 131").text and "30th Celebration: mancanti" in h.handle("/aggiungi 131").text
+    assert "Durant ex" in h.handle("/ho sv8:4").text and coll.wanted_numbers(db, index.get_set("sv8")) == set()
+    assert "spenta" in h.handle("/collezione me55 disattiva").text and "me55" not in db.active_sets()
+    assert "attiva" in h.handle("/collezione me55 attiva").text and "me55" in db.active_sets()
     monkeypatch.setattr(coll, "_get_json", lambda urls: CATALOG)
     assert "non trovata" in h.handle("/collezione xyz").text
 
 
-def test_search_includes_active_extra_sets(index, monkeypatch):
+def test_search_only_active_sets(index, monkeypatch):
     _fake_net(monkeypatch)
     from pokebot.search import run_search
     from pokebot.scrapers.base import Listing
@@ -67,26 +89,28 @@ def test_search_includes_active_extra_sets(index, monkeypatch):
     db = _db()
     db.save_settings({"sources": ["fake"], "generic_queries": [], "per_card_queries": True, "quiet_hours": None, "deal_pct": 0})
     db.set_wanted("me55-131", True)
-    coll.get_set(db, "sv8")
-    coll.mark(db, "sv8", ["1", "4"], False)  # possedute: resta mancante solo la 7
+    cs = coll.get_set(db, "sv8")
+    coll.mark(db, cs, ["1", "4"], False)  # resta mancante solo la 7
+    idx = coll.load_index(db)
     scr = FakeScraper([Listing("fake", "p", "Pikachu ex 7/191 Surging Sparks", "https://f/1", price=20.0, price_text="20 €")])
     n = FakeNotifier()
-    run_search(index, db, n, {"fake": scr})
-    assert not any("Surging" in q for q in scr.queries) and not n.sent  # spenta: né query né notifiche
-    coll.set_active(db, "sv8", True)
+    rep = run_search(idx, db, n, {"fake": scr})
+    assert rep.wanted_count == 1 and not any("Surging" in q for q in scr.queries) and not n.sent  # sv8 spenta
+    db.set_active("sv8", True)
     scr2 = FakeScraper([Listing("fake", "p2", "Pikachu ex 7/191 Surging Sparks", "https://f/2", price=20.0, price_text="20 €")])
-    rep = run_search(index, db, n, {"fake": scr2})
-    assert any("Pikachu ex 7/191 Surging Sparks" in q for q in scr2.queries) and rep.wanted_count == 2
+    rep = run_search(idx, db, n, {"fake": scr2})
+    assert any("Pikachu ex 7/191" in q for q in scr2.queries) and rep.wanted_count == 2
     assert [l.key for l, _ in n.sent] == ["fake:p2"]
+    # con la 30th spenta non si cerca nemmeno lei
+    db.set_active("me55", False)
+    db.set_active("me55c", False)
+    scr3 = FakeScraper([Listing("fake", "x", "Lapras 131/128 30th", "https://f/3", price=10.0, price_text="10 €")])
+    rep = run_search(idx, db, n, {"fake": scr3})
+    assert rep.wanted_count == 1 and not any("Lapras" in q for q in scr3.queries)
 
 
-def test_home_active_off_skips_30th(index, monkeypatch):
-    from pokebot.search import run_search
-    from pokebot.scrapers.base import Listing
-    from tests.test_search import FakeNotifier, FakeScraper
+def test_generic_queries_come_from_sets(index):
+    from pokebot.search import build_queries
     db = _db()
-    db.save_settings({"sources": ["fake"], "generic_queries": [], "per_card_queries": True, "quiet_hours": None, "home_active": False})
-    db.set_wanted("me55-131", True)
-    scr = FakeScraper([Listing("fake", "x", "Lapras 131/128 30th", "https://f/1", price=10.0, price_text="10 €")])
-    rep = run_search(index, db, FakeNotifier(), {"fake": scr})
-    assert rep.wanted_count == 0 and not scr.queries
+    qs = build_queries(index, set(), db.get_settings(), db)
+    assert "pokemon 30th celebration" in qs and "pokemon classic collection 30th" in qs

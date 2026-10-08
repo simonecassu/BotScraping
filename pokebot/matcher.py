@@ -48,7 +48,6 @@ _ITALIAN_HINT_RE = re.compile(r"\b(ita|italiano|italiana|italiane|it)\b")
 
 # Indizi di set diversi (25° anniversario "Celebrations")
 _OTHER_SET_RE = re.compile(r"\b(25th|25 anniversario|25° anniversario|celebrations|venticinquesimo)\b")
-_THIRTY_RE = re.compile(r"\b(30th|30|30°|trentesimo|30esimo|2026)\b")
 
 
 @dataclass
@@ -84,8 +83,10 @@ class MatchResult:
 
 
 class Matcher:
-    def __init__(self, index: CardIndex, set_keywords: list[str]):
+    def __init__(self, index: CardIndex, set_keywords: list[str] | None = None):
         self.index = index
+        if set_keywords is None:  # parole chiave di tutte le collezioni dell'indice
+            set_keywords = [k for s in index.sets for k in s.context_keywords]
         self.set_keywords = [normalize(k) for k in set_keywords if k.strip()]
         self._set_kw_re = self._build_kw_re(self.set_keywords)
         # Per i set senza numerazione propria (Classic Collection) servono parole di contesto
@@ -98,6 +99,8 @@ class Matcher:
         self._name_res = [(n, re.compile(r"(?<![a-z0-9])" + re.escape(n) + r"(?![a-z0-9])")) for n in names]
         # numeri "n/128" per i set con printed_total
         self._number_res: list[tuple[str, re.Pattern]] = []
+        totals = [s.printed_total for s in index.sets if s.printed_total]
+        self._shared_total: set[str] = {s.id for s in index.sets if s.printed_total and totals.count(s.printed_total) > 1}
         for s in index.sets:
             if s.printed_total:
                 self._number_res.append((s.id, re.compile(r"(?<!\d)(\d{1,3})\s*/\s*0?" + str(s.printed_total) + r"(?!\d)")))
@@ -128,12 +131,12 @@ class Matcher:
             return MatchResult("excluded", False, "solo scambio")
 
         has_set_kw = bool(self._set_kw_re and self._set_kw_re.search(text))
-        if _OTHER_SET_RE.search(text) and not _THIRTY_RE.search(text):
+        if _OTHER_SET_RE.search(text) and not has_set_kw:
             return MatchResult("none", False, "sembra un altro set (25° anniversario)")
 
         refs, ambiguous, in_set = self._extract_refs(text, has_set_kw)
         if not in_set:
-            return MatchResult("none", False, "nessun riferimento al set 30th")
+            return MatchResult("none", False, "nessun riferimento alle collezioni seguite")
         if not refs and not ambiguous:
             if _FULL_SET_RE.search(text) or _LOT_RE.search(text) or _STATED_COUNT_RE.search(text):
                 return self._evaluate_lot(text, refs, ambiguous, wanted_ids, lot_min_ratio, notify_unverifiable_lots)
@@ -174,6 +177,8 @@ class Matcher:
 
         # 1) numeri espliciti "150/128"
         for set_id, rx in self._number_res:
+            if set_id in self._shared_total and not self._set_allowed(set_id, text, has_set_kw):
+                continue  # più collezioni con la stessa numerazione: serve il nome del set nel testo
             for m in rx.finditer(text):
                 card = self.index.by_set_number.get((set_id, m.group(1).lstrip("0") or "0"))
                 if card:
@@ -229,11 +234,16 @@ class Matcher:
         return list(refs.values()), uniq, in_set
 
     def _set_allowed(self, set_id: str, text: str, has_set_kw: bool) -> bool:
-        """I set senza numerazione propria richiedono parole di contesto nel testo."""
+        """Un nome vale per una collezione se nel testo ci sono le sue parole chiave; se il testo non nomina nessuna
+        collezione, valgono le collezioni con numerazione propria (poi decide `in_set`, cioè un numero "n/128").
+        Le collezioni senza numerazione propria (Classic) richiedono sempre le loro parole di contesto."""
         rx = self._set_context_re.get(set_id)
-        if rx is None:
-            return True  # il set "principale": i nomi contano solo se poi in_set risulta vero
-        return bool(rx.search(text))
+        if rx is not None and rx.search(text):
+            return True
+        cs = self.index.get_set(set_id)
+        if not cs or not cs.printed_total:
+            return False
+        return not has_set_kw
 
     # ------------------------------------------------------------------
     def _evaluate_single(self, refs: list[CardRef], ambiguous: list[AmbiguousRef], wanted_ids: set[str]) -> MatchResult:

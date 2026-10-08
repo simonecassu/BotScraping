@@ -5,11 +5,11 @@ from pokebot.cards import load_sets
 from pokebot.matcher import Matcher
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def index():
     return load_sets()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def matcher(index):
-    return Matcher(index, config.DEFAULT_SETTINGS["set_keywords"])
+    return Matcher(index)

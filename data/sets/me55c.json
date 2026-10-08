@@ -11,6 +11,14 @@
   "classica",
   "collezione classica"
  ],
+ "queries": [
+  "pokemon classic collection 30th"
+ ],
+ "card_suffixes": [
+  "classic collection",
+  "30th classic"
+ ],
+ "card_query": "classic collection pokemon 30th",
  "cards": [
   {
    "id": "me55c-58",

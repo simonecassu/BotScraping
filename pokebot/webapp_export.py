@@ -21,6 +21,8 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300) -> dict:
     settings = db.get_settings()
     sets = []
     for s in index.sets:
+        if not s.primary:
+            continue  # le altre collezioni seguite viaggiano in "collections"
         sets.append({
             "id": s.id, "name": s.name, "name_it": s.name_it, "printed_total": s.printed_total,
             "cards": [{"id": c.id, "code": index.code_of[c.id], "number": c.number, "name": c.name,
@@ -36,7 +38,11 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300) -> dict:
                 "by_source": {src: {"n": st.n, "min": st.min, "median": st.median, "max": st.max}
                               for src, st in cp.by_source.items()},
             }
-    comp = pstats.completion(index, wanted, rows)
+    from .cards import CardIndex
+    home_index = CardIndex([s for s in index.sets if s.primary], index.aliases)
+    comp = pstats.completion(home_index, wanted, rows)
+    active = db.active_sets()
+    settings = dict(settings, home_active=any(s.id in active for s in home_index.sets))
     runs = db.last_runs(1)
     last = runs[0] if runs else None
     found = []
@@ -72,7 +78,9 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300) -> dict:
                      "every": w.get("every"), "checks": w.get("checks", 0), "found": w.get("found", 0)}
                     for cid, w in watch.list_watches(db).items()],
         "watch_found": list(reversed(watch.found_log(db))),
-        "collections": coll.export(db),
+        "collections": coll.export(db, index),
+        "active_sets": active,
+        "current_set": db.current_set(),
     }
 
 

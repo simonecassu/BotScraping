@@ -39,19 +39,23 @@ class RunReport:
 
 
 def build_queries(index: CardIndex, wanted_ids: set[str], settings: dict, db: Database) -> list[str]:
-    queries = [q.strip() for q in settings.get("generic_queries", []) if q.strip()]
+    """Query generiche di ogni collezione dell'indice (o quelle in `generic_queries`, se impostate) più le carte
+    mancanti a rotazione."""
+    generic = settings.get("generic_queries")
+    if generic is None:
+        generic = [q for s in index.sets for q in s.queries]
+    queries = [q.strip() for q in generic if q.strip()]
     if settings.get("per_card_queries") and wanted_ids:
         batch = int(settings.get("per_card_batch", 20) or 0)
         for cid in db.next_rotation(sorted(wanted_ids), batch):
             card = index.by_id.get(cid)
             if not card:
                 continue
-            if card.set_id not in ("me55", "me55c"):
-                queries.append(f"pokemon {card.name} {card.number}/{card.printed_total or ''} {card.set_name}".replace("/ ", " "))
-            elif card.printed_total:
+            if card.printed_total:
                 queries.append(f"{card.name} {card.number}/{card.printed_total}")
             else:
-                queries.append(f"{card.name} classic collection pokemon 30th")
+                cs = index.get_set(card.set_id)
+                queries.append(f"{card.name} {cs.card_query if cs and cs.card_query else card.set_name}")
     # dedup mantenendo l'ordine
     seen: set[str] = set()
     out: list[str] = []
@@ -66,13 +70,10 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
                scrapers: dict | None = None, dry_run: bool = False) -> RunReport:
     report = RunReport(started_at=time.time())
     settings = db.get_settings()
-    wanted = db.wanted_ids() if settings.get("home_active", True) else set()
-    # altre collezioni attivate con /collezione <id> attiva: si aggiungono all'indice e alle carte cercate
-    from . import collections as coll
-    extra_sets, extra_ids = coll.active_search_sets(db)
-    if extra_sets:
-        index = CardIndex(list(index.sets) + extra_sets)
-        wanted = wanted | extra_ids
+    # si cercano solo le collezioni attive: indice ridotto a quelle, mancanti solo le loro
+    active = set(db.active_sets())
+    index = CardIndex([s for s in index.sets if s.id in active], index.aliases)
+    wanted = {cid for cid in db.wanted_ids() if cid in index.by_id}
     report.wanted_count = len(wanted)
     run_id = db.start_run()
     if not wanted:
@@ -81,7 +82,7 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
         db.finish_run(run_id, 0, 0, {"info": "nessuna carta selezionata"})
         return report
 
-    matcher = Matcher(index, settings.get("set_keywords", []))
+    matcher = Matcher(index, settings.get("set_keywords"))
     lot_ratio = float(settings.get("lot_min_ratio", 0.5))
     max_price = float(settings.get("max_price", 0) or 0)
     only_italy = bool(settings.get("only_italy", True))
@@ -105,7 +106,7 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
     seen_this_run: set[str] = set()
     pending: list[tuple[Listing, "MatchResult"]] = []  # match da notificare a fine ciclo (raggruppati se tanti)
 
-    generic = {q.strip().lower() for q in settings.get("generic_queries", []) if q.strip()}
+    generic = {q.strip().lower() for q in (settings.get("generic_queries") or [q for s_ in index.sets for q in s_.queries]) if q.strip()}
     qstats: dict[str, dict] = {}
     # le sorgenti vengono interrogate in parallelo (ognuna con il proprio ritmo), poi gli annunci si valutano in ordine
     for name, listings_by_query, error in scrape_all(scrapers, queries):
@@ -347,10 +348,13 @@ def _notify_pending(pending: list, notifier: TelegramNotifier, db: Database, rep
         db.mark_seen(lst.key, notified=sent)
 
 
-def card_queries(card) -> list[str]:
-    if card.printed_total:
-        return [f"{card.name} {card.number}/{card.printed_total}", f"{card.name} 30th", f"{card.name} 30 anniversario"]
-    return [f"{card.name} classic collection", f"{card.name} 30th classic"]
+def card_queries(card, index: CardIndex | None = None) -> list[str]:
+    """Ricerca mirata: numero/totale più "nome + suffisso" per ogni suffisso della collezione."""
+    cs = index.get_set(card.set_id) if index else None
+    suffixes = (cs.card_suffixes if cs and cs.card_suffixes else [cs.keyword if cs else card.set_name])
+    out = [f"{card.name} {card.number}/{card.printed_total}"] if card.printed_total else []
+    out += [f"{card.name} {suf}" for suf in suffixes[:2]]
+    return out
 
 
 def search_card(index: CardIndex, db: Database, card, settings: dict | None = None, scrapers: dict | None = None,
@@ -361,7 +365,7 @@ def search_card(index: CardIndex, db: Database, card, settings: dict | None = No
     Gli annunci vengono registrati nello storico e segnati come visti.
     """
     settings = settings or db.get_settings()
-    matcher = Matcher(index, settings.get("set_keywords", []))
+    matcher = Matcher(index, settings.get("set_keywords"))
     language = str(settings.get("language", "ita") or "ita")
     lot_ratio = float(settings.get("lot_min_ratio", 0.5))
     max_price = float(settings.get("max_price", 0) or 0)
@@ -373,7 +377,7 @@ def search_card(index: CardIndex, db: Database, card, settings: dict | None = No
                 scrapers[name] = cls(only_italy=bool(settings.get("only_italy", True)))
     found: dict[str, tuple[Listing, MatchResult]] = {}
     errors: dict[str, str] = {}
-    for name, listings_by_query, error in scrape_all(scrapers, card_queries(card)):
+    for name, listings_by_query, error in scrape_all(scrapers, card_queries(card, index)):
         if error:
             errors[name] = error
         for _q, listings in listings_by_query:

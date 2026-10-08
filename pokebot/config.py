@@ -43,27 +43,11 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "paused": False,  # in pausa: cerca e accumula, non notifica
     "quiet_hours": None,  # es. [23, 8]: dalle 23 alle 8 accumula e manda tutto al mattino
     "sources": ["wallapop", "vinted", "ebay"],
-    "set_keywords": [
-        "30th celebration",
-        "30th",
-        "30 anniversario",
-        "30° anniversario",
-        "30esimo anniversario",
-        "trentesimo anniversario",
-        "celebrazione del 30",
-        "celebration",
-        "me55",
-    ],
-    "generic_queries": [
-        "pokemon 30th celebration",
-        "pokemon 30 anniversario",
-        "carte pokemon 30th",
-        "pokemon celebration 2026",
-        "pokemon classic collection 30th",
-    ],
     "per_card_queries": True,
     "per_card_batch": 20,  # quante carte mancanti cercare singolarmente per ciclo (a rotazione)
     "notify_unverifiable_lots": False,
     "only_italy": True,
-    "home_active": True,  # ricerca della collezione di casa (30th); si spegne dalla Mini App o con /collezione me55 disattiva
 }
+
+# Collezioni "di casa" (data/sets): comandi con codici brevi, cercate di default. La prima è quella corrente all'inizio.
+HOME_SET_IDS = ("me55", "me55c")

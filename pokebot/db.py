@@ -145,6 +145,25 @@ class Database:
                 ("_" + key, json.dumps(value)),
             )
 
+    # ---- collezioni: quali si cercano, su quale lavorano i comandi ----------------
+    def active_sets(self) -> list[str]:
+        v = self.get_kv("active_sets")
+        if v is None:  # mai impostato: si cercano le collezioni di casa
+            return list(config.HOME_SET_IDS)
+        return [str(x) for x in v]
+
+    def set_active(self, set_id: str, on: bool) -> None:
+        ids = [i for i in self.active_sets() if i != set_id]
+        if on:
+            ids.append(set_id)
+        self.set_kv("active_sets", ids)
+
+    def current_set(self) -> str:
+        return str(self.get_kv("current_set") or config.HOME_SET_IDS[0])
+
+    def set_current(self, set_id: str) -> None:
+        self.set_kv("current_set", set_id)
+
     # ---- persone collegate (proprietario + invitati) --------------------------
     def owner_chat_id(self) -> str:
         return config.TELEGRAM_CHAT_ID or str(self.get_kv("telegram_chat_id", "") or "")
