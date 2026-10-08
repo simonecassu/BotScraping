@@ -223,7 +223,7 @@ function renderAll() { renderHome(); renderCollections(); renderChecklist(); ren
 function renderHome() {
   const nExtraActive = Object.values(extra).filter((e) => e.active).length;
   const ws = state.watches || [];
-  $("#t-coll").textContent = `30th Celebration · ${wanted.size} mancanti` + (nExtraActive ? ` · +${nExtraActive} attive` : "") + (ws.length ? ` · ${ws.length} inseguit${ws.length === 1 ? "a" : "e"}` : "");
+  $("#t-coll").textContent = `30th Celebration · ${homeMissing()} mancanti` + (nExtraActive ? ` · +${nExtraActive} attive` : "") + (ws.length ? ` · ${ws.length} inseguit${ws.length === 1 ? "a" : "e"}` : "");
   const s = state.settings;
   $("#t-set").textContent = s.paused ? "⏸ in pausa" : `ogni ${s.interval_minutes} min · ${(s.sources || []).length} fonti`;
   const lr = state.last_run;
@@ -242,6 +242,7 @@ async function loadCatalog() {
     try { localStorage.setItem("catalog", JSON.stringify({ ts: Date.now(), sets: catalog })); } catch (e) {}
   } catch (e) { catalog = []; }
 }
+function homeMissing() { return cards.filter((c) => wanted.has(c.id)).length; }
 function valTxt(key) { const v = (state.values || {})[key]; return v && v.owned_priced ? ` · 💎 ${eur(v.owned_value)}` : ""; }
 function renderCollections() {
   if (!state) return;
@@ -252,7 +253,7 @@ function renderCollections() {
   const mine = [];
   const st = (on) => on ? '<span class="st on">🔎 attiva</span>' : '<span class="st">💤 spenta</span>';
   if (!q || "30th celebration classic".includes(q)) mine.push(row({ id: "me55", name: "30th Celebration", logo: ((catalog || []).find((s) => s.id === "me55") || {}).logo || "" },
-    st(state.settings.home_active !== false), "home", `${cards.length} carte (con Classic Collection) · ${wanted.size} mancanti` + valTxt("home")));
+    st(state.settings.home_active !== false), "home", `${cards.length} carte (con Classic Collection) · ${homeMissing()} mancanti` + valTxt("home")));
   for (const e of Object.values(extra)) {
     if (q && !e.meta.name.toLowerCase().includes(q)) continue;
     const miss = e.cards.length ? e.cards.length - e.owned.size : (e.meta.total || "?");
@@ -261,7 +262,7 @@ function renderCollections() {
   const vals = state.values || {};
   const totVal = Object.values(vals).reduce((a, v) => a + (v.owned_value || 0), 0);
   const totPriced = Object.values(vals).reduce((a, v) => a + (v.owned_priced || 0), 0);
-  html += `<h2>Le tue</h2>` + (totPriced ? `<div class="kpi"><div><b>${eur(totVal)}</b><span>valore stimato delle carte che hai (${totPriced} con prezzo visto)</span></div><div><b>${eur(Object.values(vals).reduce((a, v) => a + (v.missing_cost || 0), 0))}</b><span>per finire tutto, ai minimi visti</span></div></div>` : "") + `${mine.join("") || '<p class="hint">Nessuna.</p>'}`;
+  html += `<h2>Le tue</h2>` + (totPriced ? `<div class="kpi" style="grid-template-columns:1fr"><div><b>💎 ${eur(totVal)}</b><span>valore stimato delle carte che hai (${totPriced} con prezzo visto, mediane degli annunci)</span></div></div>` : "") + `${mine.join("") || '<p class="hint">Nessuna.</p>'}`;
   if (!catalog) html += '<h2>Tutte</h2><p class="hint">Carico il catalogo…</p>';
   else {
     const list = catalog.filter((s) => !HOME_SETS.includes(s.id) && !extra[s.id] && (!q || s.name.toLowerCase().includes(q) || s.series.toLowerCase().includes(q) || s.id.includes(q)));
@@ -323,7 +324,7 @@ function renderChecklist() {
     pills.innerHTML = state.sets.map((s) => {
       const miss = s.cards.filter((c) => wanted.has(c.id)).length;
       return `<span class="pill ${filterSet === s.id ? "on" : ""}" data-set="${s.id}">${esc(s.name)} · ${miss}/${s.cards.length} mancanti</span>`;
-    }).join("") + `<span class="pill">Mancanti <b>${wanted.size}</b>/${cards.length}</span>`;
+    }).join("") + `<span class="pill">Mancanti <b>${homeMissing()}</b>/${cards.length}</span>`;
     pills.querySelectorAll("[data-set]").forEach((p) => p.onclick = () => { filterSet = filterSet === p.dataset.set ? "" : p.dataset.set; renderChecklist(); });
   } else {
     const e = extra[curSet];
