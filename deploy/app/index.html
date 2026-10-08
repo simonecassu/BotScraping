@@ -197,8 +197,27 @@ async function sendCmd(text) {
     const r = await fetch("/api/cmd", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: tg.initData, text }) });
     const d = await r.json();
     if (!d.ok) { toast("Errore: " + (d.error || d.status)); return false; }
+    setTimeout(() => awaitRefresh(), 0);
     return true;
   } catch (e) { toast("Rete non disponibile"); return false; }
+}
+
+let refreshing = null;
+async function awaitRefresh(what) {
+  // dopo un comando: il bot gira su GitHub (30-60 s); resta in ascolto e aggiorna da solo appena lo stato cambia
+  if (refreshing) return;
+  const before = state ? state.generated_at : 0;
+  const upd = $("#upd");
+  refreshing = (async () => {
+    for (let i = 0; i < 20; i++) {
+      upd.textContent = "⏳ " + (what || "aggiornamento") + "…";
+      await new Promise((r) => setTimeout(r, i < 4 ? 10000 : 7000));
+      await load();
+      if (state && state.generated_at !== before) { toast("✅ Aggiornato"); break; }
+    }
+    refreshing = null;
+    if (state) upd.textContent = "aggiornato " + new Date(state.generated_at * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+  })();
 }
 
 async function load() {
@@ -226,7 +245,7 @@ async function load() {
   }
   applyOverrides();
   const d = new Date(state.generated_at * 1000);
-  $("#upd").textContent = "aggiornato " + d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+  if (!refreshing) $("#upd").textContent = "aggiornato " + d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
   renderAll();
 }
 
@@ -400,7 +419,7 @@ function sharedWith() {
 function renderShared() {
   const sw = sharedWith();
   $("#shared-hint").innerHTML = sw.length ? `👥 Album in comune con <b>${esc(sw.map((u) => u.name).join(", "))}</b>: ogni spunta vale per tutti. <a href="#" id="leavealbum">Esci dall'album</a>` : "";
-  const lv = $("#leavealbum"); if (lv) lv.onclick = async (ev) => { ev.preventDefault(); if (confirm("Uscire dall'album condiviso? Ne terrai una copia tutta tua.") && await sendCmd(`/esci ${curSetId()}`)) { toast("Uscito: guarda la chat"); setTimeout(load, 60000); } };
+  const lv = $("#leavealbum"); if (lv) lv.onclick = async (ev) => { ev.preventDefault(); if (confirm("Uscire dall'album condiviso? Ne terrai una copia tutta tua.") && await sendCmd(`/esci ${curSetId()}`)) { toast("Uscito: guarda la chat"); } };
 }
 $("#sharebtn").onclick = async () => {
   const friends = state.friends || [];
@@ -511,7 +530,7 @@ $("#chase-go").onclick = async () => {
   const v = $("#chase-card").value.trim(), d = $("#chase-dur").value;
   if (!v) { toast("Scrivi il numero della carta"); return; }
   const target = v.split(/\s+/).map((t) => curSet === "home" ? (/^\d+$/.test(t) ? `me55:${t}` : t) : `${curSet}:${t}`).join(" ");
-  if (await sendCmd(`/insegui ${target}${d ? " " + d : ""}`)) { toast("Inseguimento avviato: guarda la chat"); $("#chase-card").value = ""; setTimeout(load, 70000); }
+  if (await sendCmd(`/insegui ${target}${d ? " " + d : ""}`)) { toast("Inseguimento avviato: guarda la chat"); $("#chase-card").value = ""; }
 };
 $("#chase-card").onkeydown = (e) => { if (e.key === "Enter") $("#chase-go").click(); };
 
@@ -596,7 +615,7 @@ function renderSettings() {
   $("#friendgo").onclick = async () => {
     const code = $("#friendcode").value.trim().toUpperCase(); if (!code) return;
     // un codice amico si usa con /amico, un codice album con /accetta: il bot capisce dal codice
-    if (await sendCmd(`/amico ${code}`)) { toast("Codice inviato: guarda la chat"); $("#friendcode").value = ""; setTimeout(load, 60000); }
+    if (await sendCmd(`/amico ${code}`)) { toast("Codice inviato: guarda la chat"); $("#friendcode").value = ""; }
   };
   const lr = state.last_run;
   $("#lastrun").innerHTML = lr ? `Ultimo giro ${new Date(lr.started_at * 1000).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}: ${lr.listings_seen} annunci letti, ${lr.matches} segnalati` +
