@@ -90,10 +90,8 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
     unverifiable = bool(settings.get("notify_unverifiable_lots", False))
     max_per_card = int(settings.get("max_per_card", 5) or 5)
     language = str(settings.get("language", "ita") or "ita")
-    notifier = notifier or TelegramNotifier.from_db(db)
-    suppressed = notifications_suppressed(settings)
-    if not suppressed:
-        flush_queued(db, notifier, settings)
+    if notifier is None:
+        flush_all_queues(db, index.by_id)
 
     if scrapers is None:
         scrapers = {}
@@ -134,7 +132,7 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
             # qualche query è riuscita: l'errore è parziale, non bloccante
             report.errors[name] = "parziale: " + report.errors[name]
 
-    _notify_pending(pending, notifier, db, report, dry_run, max_per_card, settings, suppressed)
+    _notify_pending(pending, db, report, dry_run, notifier=notifier, settings=settings)
     report.finished_at = time.time()
     db.finish_run(run_id, report.listings, report.matches, report.errors, dict(report.per_source))
     log.info("Ciclo completato: %d query, %d annunci (%d nuovi), %d match, %d notifiche, %d affari, %d in coda · per fonte: %s",
@@ -248,9 +246,10 @@ def _row_to_pair(row: dict, index_by_id: dict | None = None) -> tuple[Listing, M
     return lst, res
 
 
-def flush_queued(db: Database, notifier: TelegramNotifier, settings: dict, index_by_id: dict | None = None) -> int:
-    """Invia gli annunci accumulati durante la pausa o la notte, raggruppati per carta."""
-    rows = db.queued_found()
+def flush_queued(db: Database, notifier: TelegramNotifier, settings: dict, index_by_id: dict | None = None,
+                 chat_id: str | None = None) -> int:
+    """Invia gli annunci accumulati (per una persona) durante la sua pausa o le sue ore notturne, raggruppati per carta."""
+    rows = db.queued_found(chat_id)
     if not rows:
         return 0
     if index_by_id is None:
@@ -258,10 +257,14 @@ def flush_queued(db: Database, notifier: TelegramNotifier, settings: dict, index
         index_by_id = load_sets().by_id
     pairs = []
     ids = []
+    seen_ids: set[int] = set()
     for r in rows:
+        if r["id"] in seen_ids:
+            continue
+        seen_ids.add(r["id"])
         lst, res = _row_to_pair(r, index_by_id)
         if not (res.wanted or res.possible_wanted) and r["kind"] != "lot":
-            db.mark_sent([r["id"]], False)
+            db.mark_sent([r["id"]], False, chat_id)
             continue
         pairs.append((lst, res))
         ids.append(r["id"])
@@ -271,37 +274,73 @@ def flush_queued(db: Database, notifier: TelegramNotifier, settings: dict, index
     outcomes = notifier.notify_many(pairs, max_per_card=int(settings.get("max_per_card", 5) or 5),
                                     images=bool(settings.get("images", True)))
     for row_id, sent in zip(ids, outcomes):
-        db.mark_sent([row_id], sent)
-    log.info("Coda inviata: %d annunci", len(pairs))
+        db.mark_sent([row_id], sent, chat_id)
+    log.info("Coda inviata a %s: %d annunci", chat_id or "tutti", len(pairs))
     return len(pairs)
 
 
-def _notify_pending(pending: list, notifier: TelegramNotifier, db: Database, report: RunReport, dry_run: bool,
-                    max_per_card: int = 5, settings: dict | None = None, suppressed: bool = False) -> None:
-    settings = settings or {}
+def flush_all_queues(db: Database, index_by_id: dict | None = None) -> int:
+    """Per ogni persona con annunci in coda e notifiche attive: invia con le sue impostazioni."""
+    total = 0
+    for chat in db.queued_chats():
+        settings = db.settings_for(chat)
+        if notifications_suppressed(settings):
+            continue
+        total += flush_queued(db, TelegramNotifier(chat_ids=[chat]), settings, index_by_id, chat)
+    return total
+
+
+def _notify_pending(pending: list, db: Database, report: RunReport, dry_run: bool,
+                    notifier: TelegramNotifier | None = None, settings: dict | None = None) -> None:
+    """Registra gli annunci una volta sola, poi li consegna a ogni persona collegata con le SUE impostazioni
+    (pausa, notte, foto, quanti per carta, affari). Chi ha le notifiche sospese li trova in coda al risveglio."""
+    if not pending:
+        return
+    found_ids: dict[str, int] = {}
+    for lst, result in pending:
+        found_ids[lst.key] = db.add_found(lst.key, lst.source, lst.title, lst.url,
+                                          lst.price_text or (f"{lst.price:.2f} €" if lst.price else None), lst.location,
+                                          result.kind, result.matched_payload, result.ratio, False, image=lst.image, seller=lst.seller)
+        db.mark_seen(lst.key, notified=False)
+    if notifier is not None:  # un solo destinatario esplicito (test / prova): le impostazioni passate valgono per lui
+        recipients = [("", notifier, dict(settings or db.get_settings()))]
+    else:
+        recipients = [(chat, TelegramNotifier(chat_ids=[chat]), db.settings_for(chat)) for chat in db.chat_ids()]
+    history = db.list_found()
+    pending_keys = set(found_ids)
+    sent_any: set[str] = set()
+    deal_keys: set[str] = set()
+    for i, (chat, ntf, st) in enumerate(recipients):
+        first = i == 0  # i contatori del giro si riferiscono alla prima persona (il proprietario)
+        if notifications_suppressed(st):
+            db.enqueue(chat, list(found_ids.values()))
+            if first:
+                report.queued += len(pending)
+            log.info("Notifiche sospese per %s (pausa/notte): %d annunci in coda", chat or "destinatario", len(pending))
+            continue
+        delivered, deals = _deliver(pending, ntf, st, history, dry_run, report if first else None, pending_keys)
+        sent_any |= delivered
+        deal_keys |= deals
+    db.mark_notified([found_ids[k] for k in sent_any])
+    db.mark_deal([found_ids[k] for k in deal_keys])
+
+
+def _deliver(pending: list, notifier: TelegramNotifier, settings: dict, history: list[dict], dry_run: bool,
+             report: RunReport | None, pending_keys: set[str] | None = None) -> tuple[set[str], set[str]]:
+    """Consegna a una persona: affari 🔥, poi i gruppi per carta con il tetto per giro.
+    Restituisce (chiavi inviate, chiavi segnalate come affare)."""
     images = bool(settings.get("images", True))
     deal_pct = float(settings.get("deal_pct", 60) or 0)
-
-    if suppressed:
-        for lst, result in pending:
-            report.queued += 1
-            db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),
-                         lst.location, result.kind, result.matched_payload, result.ratio, False, queued=True, image=lst.image, seller=lst.seller)
-            db.mark_seen(lst.key, notified=False)
-        if pending:
-            log.info("Notifiche sospese (pausa/notte): %d annunci in coda", len(pending))
-        return
-
-    # 🔥 affari: prezzo molto sotto la mediana storica della carta -> avviso immediato, fuori dai gruppi
+    max_per_card = int(settings.get("max_per_card", 5) or 5)
+    sent: set[str] = set()
     deals: set[str] = set()
     max_deals = int(settings.get("max_deals_per_run", 3) or 0)
-    if deal_pct > 0 and pending and max_deals > 0:
-        history = db.list_found()
+    if deal_pct > 0 and max_deals > 0:
         candidates = []
         for lst, result in pending:
             if result.kind != "single" or not result.wanted or lst.price is None or lst.price < 1:
                 continue
-            median = pstats.median_for_deal(history, result.wanted[0].id)
+            median = pstats.median_for_deal(history, result.wanted[0].id, exclude_keys=pending_keys or {lst.key})
             # sotto il 25% della mediana è quasi sempre un errore di riconoscimento o un'inserzione sospetta
             if median and median * 0.25 <= lst.price <= median * deal_pct / 100.0:
                 candidates.append((lst.price / median, lst, result, median))
@@ -309,18 +348,16 @@ def _notify_pending(pending: list, notifier: TelegramNotifier, db: Database, rep
         if len(candidates) > max_deals:
             log.info("Affari trovati: %d, inviati solo i %d migliori", len(candidates), max_deals)
         for _, lst, result, median in candidates[:max_deals]:
-            if True:
-                sent = False if dry_run else notifier.notify_deal(lst, result, median, images)
-                deals.add(lst.key)
-                report.deals += int(sent)
-                report.notified += int(sent)
-                db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or f"{lst.price:.2f} €", lst.location,
-                             result.kind, result.matched_payload, result.ratio, sent, image=lst.image, deal=True, seller=lst.seller)
-                db.mark_seen(lst.key, notified=sent)
-                log.info("AFFARE [%s] %s %.2f € (mediana %.2f)", lst.source, lst.title[:60], lst.price, median)
-
+            ok = False if dry_run else notifier.notify_deal(lst, result, median, images)
+            deals.add(lst.key)
+            if ok:
+                sent.add(lst.key)
+            if report:
+                report.deals += int(ok)
+                report.notified += int(ok)
+            log.info("AFFARE [%s] %s %.2f € (mediana %.2f)", lst.source, lst.title[:60], lst.price, median)
     rest = [(lst, res) for lst, res in pending if lst.key not in deals]
-    # tetto ai messaggi per giro: oltre il limite si registra nello storico senza inviare (anti-valanga)
+    # tetto ai messaggi per giro: oltre il limite restano solo nello storico (anti-valanga)
     max_msgs = int(settings.get("max_messages_per_run", 10) or 0)
     overflow_note = None
     if max_msgs > 0 and rest:
@@ -329,27 +366,24 @@ def _notify_pending(pending: list, notifier: TelegramNotifier, db: Database, rep
         if len(groups) > max_msgs:
             keep_keys = {lst.key for _, _, members in groups[:max_msgs] for lst, _ in members}
             skipped_groups = groups[max_msgs:]
-            overflow = [(lst, res) for lst, res in rest if lst.key not in keep_keys]
+            n_over = sum(1 for lst, _ in rest if lst.key not in keep_keys)
             rest = [(lst, res) for lst, res in rest if lst.key in keep_keys]
-            for lst, result in overflow:
-                db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),
-                             lst.location, result.kind, result.matched_payload, result.ratio, False, image=lst.image, seller=lst.seller)
-                db.mark_seen(lst.key, notified=False)
             names = ", ".join(t.replace("🃏 ", "").replace("📦 ", "").replace("❔ ", "") for _, t, _ in skipped_groups[:12])
             overflow_note = (f"⚠️ Giro insolitamente ricco: {len(groups)} carte con novità, inviate le prime {max_msgs}. "
-                             f"Le altre ({len(overflow)} annunci) sono nello storico: {names}" + (" …" if len(skipped_groups) > 12 else "") +
+                             f"Le altre ({n_over} annunci) sono nello storico: {names}" + (" …" if len(skipped_groups) > 12 else "") +
                              "\nUsa /storico o /cerca <carta>.")
-            log.info("Tetto messaggi: %d gruppi su %d inviati, %d annunci solo nello storico", max_msgs, len(groups), len(overflow))
+            log.info("Tetto messaggi: %d gruppi su %d inviati, %d annunci solo nello storico", max_msgs, len(groups), n_over)
     outcomes = [False] * len(rest)
     if rest and not dry_run:
         outcomes = notifier.notify_many(rest, max_per_card=max_per_card, images=images)
     if overflow_note and not dry_run:
         notifier.send(overflow_note, disable_preview=True)
-    for (lst, result), sent in zip(rest, outcomes):
-        report.notified += int(sent)
-        db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),
-                     lst.location, result.kind, result.matched_payload, result.ratio, sent, image=lst.image, seller=lst.seller)
-        db.mark_seen(lst.key, notified=sent)
+    for (lst, _), ok in zip(rest, outcomes):
+        if ok:
+            sent.add(lst.key)
+        if report:
+            report.notified += int(ok)
+    return sent, deals
 
 
 _BARE_NUM_RE = re.compile(r"(?<![\d/])0*(\d{1,3})(?![\d/])")
@@ -367,6 +401,8 @@ def _refers_to(card, res, text: str) -> bool:
     if card.number in nums:
         return True
     return not (nums & siblings)
+
+
 
 
 def card_queries(card, index: CardIndex | None = None) -> list[str]:

@@ -41,6 +41,11 @@ CREATE TABLE IF NOT EXISTS found (
     notified INTEGER NOT NULL DEFAULT 0,
     created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS queue (
+    chat_id TEXT NOT NULL,
+    found_id INTEGER NOT NULL,
+    PRIMARY KEY (chat_id, found_id)
+);
 CREATE TABLE IF NOT EXISTS prices (
     card_id TEXT NOT NULL,
     listing_key TEXT NOT NULL,
@@ -137,6 +142,22 @@ class Database:
                 [(k, json.dumps(v)) for k, v in values.items()],
             )
 
+    # ---- preferenze personali (ogni persona collegata ha le sue notifiche) ----------
+    def user_prefs(self, chat_id: str) -> dict[str, Any]:
+        v = self.get_kv(f"prefs:{chat_id}") if chat_id else None
+        return dict(v) if isinstance(v, dict) else {}
+
+    def save_user_prefs(self, chat_id: str, values: dict[str, Any]) -> None:
+        prefs = self.user_prefs(chat_id)
+        prefs.update(values)
+        self.set_kv(f"prefs:{chat_id}", prefs)
+
+    def settings_for(self, chat_id: str) -> dict[str, Any]:
+        """Impostazioni condivise più le preferenze personali di quella chat."""
+        out = self.get_settings()
+        out.update({k: v for k, v in self.user_prefs(chat_id).items() if k in config.PERSONAL_SETTINGS})
+        return out
+
     # ---- valori interni (chat id Telegram, offset aggiornamenti...) --------
     def get_kv(self, key: str, default: Any = None) -> Any:
         with self.connect() as c:
@@ -168,11 +189,16 @@ class Database:
             ids.append(set_id)
         self.set_kv("active_sets", ids)
 
-    def current_set(self) -> str:
+    def current_set(self, chat_id: str = "") -> str:
+        """Collezione su cui lavorano i comandi: personale per chat, altrimenti quella generale."""
+        if chat_id:
+            v = self.get_kv(f"current_set:{chat_id}")
+            if v:
+                return str(v)
         return str(self.get_kv("current_set") or config.HOME_SET_IDS[0])
 
-    def set_current(self, set_id: str) -> None:
-        self.set_kv("current_set", set_id)
+    def set_current(self, set_id: str, chat_id: str = "") -> None:
+        self.set_kv(f"current_set:{chat_id}" if chat_id else "current_set", set_id)
 
     # ---- persone collegate (proprietario + invitati) --------------------------
     def owner_chat_id(self) -> str:
@@ -208,6 +234,7 @@ class Database:
             c.execute("DELETE FROM found WHERE id NOT IN (SELECT id FROM found ORDER BY created_at DESC LIMIT ?)", (keep_found,))
             c.execute("DELETE FROM runs WHERE id NOT IN (SELECT id FROM runs ORDER BY started_at DESC LIMIT ?)", (keep_runs,))
             c.execute("DELETE FROM prices WHERE ts < ?", (time.time() - 120 * 86400,))
+            c.execute("DELETE FROM queue WHERE found_id NOT IN (SELECT id FROM found)")
         with _lock:
             conn = sqlite3.connect(self.path, isolation_level=None)
             try:
@@ -268,10 +295,20 @@ class Database:
             v.pop(card_id, None)
         self.set_kv("copies", v)
 
-    def queued_found(self) -> list[dict]:
-        """Annunci trovati durante la pausa / le ore notturne, non ancora inviati."""
+    def enqueue(self, chat_id: str, found_ids: list[int]) -> None:
+        """Annunci da inviare a quella persona quando le sue notifiche riprendono (pausa / ore notturne)."""
         with self.connect() as c:
-            rows = c.execute("SELECT * FROM found WHERE queued = 1 ORDER BY created_at").fetchall()
+            c.executemany("INSERT OR IGNORE INTO queue(chat_id, found_id) VALUES (?, ?)", [(chat_id, i) for i in found_ids])
+
+    def queued_found(self, chat_id: str | None = None) -> list[dict]:
+        """Annunci in coda (per una persona, o di chiunque)."""
+        with self.connect() as c:
+            if chat_id is None:
+                rows = c.execute("SELECT f.*, q.chat_id AS queue_chat FROM queue q JOIN found f ON f.id = q.found_id "
+                                 "ORDER BY f.created_at").fetchall()
+            else:
+                rows = c.execute("SELECT f.*, q.chat_id AS queue_chat FROM queue q JOIN found f ON f.id = q.found_id "
+                                 "WHERE q.chat_id = ? ORDER BY f.created_at", (chat_id,)).fetchall()
         out = []
         for r in rows:
             d = dict(r)
@@ -279,11 +316,31 @@ class Database:
             out.append(d)
         return out
 
-    def mark_sent(self, ids: list[int], sent: bool) -> None:
+    def queued_chats(self) -> list[str]:
+        with self.connect() as c:
+            return [r["chat_id"] for r in c.execute("SELECT DISTINCT chat_id FROM queue")]
+
+    def mark_sent(self, ids: list[int], sent: bool, chat_id: str | None = None) -> None:
+        """Toglie dalla coda (di una persona o di tutte) e segna come inviato se lo è stato."""
         if not ids:
             return
         with self.connect() as c:
-            c.executemany("UPDATE found SET queued = 0, notified = ? WHERE id = ?", [(int(sent), i) for i in ids])
+            if chat_id is None:
+                c.executemany("DELETE FROM queue WHERE found_id = ?", [(i,) for i in ids])
+            else:
+                c.executemany("DELETE FROM queue WHERE found_id = ? AND chat_id = ?", [(i, chat_id) for i in ids])
+            if sent:
+                c.executemany("UPDATE found SET notified = 1, queued = 0 WHERE id = ?", [(i,) for i in ids])
+
+    def mark_deal(self, ids: list[int]) -> None:
+        if ids:
+            with self.connect() as c:
+                c.executemany("UPDATE found SET deal = 1 WHERE id = ?", [(i,) for i in ids])
+
+    def mark_notified(self, ids: list[int]) -> None:
+        if ids:
+            with self.connect() as c:
+                c.executemany("UPDATE found SET notified = 1 WHERE id = ?", [(i,) for i in ids])
 
     def list_found(self, limit: int = 2000) -> list[dict]:
         with self.connect() as c:

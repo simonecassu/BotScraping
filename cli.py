@@ -88,11 +88,8 @@ def main(argv: list[str] | None = None) -> int:
         for line in run_watches(index, db):  # inseguimenti (/insegui): a ogni sveglia, 5 minuti
             print(f"inseguimento · {line}")
         if not (args.force or want_search or _search_due(db)):
-            from pokebot.notifier import TelegramNotifier
-            from pokebot.search import flush_queued, notifications_suppressed
-            settings = db.get_settings()
-            if not notifications_suppressed(settings):
-                flush_queued(db, TelegramNotifier.from_db(db), settings, index.by_id)
+            from pokebot.search import flush_all_queues
+            flush_all_queues(db, index.by_id)  # chi ha finito pausa o notte riceve quello che si è accumulato
             print("Ricerca completa non ancora dovuta (vedi /intervallo): solo comandi Telegram e inseguimenti.")
             db.prune()
             return 0

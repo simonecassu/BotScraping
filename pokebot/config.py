@@ -49,5 +49,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "only_italy": True,
 }
 
+# Impostazioni personali: ogni persona collegata ha le sue (le altre sono condivise, come l'album).
+PERSONAL_SETTINGS = {"paused", "quiet_hours", "images", "max_per_card", "deal_pct", "max_messages_per_run", "max_deals_per_run"}
+
 # Collezioni "di casa" (data/sets): comandi con codici brevi, cercate di default. La prima è quella corrente all'inizio.
 HOME_SET_IDS = ("me55", "me55c")
