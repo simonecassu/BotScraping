@@ -45,6 +45,8 @@ HELP = """<b>Comandi</b>
 /progresso – avanzamento del set, mancanti per rarità, stima di spesa
 /affari 60 – avviso 🔥 immediato se un prezzo è sotto il 60% della mediana storica · /affari off
 /pausa · /riprendi – sospendi/riattiva le notifiche (il bot accumula) · /notte 23 8 – ore silenziose
+/valore – quanto valgono le carte che hai e quanto costa finire · /spesa – paniere più economico per le mancanti, raggruppato per venditore
+/doppioni 131 132 – segna copie in più (·/doppioni togli 131) · /scambio – messaggio "cerco / offro" pronto da inviare
 /esporta – file Excel con checklist, storico e prezzi · /immagini on|off – foto della carta nei messaggi
 /soglia 50 – % minima di carte mancanti perché un lotto venga segnalato
 /prezzo 100 – prezzo massimo in € (0 = nessun limite)
@@ -63,7 +65,7 @@ Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
-MENU_VERSION = 14
+MENU_VERSION = 15
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -77,6 +79,10 @@ MENU_COMMANDS = [
     ("pausa", "Sospende le notifiche (continua a cercare e accumula)"),
     ("riprendi", "Riattiva le notifiche e invia quanto accumulato"),
     ("notte", "Ore silenziose: /notte 23 8 (accumula e invia al mattino), /notte off"),
+    ("valore", "Valore delle carte possedute e costo per finire la collezione"),
+    ("spesa", "Lista della spesa: paniere piu' economico per le mancanti, per venditore"),
+    ("doppioni", "Copie in piu' da scambiare: /doppioni 131 132, /doppioni togli 131"),
+    ("scambio", "Messaggio cerco/offro pronto da inviare"),
     ("esporta", "File Excel con checklist, storico annunci e prezzi"),
     ("immagini", "Immagine della carta nei messaggi: /immagini on | off"),
     ("cerca", "Cerca subito tutto, oppure una carta mirata: /cerca 145"),
@@ -227,6 +233,14 @@ class CommandHandler:
             return Reply("▶️ Notifiche riattivate. Se c'è qualcosa in coda, arriva tra pochi secondi.")
         if cmd in ("/notte", "/silenzio"):
             return self._quiet(args)
+        if cmd in ("/valore", "/value"):
+            return self._value()
+        if cmd in ("/spesa", "/lista_spesa", "/paniere"):
+            return self._shopping()
+        if cmd in ("/doppioni", "/doppione", "/copie"):
+            return self._copies(args)
+        if cmd in ("/scambio", "/scambi"):
+            return self._swap()
         if cmd in ("/esporta", "/export", "/excel"):
             return self._export()
         if cmd in ("/immagini", "/foto"):
@@ -658,6 +672,101 @@ class CommandHandler:
             out.append("❓ Non capiti: " + html.escape(" ".join(unknown)))
         code = self.index.code_of[cards[0].id]
         return Reply("\n\n".join(out), buttons=[[("💶 Prezzi", f"/prezzi {code}"), ("📂 Storico", f"/storico {code}")]])
+
+    def _all_price_rows(self) -> list[dict]:
+        return self.db.list_found() + self.db.price_rows()
+
+    def _value(self) -> Reply:
+        from . import stats as pstats
+        cur = self.current()
+        cards = [c for s_ in self.scope() for c in s_.cards]
+        v = pstats.collection_value(cards, self.db.wanted_ids(), self._all_price_rows())
+        lines = [f"💎 <b>{html.escape(cur.name)}</b>",
+                 f"Possiedi {v.owned} carte: valore stimato <b>{pstats.fmt_eur(v.owned_value)}</b> "
+                 f"(mediane viste su {v.owned_priced} carte" + (f", {v.owned - v.owned_priced} ancora senza prezzo" if v.owned > v.owned_priced else "") + ")"]
+        if v.missing:
+            lines.append(f"Mancano {v.missing}: per finirla circa <b>{pstats.fmt_eur(v.missing_cost)}</b> ai minimi visti"
+                         + (f" ({v.missing - v.missing_priced} senza prezzo)" if v.missing > v.missing_priced else ""))
+        lines.append("\n<i>I prezzi si accumulano a ogni giro: più il bot cerca, più la stima è completa.</i>")
+        return Reply("\n".join(lines), buttons=[[("🛒 Lista della spesa", "/spesa"), ("💶 Prezzi", "/prezzi")]])
+
+    def _shopping(self) -> Reply:
+        from . import shopping, stats as pstats
+        cur = self.current()
+        cards = [c for s_ in self.scope() for c in s_.cards]
+        sl = shopping.build(cards, self.db.wanted_ids(), self.db.list_found())
+        if not sl.picks:
+            return Reply(f"🛒 {html.escape(cur.name)}: nessun annuncio recente per le carte mancanti. Il bot continua a cercare.")
+        lines = [f"🛒 <b>Lista della spesa · {html.escape(cur.name)}</b>",
+                 f"{sl.covered} carte su {sl.covered + len(sl.uncovered)} mancanti, totale <b>{pstats.fmt_eur(sl.total)}</b> "
+                 f"(annunci degli ultimi 14 giorni, raggruppati per venditore)"]
+        for key, picks in sl.by_seller():
+            tot = sum(p.price for p in picks)
+            n = sum(len(p.cards) for p in picks)
+            lines.append(f"\n<b>{html.escape(sl.seller_label(key))}</b> · {n} cart{'a' if n == 1 else 'e'} · {pstats.fmt_eur(tot)}")
+            for p in picks:
+                names = ", ".join(c.label for c in p.cards)
+                tag = " 📦" if p.row.get("kind") == "lot" else ""
+                lines.append(f'• {pstats.fmt_eur(p.price)}{tag} <a href="{html.escape(p.row["url"], quote=True)}">{html.escape(names[:90])}</a>')
+        if sl.uncovered:
+            lines.append("\n❌ Senza annuncio recente: " + ", ".join(html.escape(c.label) for c in sl.uncovered[:15])
+                         + (f" e altre {len(sl.uncovered) - 15}" if len(sl.uncovered) > 15 else ""))
+        return Reply("\n".join(lines), buttons=[[("💎 Valore", "/valore"), ("🃏 Mancanti", "/mancanti")]])
+
+    def _copies(self, args: str) -> Reply:
+        from . import stats as pstats
+        a = args.strip()
+        copies = self.db.copies()
+        if not a:
+            mine = [(self.index.by_id[cid], n) for cid, n in copies.items() if cid in self.index.by_id]
+            if not mine:
+                return Reply("🔁 Nessun doppione segnato. Es. <code>/doppioni 131 132</code> (una copia in più ciascuna), "
+                             "<code>/doppioni togli 131</code>, <code>/doppioni azzera</code>.")
+            rows = self._all_price_rows()
+            lines = [f"🔁 <b>Doppioni</b> ({sum(n for _, n in mine)} copie in più)"]
+            tot = 0.0
+            for c, n in sorted(mine, key=lambda t: t[0].sort_key):
+                st = pstats.card_prices(rows, c).overall
+                val = f" · ~{pstats.fmt_eur(st.median)} l'una" if st.n and st.median is not None else ""
+                if st.n and st.median is not None:
+                    tot += st.median * n
+                lines.append(f"• {html.escape(c.label)} ×{n}{val}")
+            if tot:
+                lines.append(f"\nValore stimato dei doppioni: <b>{pstats.fmt_eur(tot)}</b>")
+            lines.append("/scambio per il messaggio di scambio pronto da inviare")
+            return Reply("\n".join(lines))
+        verb, _, rest = a.partition(" ")
+        if verb.lower() in ("azzera", "reset"):
+            self.db.set_kv("copies", {})
+            return Reply("🔁 Doppioni azzerati.")
+        remove = verb.lower() in ("togli", "rimuovi", "meno", "-")
+        cards, unknown = self.resolve(rest if remove else a)
+        if not cards:
+            return Reply("Carta non riconosciuta. Es. <code>/doppioni 131 132</code> oppure <code>/doppioni togli 131</code>.")
+        for c in cards:
+            self.db.set_copies(c.id, copies.get(c.id, 0) + (-1 if remove else 1))
+        msg = ("➖ " if remove else "➕ ") + ", ".join(html.escape(c.label) for c in cards[:20])
+        if unknown:
+            msg += "\n❓ Non capiti: " + html.escape(" ".join(unknown))
+        return Reply(msg + "\n/doppioni per l'elenco · /scambio per il messaggio")
+
+    def _swap(self) -> Reply:
+        """Messaggio di scambio pronto da copiare: cerco le mancanti della collezione corrente, offro i doppioni."""
+        cur = self.current()
+        wanted = self.db.wanted_ids()
+        want = [c for s_ in self.scope() for c in s_.cards if c.id in wanted]
+        copies = self.db.copies()
+        offer = [(self.index.by_id[cid], n) for cid, n in copies.items() if cid in self.index.by_id]
+        if not want and not offer:
+            return Reply("Niente da scambiare: nessuna mancante nella collezione corrente e nessun doppione (/doppioni).")
+        lines = [f"🔁 Scambio carte Pokémon · {cur.name}"]
+        if want:
+            lines.append("CERCO: " + ", ".join(c.label for c in want[:40]) + (f" (+{len(want) - 40})" if len(want) > 40 else ""))
+        if offer:
+            lines.append("OFFRO (doppioni): " + ", ".join(f"{c.label}" + (f" ×{n}" if n > 1 else "") for c, n in sorted(offer, key=lambda t: t[0].sort_key)))
+        lines.append("Scrivetemi in privato, scambio anche più carte insieme.")
+        text = "\n".join(lines)
+        return Reply("Copia e incolla dove vuoi:\n\n<code>" + html.escape(text) + "</code>")
 
     def _progress(self) -> Reply:
         from . import stats as pstats

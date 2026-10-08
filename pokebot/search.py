@@ -195,6 +195,9 @@ def scrape_all(scrapers: dict, queries: list[str]) -> list[tuple[str, list[tuple
 def _handle_listing(lst: Listing, matcher: Matcher, wanted: set[str], lot_ratio: float, max_price: float,
                     unverifiable: bool, db: Database, report: RunReport, pending: list, language: str = "tutte") -> None:
     result = matcher.analyze(lst.title, lst.description, wanted, lot_ratio, unverifiable, lst.is_auction, language)
+    if result.kind == "single" and result.refs and lst.price and lst.price > 0:
+        # prezzo di una carta riconosciuta con certezza, mancante o no: serve per il valore della collezione
+        db.add_price_point(result.refs[0].card.id, lst.key, lst.source, lst.price, lst.seller)
     if not result.notify:
         db.mark_seen(lst.key)
         report.skipped[result.reason] += 1
@@ -283,7 +286,7 @@ def _notify_pending(pending: list, notifier: TelegramNotifier, db: Database, rep
         for lst, result in pending:
             report.queued += 1
             db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),
-                         lst.location, result.kind, result.matched_payload, result.ratio, False, queued=True, image=lst.image)
+                         lst.location, result.kind, result.matched_payload, result.ratio, False, queued=True, image=lst.image, seller=lst.seller)
             db.mark_seen(lst.key, notified=False)
         if pending:
             log.info("Notifiche sospese (pausa/notte): %d annunci in coda", len(pending))
@@ -312,7 +315,7 @@ def _notify_pending(pending: list, notifier: TelegramNotifier, db: Database, rep
                 report.deals += int(sent)
                 report.notified += int(sent)
                 db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or f"{lst.price:.2f} €", lst.location,
-                             result.kind, result.matched_payload, result.ratio, sent, image=lst.image, deal=True)
+                             result.kind, result.matched_payload, result.ratio, sent, image=lst.image, deal=True, seller=lst.seller)
                 db.mark_seen(lst.key, notified=sent)
                 log.info("AFFARE [%s] %s %.2f € (mediana %.2f)", lst.source, lst.title[:60], lst.price, median)
 
@@ -330,7 +333,7 @@ def _notify_pending(pending: list, notifier: TelegramNotifier, db: Database, rep
             rest = [(lst, res) for lst, res in rest if lst.key in keep_keys]
             for lst, result in overflow:
                 db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),
-                             lst.location, result.kind, result.matched_payload, result.ratio, False, image=lst.image)
+                             lst.location, result.kind, result.matched_payload, result.ratio, False, image=lst.image, seller=lst.seller)
                 db.mark_seen(lst.key, notified=False)
             names = ", ".join(t.replace("🃏 ", "").replace("📦 ", "").replace("❔ ", "") for _, t, _ in skipped_groups[:12])
             overflow_note = (f"⚠️ Giro insolitamente ricco: {len(groups)} carte con novità, inviate le prime {max_msgs}. "
@@ -345,7 +348,7 @@ def _notify_pending(pending: list, notifier: TelegramNotifier, db: Database, rep
     for (lst, result), sent in zip(rest, outcomes):
         report.notified += int(sent)
         db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),
-                     lst.location, result.kind, result.matched_payload, result.ratio, sent, image=lst.image)
+                     lst.location, result.kind, result.matched_payload, result.ratio, sent, image=lst.image, seller=lst.seller)
         db.mark_seen(lst.key, notified=sent)
 
 
@@ -415,6 +418,6 @@ def search_card(index: CardIndex, db: Database, card, settings: dict | None = No
         if lst.key not in existing:
             db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),
                          lst.location, res.kind, res.matched_payload or [{"id": card.id, "label": card.label, "sure": True}],
-                         res.ratio, True, image=lst.image)
+                         res.ratio, True, image=lst.image, seller=lst.seller)
         db.mark_seen(lst.key, notified=True)
     return items[:limit], errors

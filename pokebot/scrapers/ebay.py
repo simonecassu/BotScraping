@@ -97,6 +97,7 @@ class EbayScraper(BaseScraper):
                 location=", ".join(p for p in (loc.get("city"), loc.get("country")) if p),
                 image=(it.get("image") or {}).get("imageUrl", ""),
                 is_auction=is_auction,
+                seller=str((it.get("seller") or {}).get("username") or ""),
                 extra={"condition": it.get("condition", "")},
             ))
         return out

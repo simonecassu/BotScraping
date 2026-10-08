@@ -39,6 +39,8 @@ input[type=search]{flex:1;min-width:150px}
 .c .n{font-size:11px;color:var(--hint);margin-top:5px;font-weight:700}.c .nm{font-size:12px;font-weight:800;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .c .tag{position:absolute;top:8px;left:8px;background:#0a1328;color:#dbe4f5;border:1px solid #2a3a60;font-size:10px;font-weight:900;padding:2px 7px;border-radius:7px;letter-spacing:.3px;z-index:1}
 .c.pending{opacity:.55}
+.c .dup{position:absolute;left:8px;bottom:44px;background:var(--red);color:#fff;font-size:11px;font-weight:900;padding:2px 7px;border-radius:7px;z-index:1}
+.c.dupsel{outline:3px solid var(--red)}
 h2{font-size:18px;font-weight:900;margin:16px 0 8px;color:var(--yel)}h3{font-size:13px;color:var(--hint);margin:12px 0 6px;font-weight:800;text-transform:uppercase;letter-spacing:.6px}
 .folder{background:var(--sec);border-radius:14px;padding:10px 12px;margin-bottom:9px;border:2px solid var(--line)}
 .folder .hd{display:flex;align-items:center;gap:10px}.folder .hd img{width:36px;height:50px;object-fit:cover;border-radius:5px;border:2px solid var(--yel)}
@@ -100,7 +102,8 @@ a{color:var(--link);text-decoration:none}
       <select id="rar"><option value="">Tutte le rarità</option></select>
     </div>
     <div class="card-row" id="setpills"></div>
-    <p class="hint">Le carte che <b>hai</b> sono accese, quelle che <b>mancano</b> restano al buio. Tocca una carta per cambiarla: ogni tocco diventa un comando per il bot.</p>
+    <div class="card-row"><span class="pill" id="dupmode">🔁 Doppioni</span><button class="btn sec" id="swapmsg">✉️ Messaggio di scambio</button></div>
+    <p class="hint" id="check-hint">Le carte che <b>hai</b> sono accese, quelle che <b>mancano</b> restano al buio. Tocca una carta per cambiarla: ogni tocco diventa un comando per il bot.</p>
     <div id="grid" class="grid"></div>
   </div>
     <div id="cseg-chase" class="hidden">
@@ -116,7 +119,7 @@ a{color:var(--link);text-decoration:none}
     <div id="chase-found"></div>
   </div>
     <div id="cseg-found" class="hidden">
-    <div class="seg"><button data-seg="ann" class="on">Annunci</button><button data-seg="prz">Prezzi</button></div>
+    <div class="seg"><button data-seg="ann" class="on">Annunci</button><button data-seg="prz">Prezzi</button><button data-seg="spesa">🛒 Spesa</button></div>
     <div id="seg-ann">
       <div class="card-row"><input id="qf" type="search" placeholder="Filtra per carta…"><span class="pill" id="fcount"></span></div>
       <div id="folders"></div>
@@ -128,6 +131,10 @@ a{color:var(--link);text-decoration:none}
       <h2>Prezzi per carta</h2>
       <p class="hint">Minimo, mediana e massimo degli annunci visti. Tocca una riga per aprire la cartella.</p>
       <table id="ptable"><thead><tr><th>Carta</th><th class="r">Min</th><th class="r">Mediana</th><th class="r">Max</th><th class="r">N</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div id="seg-spesa" class="hidden">
+      <p class="hint">Il paniere più economico per le carte mancanti tra gli annunci degli ultimi 14 giorni, raggruppato per venditore (meno spedizioni). Un lotto entra solo se costa meno delle singole che copre.</p>
+      <div id="shop"></div>
     </div>
   </div>
   </section>
@@ -160,7 +167,7 @@ const HOME_SETS = ["me55", "me55c"];  // la collezione "di casa": 30th Celebrati
 const CATALOG_URL = "https://cdn.jsdelivr.net/gh/PokemonTCG/pokemon-tcg-data@master/sets/en.json";
 const CARDS_URL = (id) => `https://cdn.jsdelivr.net/gh/PokemonTCG/pokemon-tcg-data@master/cards/en/${id}.json`;
 let state = null, cards = [], byId = {}, wanted = new Set(), pending = new Set(), filterSet = "";
-let catalog = null, curSet = "home", extra = {};  // extra[id] = { meta, cards, owned:Set, active, loaded } (mancano tutte tranne le possedute)
+let catalog = null, curSet = "home", extra = {}, dupMode = false, copies = {};  // extra[id] = { meta, cards, owned:Set, active, loaded } (mancano tutte tranne le possedute)
 const stack = [];
 const overrides = {};  // scelte fatte da poco (id → {ts, want|own}) da tenere finché lo stato del bot non le riflette (max 4 min)
 const OVERRIDE_MS = 4 * 60e3;
@@ -199,6 +206,7 @@ async function load() {
   cards = state.sets.flatMap((s) => s.cards.map((c) => ({ ...c, set: s.id, setName: s.name, printed: s.printed_total })));
   byId = Object.fromEntries(cards.map((c) => [c.id, c]));
   wanted = new Set(state.wanted);
+  copies = state.copies || {};
   for (const c of (state.collections || [])) {
     extra[c.id] = { meta: { id: c.id, name: c.name, series: c.series, logo: c.logo, symbol: c.symbol, total: c.total, printed_total: c.printed_total },
       cards: c.cards.map((k) => ({ ...k, set: c.id, setName: c.name, printed: c.printed_total, code: k.number })), owned: new Set(c.owned || []), active: c.active, loaded: true };
@@ -234,6 +242,7 @@ async function loadCatalog() {
     try { localStorage.setItem("catalog", JSON.stringify({ ts: Date.now(), sets: catalog })); } catch (e) {}
   } catch (e) { catalog = []; }
 }
+function valTxt(key) { const v = (state.values || {})[key]; return v && v.owned_priced ? ` · 💎 ${eur(v.owned_value)}` : ""; }
 function renderCollections() {
   if (!state) return;
   const q = $("#qc").value.trim().toLowerCase();
@@ -243,13 +252,16 @@ function renderCollections() {
   const mine = [];
   const st = (on) => on ? '<span class="st on">🔎 attiva</span>' : '<span class="st">💤 spenta</span>';
   if (!q || "30th celebration classic".includes(q)) mine.push(row({ id: "me55", name: "30th Celebration", logo: ((catalog || []).find((s) => s.id === "me55") || {}).logo || "" },
-    st(state.settings.home_active !== false), "home", `${cards.length} carte (con Classic Collection) · ${wanted.size} mancanti`));
+    st(state.settings.home_active !== false), "home", `${cards.length} carte (con Classic Collection) · ${wanted.size} mancanti` + valTxt("home")));
   for (const e of Object.values(extra)) {
     if (q && !e.meta.name.toLowerCase().includes(q)) continue;
     const miss = e.cards.length ? e.cards.length - e.owned.size : (e.meta.total || "?");
-    mine.push(row(e.meta, st(e.active), e.meta.id, `${e.cards.length || e.meta.total || "?"} carte · ${miss} mancanti`));
+    mine.push(row(e.meta, st(e.active), e.meta.id, `${e.cards.length || e.meta.total || "?"} carte · ${miss} mancanti` + valTxt(e.meta.id)));
   }
-  html += `<h2>Le tue</h2>${mine.join("") || '<p class="hint">Nessuna.</p>'}`;
+  const vals = state.values || {};
+  const totVal = Object.values(vals).reduce((a, v) => a + (v.owned_value || 0), 0);
+  const totPriced = Object.values(vals).reduce((a, v) => a + (v.owned_priced || 0), 0);
+  html += `<h2>Le tue</h2>` + (totPriced ? `<div class="kpi"><div><b>${eur(totVal)}</b><span>valore stimato delle carte che hai (${totPriced} con prezzo visto)</span></div><div><b>${eur(Object.values(vals).reduce((a, v) => a + (v.missing_cost || 0), 0))}</b><span>per finire tutto, ai minimi visti</span></div></div>` : "") + `${mine.join("") || '<p class="hint">Nessuna.</p>'}`;
   if (!catalog) html += '<h2>Tutte</h2><p class="hint">Carico il catalogo…</p>';
   else {
     const list = catalog.filter((s) => !HOME_SETS.includes(s.id) && !extra[s.id] && (!q || s.name.toLowerCase().includes(q) || s.series.toLowerCase().includes(q) || s.id.includes(q)));
@@ -332,7 +344,7 @@ function renderChecklist() {
     (!q || c.name.toLowerCase().includes(q) || c.number.toLowerCase().includes(q) || (c.code || "").includes(q)));
   $("#grid").innerHTML = list.map((c) => `
     <div class="c ${isMissing(c) ? "miss" : ""} ${pending.has(c.id) ? "pending" : ""}" data-id="${c.id}">
-      ${isMissing(c) ? '<span class="tag">MANCA</span>' : ""}
+      ${isMissing(c) ? '<span class="tag">MANCA</span>' : ""}${copies[c.id] ? `<span class="dup">×${copies[c.id] + 1}</span>` : ""}
       <img loading="lazy" src="${esc(c.image)}" alt="">
       <div class="n">${c.printed ? "#" + esc(c.number) + "/" + c.printed : (curSet === "home" ? esc(c.code) + " · " : "") + "#" + esc(c.number)}</div>
       <div class="nm">${esc(c.name)}</div>
@@ -340,6 +352,13 @@ function renderChecklist() {
   $("#grid").querySelectorAll(".c").forEach((el) => el.onclick = () => toggle(el.dataset.id));
 }
 async function toggle(id) {
+  if (dupMode) {
+    const c = cardInfo(id); if (!c) return;
+    const had = copies[id] || 0;
+    const ok = await sendCmd(had ? `/doppioni togli ${c.set}:${c.number}` : `/doppioni ${c.set}:${c.number}`);
+    if (ok) { if (had) delete copies[id]; else copies[id] = 1; toast(had ? "Doppione tolto: " + c.name : "Doppione: " + c.name); renderChecklist(); }
+    return;
+  }
   if (curSet === "home") {
     const c = byId[id]; const willWant = !wanted.has(id);
     pending.add(id); renderChecklist();
@@ -357,6 +376,16 @@ async function toggle(id) {
   renderChecklist(); renderHome();
 }
 $("#q").oninput = renderChecklist; $("#rar").onchange = renderChecklist;
+$("#dupmode").onclick = () => { dupMode = !dupMode; $("#dupmode").classList.toggle("on", dupMode); $("#check-hint").innerHTML = dupMode ? "🔁 <b>Modalità doppioni</b>: tocca le carte di cui hai una copia in più (ritocca per togliere). Compare ×2 sulla carta." : 'Le carte che <b>hai</b> sono accese, quelle che <b>mancano</b> restano al buio. Tocca una carta per cambiarla: ogni tocco diventa un comando per il bot.'; };
+$("#swapmsg").onclick = async () => {
+  const want = curCards().filter(isMissing).map(cardTitle);
+  const offer = Object.entries(copies).map(([id, n]) => { const c = cardInfo(id); return c && inCurSet(id) ? cardTitle(c) + (n > 1 ? ` ×${n}` : "") : null; }).filter(Boolean);
+  if (!want.length && !offer.length) { toast("Niente da scambiare in questa collezione"); return; }
+  const name = curSet === "home" ? "30th Celebration" : ((extra[curSet] || {}).meta || {}).name || curSet;
+  const text = [`🔁 Scambio carte Pokémon · ${name}`, want.length ? "CERCO: " + want.slice(0, 40).join(", ") + (want.length > 40 ? ` (+${want.length - 40})` : "") : "", offer.length ? "OFFRO (doppioni): " + offer.join(", ") : "", "Scrivetemi in privato, scambio anche più carte insieme."].filter(Boolean).join("\n");
+  try { await navigator.clipboard.writeText(text); toast("Messaggio copiato: incollalo dove vuoi"); }
+  catch (e) { if (tg && tg.switchInlineQuery) tg.switchInlineQuery(text.slice(0, 250)); else prompt("Copia il messaggio:", text); }
+};
 
 /* ---------- Trovati ---------- */
 function renderFound() {
@@ -397,7 +426,21 @@ $("#qf").oninput = renderFound;
 function openFolder(id) { showCseg("found"); setSeg("ann"); $("#qf").value = ""; renderFound(); const f = $(`.folder[data-key="${id}"]`); if (f) { f.querySelector(".bd").classList.remove("hidden"); f.scrollIntoView({ behavior: "smooth" }); } }
 
 
-function setSeg(name) { document.querySelectorAll(".seg button").forEach((b) => b.classList.toggle("on", b.dataset.seg === name)); $("#seg-ann").classList.toggle("hidden", name !== "ann"); $("#seg-prz").classList.toggle("hidden", name !== "prz"); }
+function setSeg(name) { document.querySelectorAll(".seg button").forEach((b) => b.classList.toggle("on", b.dataset.seg === name)); ["ann", "prz", "spesa"].forEach((t) => $("#seg-" + t).classList.toggle("hidden", t !== name)); if (name === "spesa") renderShopping(); }
+function groupKey() { return curSet === "home" ? "home" : curSet; }
+function renderShopping() {
+  const sl = (state.shopping || {})[groupKey()];
+  if (!sl || !sl.sellers.length) { $("#shop").innerHTML = '<p class="hint">Nessun annuncio recente per le carte mancanti di questa collezione.</p>'; return; }
+  const tot = sl.covered + sl.uncovered.length;
+  let html = `<div class="kpi"><div><b>${eur(sl.total)}</b><span>per ${sl.covered} carte su ${tot} mancanti</span></div><div><b>${sl.sellers.length}</b><span>venditor${sl.sellers.length === 1 ? "e" : "i"}</span></div></div>`;
+  html += sl.sellers.map((g) => `<div class="folder"><div class="hd"><b>${esc(g.label)}</b><span class="cnt">${eur(g.total)}</span></div><div class="bd">` +
+    g.picks.map((p) => `<div class="lst" data-url="${esc(p.url)}">${p.image ? `<img loading="lazy" src="${esc(p.image)}" alt="">` : '<div class="ph">foto n.d.</div>'}
+      <div class="t"><div class="ti">${p.lot ? "📦 " : ""}${esc(p.cards.map((id) => { const c = cardInfo(id); return c ? cardTitle(c) : id; }).join(", "))}</div><div class="mt">${esc(p.title.slice(0, 70))}</div></div>
+      <div class="pr">${eur(p.price)}</div></div>`).join("") + `</div></div>`).join("");
+  if (sl.uncovered.length) html += `<p class="hint">❌ Senza annuncio recente: ${esc(sl.uncovered.map((id) => { const c = cardInfo(id); return c ? cardTitle(c) : id; }).join(", "))}</p>`;
+  $("#shop").innerHTML = html;
+  $("#shop").querySelectorAll(".lst").forEach((el) => el.onclick = () => openLink(el.dataset.url));
+}
 document.querySelectorAll(".seg button").forEach((b) => b.onclick = () => setSeg(b.dataset.seg));
 
 /* ---------- Inseguimento ---------- */

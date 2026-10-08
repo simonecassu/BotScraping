@@ -30,6 +30,7 @@ class Listing:
     location: str = ""
     image: str = ""
     is_auction: bool = False
+    seller: str = ""  # nome/ID del venditore quando il marketplace lo dà (per raggruppare la lista della spesa)
     extra: dict = field(default_factory=dict)
 
     @property

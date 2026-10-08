@@ -129,5 +129,6 @@ class WallapopScraper(BaseScraper):
             price_text=price_text,
             location=location,
             image=image,
+            seller=str(it.get("user_id") or (it.get("user") or {}).get("id") or ""),
             extra={"country": loc.get("country_code") or "", "shippable": bool((it.get("shipping") or {}).get("item_is_shippable"))},
         )

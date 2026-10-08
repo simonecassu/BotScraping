@@ -28,9 +28,10 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300) -> dict:
             "cards": [{"id": c.id, "code": index.code_of[c.id], "number": c.number, "name": c.name,
                        "rarity": c.rarity, "image": c.image} for c in s.cards],
         })
+    all_rows = rows + db.price_rows()
     prices = {}
     for c in index.by_id.values():
-        cp = pstats.card_prices(rows, c)
+        cp = pstats.card_prices(all_rows, c)
         if cp.overall.n:
             prices[c.id] = {
                 "n": cp.overall.n, "min": cp.overall.min, "median": cp.overall.median, "max": cp.overall.max,
@@ -79,9 +80,43 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300) -> dict:
                     for cid, w in watch.list_watches(db).items()],
         "watch_found": list(reversed(watch.found_log(db))),
         "collections": coll.export(db, index),
+        "values": _values(index, wanted, all_rows),
+        "shopping": _shopping(index, wanted, rows),
+        "copies": db.copies(),
         "active_sets": active,
         "current_set": db.current_set(),
     }
+
+
+def _groups(index: CardIndex) -> dict[str, list]:
+    """Collezioni come le vede la Mini App: "home" = quelle di casa insieme, le altre una per una."""
+    out: dict[str, list] = {"home": [c for s in index.sets if s.primary for c in s.cards]}
+    for s in index.sets:
+        if not s.primary:
+            out[s.id] = list(s.cards)
+    return out
+
+
+def _values(index: CardIndex, wanted: set[str], all_rows: list[dict]) -> dict:
+    out = {}
+    for key, cards in _groups(index).items():
+        v = pstats.collection_value(cards, wanted, all_rows)
+        out[key] = {"owned": v.owned, "owned_priced": v.owned_priced, "owned_value": round(v.owned_value, 2),
+                    "missing": v.missing, "missing_priced": v.missing_priced, "missing_cost": round(v.missing_cost, 2)}
+    return out
+
+
+def _shopping(index: CardIndex, wanted: set[str], rows: list[dict]) -> dict:
+    from . import shopping
+    out = {}
+    for key, cards in _groups(index).items():
+        sl = shopping.build(cards, wanted, rows)
+        out[key] = {"total": round(sl.total, 2), "covered": sl.covered, "uncovered": [c.id for c in sl.uncovered],
+                    "sellers": [{"label": sl.seller_label(k), "total": round(sum(p.price for p in picks), 2),
+                                 "picks": [{"price": p.price, "lot": p.row.get("kind") == "lot", "url": p.row["url"], "title": p.row["title"],
+                                            "image": p.row.get("image") or "", "cards": [c.id for c in p.cards], "key": p.row["listing_key"]} for p in picks]}
+                                for k, picks in sl.by_seller()]}
+    return out
 
 
 def write_state(index: CardIndex, db: Database, path: str) -> None:

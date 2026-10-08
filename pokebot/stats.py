@@ -124,6 +124,34 @@ def completion(index: CardIndex, wanted_ids: set[str], rows: list[dict]) -> Comp
                       unpriced=sorted(unpriced, key=lambda c: c.sort_key), by_rarity=by_rarity)
 
 
+@dataclass
+class Value:
+    owned: int = 0
+    owned_priced: int = 0
+    owned_value: float = 0.0   # somma delle mediane viste per le carte possedute
+    missing: int = 0
+    missing_priced: int = 0
+    missing_cost: float = 0.0  # somma dei minimi visti per le mancanti
+
+
+def collection_value(cards: list[Card], wanted_ids: set[str], rows: list[dict]) -> Value:
+    """Quanto valgono le carte possedute (mediane viste) e quanto costano le mancanti (minimi visti)."""
+    v = Value()
+    for c in cards:
+        st = card_prices(rows, c).overall
+        if c.id in wanted_ids:
+            v.missing += 1
+            if st.n and st.min is not None:
+                v.missing_priced += 1
+                v.missing_cost += st.min
+        else:
+            v.owned += 1
+            if st.n and st.median is not None:
+                v.owned_priced += 1
+                v.owned_value += st.median
+    return v
+
+
 def fmt_eur(v: float | None) -> str:
     if v is None:
         return "n.d."
