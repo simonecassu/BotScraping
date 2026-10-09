@@ -10,9 +10,19 @@ const APP = path.resolve(__dirname, "..", "deploy", "app");
 const ORIGIN = "https://pokebot.demo";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const log = (m) => console.log(new Date().toISOString().slice(11, 19), m);
+
 (async () => {
   fs.mkdirSync(outDir, { recursive: true });
   const browser = await chromium.launch();
+  try {
+    await record(browser);
+  } finally {
+    await browser.close().catch(() => {});  // mai lasciare Chromium vivo: terrebbe aperto il passo su GitHub Actions
+  }
+})().catch((e) => { console.error(e); process.exit(1); });
+
+async function record(browser) {
   const ctx = await browser.newContext({
     viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, locale: "it-IT",
     recordVideo: { dir: outDir, size: { width: 1080, height: 2338 } },
@@ -29,12 +39,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   });
   await page.route("https://telegram.org/**", (route) => route.fulfill({ contentType: "application/javascript", body: "" }));
   // dentro Telegram la Mini App non mostra il titolo del browser: nascondo il cursore e tolgo le barre
-  await page.goto(`${ORIGIN}/app/`);
+  page.setDefaultTimeout(20000);
+  await page.goto(`${ORIGIN}/app/`, { waitUntil: "domcontentloaded" });
   await page.addStyleTag({ content: "* { cursor: none !important }" });
   await page.waitForSelector("#t-coll:not(:empty)");
+  log("home pronta");
   await sleep(2600);
 
-  const tap = async (sel, ms = 1800) => { await page.locator(sel).first().tap(); await sleep(ms); };
+  const tap = async (sel, ms = 1800) => { log("tocco " + sel); await page.locator(sel).first().tap(); await sleep(ms); };
   await tap(".tile[data-go=coll]", 2600);
   await tap(".coll[data-go=home]", 3000);                 // checklist: accese = ho, buie = mancano
   await page.mouse.wheel(0, 500); await sleep(1600);
@@ -57,9 +69,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await tap(".tile[data-go=settings]", 2800);
   await sleep(600);
   const video = page.video();
+  log("chiudo e salvo il video");
   await ctx.close();
   const webm = await video.path();
   fs.renameSync(webm, path.join(outDir, "pokebot-demo.webm"));
-  await browser.close();
-  console.log("video:", path.join(outDir, "pokebot-demo.webm"));
-})().catch((e) => { console.error(e); process.exit(1); });
+  log("video: " + path.join(outDir, "pokebot-demo.webm"));
+}

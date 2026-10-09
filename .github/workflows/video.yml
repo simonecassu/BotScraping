@@ -29,7 +29,7 @@ jobs:
       - name: Pokébot dimostrativo
         run: python scripts/demo_state.py /tmp/demo
       - name: Registra
-        run: NODE_PATH=/tmp/pw/node_modules node scripts/record_demo.cjs /tmp/demo /tmp/video
+        run: NODE_PATH=/tmp/pw/node_modules timeout 420 node scripts/record_demo.cjs /tmp/demo /tmp/video
       - name: Converte in MP4 verticale
         run: |
           ffmpeg -v error -y -i /tmp/video/pokebot-demo.webm -vf "scale=1080:-2,fps=30" -c:v libx264 -preset slow -crf 20 \
