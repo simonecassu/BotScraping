@@ -41,6 +41,9 @@ jobs:
           done
           if [ -n "$manca" ]; then echo "::error::Secret mancanti:$manca"; exit 1; fi
 
+      - name: Indice delle carte per la ricerca nella Mini App
+        run: python3 ../scripts/build_card_index.py app/cards.json
+
       - name: Pubblica il worker
         run: |
           set -o pipefail  # se il deploy fallisce, il passo fallisce (e le chiavi non vanno al worker vecchio)

@@ -30,6 +30,8 @@ funziona per gli altri, e nessuno vede le richieste di accesso tranne il proprie
 Il pulsante **App** accanto alla chat apre: **Collezioni** (checklist con le carte possedute accese e le mancanti
 al buio, inseguimenti, annunci trovati, prezzi e lista della spesa), **Amici** (codice amico, album in comune),
 **Impostazioni**, **Segnalazioni** e **Analisi IA** (in arrivo). Ogni tocco diventa un comando per il bot.
+La casella di ricerca in Collezioni trova anche le carte in tutte le espansioni (indice `deploy/app/cards.json`,
+generato da `scripts/build_card_index.py` a ogni deploy del ponte), raggruppate per espansione.
 Ognuno vede solo i suoi dati.
 
 **Segnalazioni**: ogni utente può scrivere una volta al giorno un problema o un'idea (`/segnala testo`, anche su più

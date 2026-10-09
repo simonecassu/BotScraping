@@ -77,6 +77,7 @@ a{color:var(--link);text-decoration:none}
 .coll b{display:block;font-weight:900;font-size:14px}.coll small{color:var(--hint);font-weight:700;font-size:12px}
 .coll .st{flex:none;font-size:11px;font-weight:900;padding:4px 9px;border-radius:999px;background:#0a1328;color:var(--hint);border:1px solid var(--line)}
 .coll .st.on{background:var(--yel);color:#1a1a1a;border-color:#fff3b0}
+.hits{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 12px}.hit{background:var(--sec);border:2px solid var(--line);border-radius:999px;padding:6px 11px;font-size:13px;font-weight:800;cursor:pointer}.hit small{color:var(--hint);font-weight:700;margin-left:4px}
 .seg{display:flex;background:#0a1328;border-radius:999px;padding:3px;margin-bottom:10px;border:2px solid var(--line)}.seg button{flex:1;border:0;border-radius:999px;padding:8px;background:transparent;color:var(--hint);font:800 13px "Nunito",sans-serif}.seg button.on{background:var(--yel);color:#1a1a1a}
 .tile.wide{grid-column:1/-1;min-height:0;flex-direction:row;align-items:center;justify-content:flex-start;gap:14px;padding:14px}.tile.wide b{margin-top:0}
 .tile .new{margin-left:auto;background:var(--red);color:#fff;font-weight:900;font-size:12px;padding:3px 9px;border-radius:999px}
@@ -105,7 +106,7 @@ textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
   </section>
 
   <section id="tab-coll" class="hidden">
-    <div class="card-row"><input id="qc" type="search" placeholder="Cerca una collezione…"></div>
+    <div class="card-row"><input id="qc" type="search" placeholder="Cerca una collezione o una carta…"></div>
     <div id="coll-list"><p class="hint">Carico il catalogo…</p></div>
   </section>
 
@@ -421,6 +422,43 @@ async function loadCatalog() {
     try { localStorage.setItem("catalog", JSON.stringify({ ts: Date.now(), sets: catalog })); } catch (e) {}
   } catch (e) { catalog = []; }
 }
+/* ---------- ricerca delle carte in tutte le espansioni (indice cards.json, generato dal deploy) ---------- */
+let cardIndex = null, cardIndexLoading = null;
+const fold = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+function loadCardIndex() {
+  if (cardIndex || cardIndexLoading) return cardIndexLoading;
+  cardIndexLoading = fetch("/app/cards.json").then((r) => r.ok ? r.json() : { sets: {} }).catch(() => ({ sets: {} }))
+    .then((d) => { cardIndex = d.sets || {}; renderCollections(); });
+  return cardIndexLoading;
+}
+function cardHits(q) {
+  // per espansione, nell'ordine del catalogo (le più recenti prima), quelle di casa per prime
+  const fq = fold(q), isNum = /^\d+$/.test(fq);
+  const hit = (number, name) => isNum ? number === fq : fold(name).includes(fq);
+  const groups = [];
+  const home = cards.filter((c) => hit(c.number, c.name));
+  if (home.length) groups.push({ id: "home", name: "30th Celebration", cards: home.map((c) => ({ number: c.number, name: c.name })) });
+  for (const s of (catalog || [])) {
+    if (HOME_SETS.includes(s.id)) continue;
+    const found = ((cardIndex || {})[s.id] || []).filter(([n, nm]) => hit(n, nm)).map(([number, name]) => ({ number, name }));
+    if (found.length) groups.push({ id: s.id, name: s.name, cards: found });
+  }
+  return groups;
+}
+function renderCardHits(q) {
+  if (!cardIndex) { loadCardIndex(); return '<h2>Carte</h2><p class="hint">Carico l\'elenco delle carte…</p>'; }
+  const groups = cardHits(q), total = groups.reduce((a, g) => a + g.cards.length, 0);
+  if (!groups.length) return "";
+  return `<h2>Carte (${total})</h2>` + groups.slice(0, 40).map((g) => `<h3>${esc(g.name)}</h3><div class="hits">` +
+    g.cards.slice(0, 24).map((c) => `<span class="hit" data-set="${esc(g.id)}" data-num="${esc(c.number)}">${esc(c.name)}<small>#${esc(c.number)}</small></span>`).join("") +
+    (g.cards.length > 24 ? `<span class="hit" data-set="${esc(g.id)}">… e altre ${g.cards.length - 24}</span>` : "") + "</div>").join("") +
+    (groups.length > 40 ? `<p class="hint">… e altre ${groups.length - 40} espansioni: scrivi qualche lettera in più.</p>` : "");
+}
+async function openCard(sid, q) {  // apre la checklist di quella espansione già filtrata sulla ricerca
+  await openSet(sid);
+  $("#q").value = q; renderChecklist();
+}
+
 function homeMissing() { return cards.filter((c) => wanted.has(c.id)).length; }
 function valTxt(key) { const v = (state.values || {})[key]; return v && v.owned_priced ? ` · 💎 ${eur(v.owned_value)}` : ""; }
 function renderCollections() {
@@ -442,6 +480,7 @@ function renderCollections() {
   const vals = state.values || {};
   const totVal = Object.values(vals).reduce((a, v) => a + (v.owned_value || 0), 0);
   const totPriced = Object.values(vals).reduce((a, v) => a + (v.owned_priced || 0), 0);
+  if (q.length >= 2) html += renderCardHits(q);
   html += `<h2>Le tue</h2>` + (totPriced ? `<div class="kpi" style="grid-template-columns:1fr"><div><b>💎 ${eur(totVal)}</b><span>valore stimato delle carte che hai (${totPriced} con prezzo: Cardmarket, altrimenti gli annunci visti)</span></div></div>` : "") + `${mine.join("") || '<p class="hint">Nessuna.</p>'}`;
   if (!catalog) html += '<h2>Tutte</h2><p class="hint">Carico il catalogo…</p>';
   else {
@@ -453,6 +492,7 @@ function renderCollections() {
   }
   $("#coll-list").innerHTML = html;
   $("#coll-list").querySelectorAll(".coll").forEach((el) => el.onclick = () => openSet(el.dataset.go));
+  $("#coll-list").querySelectorAll(".hit").forEach((el) => el.onclick = () => openCard(el.dataset.set, el.dataset.num || q));
 }
 $("#qc").oninput = renderCollections;
 
