@@ -212,3 +212,18 @@ def test_light_max_three_active_collections(index, monkeypatch):
     assert "3 collezioni" in r.text and "sv3" not in db.active_sets("2")
     tc.handler.handle("/collezione sv3 attiva", "1")  # il proprietario non ha limiti
     assert "sv3" in db.active_sets("1")
+
+
+def test_owner_refund(index, monkeypatch):
+    db, client, tc = setup(index, monkeypatch)
+    db.add_chat_id("2")
+    calls = []
+    client.refund_stars = lambda uid, charge: (calls.append((uid, charge)) or (True, ""))
+    tc.handle_payload({"chat_id": 2, "text": "/pagamento", "payment": {
+        "currency": "XTR", "total_amount": 250, "invoice_payload": "pro:2", "telegram_payment_charge_id": "ch9",
+        "subscription_expiration_date": time.time() + 86400 * 30}})
+    assert plans.tier(db, "2") == "pro"
+    assert "Solo il proprietario" in tc.handler.handle("/rimborsa 2", "2").text
+    r = tc.handler.handle("/rimborsa 2", "1")
+    assert "250" in r.text and calls == [("2", "ch9")] and plans.tier(db, "2") == "light"
+    assert "Nessun pagamento" in tc.handler.handle("/rimborsa 2", "1").text

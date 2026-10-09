@@ -60,7 +60,7 @@ HELP = """<b>Comandi</b>
 /invita – codice per collegare un'altra persona (stesse notifiche, stessa checklist, stessa app) · /utenti · /espelli ID
 /attesa – chi ha scritto /start e aspetta l'accesso · /approva ID (o tutti) · /rifiuta ID
 /abbonati – il tuo piano e l'abbonamento (250 ⭐ al mese) · /voto 1-5 · /recensione testo
-/piano ID sempre|pro 30|prova 5|light – (proprietario) cambia il piano di qualcuno · /recensioni
+/piano ID sempre|pro 30|prova 5|light – (proprietario) cambia il piano di qualcuno · /recensioni · /rimborsa ID
 /canale @nome – canale pubblico dove ogni giorno pubblico i 3 affari migliori · /canale ora · /canale 20 · /canale off
 /collezione – le collezioni seguite · /collezione sv8 – passa a quella (scaricata al volo, parte da "mi mancano tutte"): da lì /mancanti, /aggiungi, /ho, /progresso, /prezzi lavorano su di lei · /collezione 30th – torna alla 30th
 /collezione sv8 attiva – ⚠️ la cerca anche sui marketplace · /collezione sv8 disattiva · sv8:7 – una sua carta in qualsiasi comando (es. /insegui sv8:7)
@@ -74,9 +74,9 @@ BOT_DESCRIPTION = ("🃏 Pokébot trova le carte Pokémon che mancano alla tua c
                    "🔔 Ti avviso appena spunta un annuncio, con prezzo e foto\n"
                    "🔥 Affari sotto il prezzo medio, lista della spesa, doppioni da scambiare\n"
                    "👥 Album condivisi con gli amici\n\n"
-                   "Accesso su invito: premi Avvia per metterti in lista d'attesa.")
+                   "Premi Avvia per chiedere l'accesso: 5 giorni di prova con tutto, poi gratis in versione Light.")
 BOT_SHORT_DESCRIPTION = "Cerca su Vinted, Wallapop ed eBay le carte Pokémon che ti mancano e ti avvisa appena spuntano."
-PROFILE_VERSION = 1
+PROFILE_VERSION = 2
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
 MENU_VERSION = 17
@@ -163,6 +163,18 @@ class TelegramClient:
                              json={"commands": [{"command": c, "description": d[:256]} for c, d in commands]},
                              timeout=config.HTTP_TIMEOUT)
         return resp.status_code == 200 and bool(resp.json().get("ok"))
+
+    def refund_stars(self, user_id: str, charge_id: str) -> tuple[bool, str]:
+        """Restituisce le Stars di un pagamento e, se era un abbonamento, ne ferma il rinnovo."""
+        resp = requests.post(f"{self.base}/refundStarPayment", json={"user_id": int(user_id), "telegram_payment_charge_id": charge_id},
+                             timeout=config.HTTP_TIMEOUT)
+        data = resp.json()
+        try:
+            requests.post(f"{self.base}/editUserStarSubscription", json={"user_id": int(user_id), "telegram_payment_charge_id": charge_id,
+                                                                          "is_canceled": True}, timeout=config.HTTP_TIMEOUT)
+        except requests.RequestException:
+            pass
+        return bool(data.get("ok")), str(data.get("description", ""))
 
     def create_invoice_link(self, title: str, description: str, payload: str, amount: int, period: int = 0) -> str:
         """Link di pagamento in Telegram Stars (XTR); con `period` è un abbonamento che si rinnova da solo."""
@@ -407,6 +419,8 @@ class CommandHandler:
             return self._review(args)
         if cmd == "/recensioni":
             return self._reviews(chat_id)
+        if cmd in ("/rimborsa", "/rimborso"):
+            return self._refund(chat_id, args)
         if cmd in ("/collezione", "/collezioni", "/set"):
             return self._collection(args)
         if cmd == "/resetvisti":
@@ -669,7 +683,8 @@ class CommandHandler:
                      "Pokébot cerca su Wallapop, Vinted ed eBay le carte che mancano alla tua collezione e ti avvisa "
                      "appena spuntano, con prezzi, affari 🔥, lista della spesa e album da condividere con gli amici.\n\n"
                      f"⏳ Per ora l'accesso è su invito: sei in lista d'attesa (posizione {pos}). "
-                     "Ti scrivo io qui appena viene attivato, non devi fare altro.", sends=sends)
+                     "Ti scrivo io qui appena viene attivato, non devi fare altro: da quel momento hai 5 giorni di prova "
+                     "con tutte le funzioni, poi resta gratis in versione Light.", sends=sends)
 
     def _waitlist(self, chat_id: str) -> Reply:
         if not self._is_owner(chat_id):
@@ -765,6 +780,29 @@ class CommandHandler:
         else:
             return Reply("Usa <code>/piano ID sempre</code>, <code>/piano ID pro 30</code>, <code>/piano ID prova 5</code> o <code>/piano ID light</code>.")
         return Reply(f"✅ {who}: {plans.describe(self.db, target)}")
+
+    def _refund(self, chat_id: str, args: str) -> Reply:
+        """(proprietario) /rimborsa ID – restituisce le Stars dell'ultimo pagamento, ferma il rinnovo e torna a Light."""
+        from . import plans
+        if not self._is_owner(chat_id):
+            return Reply("Solo il proprietario può fare rimborsi.")
+        target = args.strip()
+        p = plans.get(self.db, target)
+        pays = [x for x in (p.get("payments") or []) if x.get("charge") and not x.get("refunded")]
+        if not pays:
+            return Reply("Nessun pagamento da rimborsare per quell'ID (vedi /utenti).")
+        last = pays[-1]
+        ok, err = TelegramClient().refund_stars(target, last["charge"])
+        if not ok:
+            return Reply(f"⚠️ Rimborso non riuscito: {html.escape(err or 'errore Telegram')}")
+        for x in p["payments"]:
+            if x.get("charge") == last["charge"]:
+                x["refunded"] = True
+        self.db.set_kv(f"plan:{target}", p)
+        plans.set_light(self.db, target)
+        who = html.escape(self.db.user_name(target))
+        return Reply(f"↩️ Rimborsate {last.get('stars', 0)} ⭐ a {who}: rinnovo fermato, ora è su Light.",
+                     sends=[(target, f"↩️ Ti ho rimborsato {last.get('stars', 0)} ⭐ e fermato l'abbonamento. Resti sulla versione Light.", None)])
 
     def _vote(self, args: str) -> Reply:
         from . import plans
