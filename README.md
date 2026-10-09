@@ -29,7 +29,12 @@ funziona per gli altri, e nessuno vede le richieste di accesso tranne il proprie
 
 Il pulsante **App** accanto alla chat apre: **Collezioni** (checklist con le carte possedute accese e le mancanti
 al buio, inseguimenti, annunci trovati, prezzi e lista della spesa), **Amici** (codice amico, album in comune),
-**Impostazioni** e **Analisi IA** (in arrivo). Ogni tocco diventa un comando per il bot. Ognuno vede solo i suoi dati.
+**Impostazioni**, **Segnalazioni** e **Analisi IA** (in arrivo). Ogni tocco diventa un comando per il bot.
+Ognuno vede solo i suoi dati.
+
+**Segnalazioni**: ogni utente può scrivere una volta al giorno un problema o un'idea (`/segnala testo`, anche su più
+righe, o dalla Mini App); il proprietario riceve un messaggio e le trova tutte con `/segnalazioni` o nella Mini App,
+dalle più recenti, con il contatore delle nuove.
 
 ### Canale degli affari
 

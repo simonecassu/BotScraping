@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from . import cardmarket, config, plans, watch
+from . import cardmarket, config, plans, reports, watch
 from . import collections as coll
 from . import stats as pstats
 from .cards import Card, CardIndex, normalize
@@ -56,6 +56,7 @@ HELP = """<b>Comandi</b>
 /pausa · /riprendi – sospendi o riattiva le notifiche · /notte 23 8 – ore silenziose
 /prezzo 100 – prezzo massimo · /lingua ita | tutte · /soglia 50 – % minima di carte mancanti nei lotti
 /max 5 – annunci per carta in ogni messaggio · /immagini on | off · /esporta – file Excel
+/segnala testo – un problema o un'idea per migliorare Pokébot (una al giorno)
 /abbonati – il tuo piano e l'abbonamento · /voto 1-5 · /recensione testo
 Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
@@ -63,11 +64,14 @@ OWNER_HELP = """
 <b>Solo per te (proprietario)</b>
 /attesa – chi aspetta l'accesso · /approva ID (o tutti) · /rifiuta ID · /invita – codice d'invito
 /utenti – le persone collegate e il loro piano · /espelli ID · /piano ID sempre | pro 30 | prova 5 | light
-/recensioni · /rimborsa ID (entro {refund_days} giorni; annulla = ferma solo il rinnovo)
+/segnalazioni · /recensioni · /rimborsa ID (entro {refund_days} giorni; annulla = ferma solo il rinnovo)
 /canale @nome – canale degli affari · /canale ora · /canale 20 · /canale off
 /fonti wallapop vinted ebay · /intervallo 20 – valgono per tutti
 /cerca – ricerca completa adesso · /storico svuota · /resetvisti – rinotifica gli annunci già visti"""
 
+
+# comandi seguiti da testo libero: il messaggio resta intero anche se va a capo (non è un comando per riga)
+WHOLE_MESSAGE_COMMANDS = {"/segnala", "/segnalazione", "/recensione", "/commento"}
 
 # ricerche mirate dal vivo (/cerca 145) per chi non è il proprietario: completo (abbonati e prova) e Light
 CERCA_EVERY_FULL_S = 5 * 60
@@ -84,7 +88,7 @@ BOT_SHORT_DESCRIPTION = "Cerca su Vinted, Wallapop ed eBay le carte Pokémon che
 PROFILE_VERSION = 3
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot); il proprietario ne ha uno suo
-MENU_VERSION = 19
+MENU_VERSION = 20
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -110,6 +114,7 @@ MENU_COMMANDS = [
     ("lingua", "Solo carte italiane (/lingua ita) oppure tutte (/lingua tutte)"),
     ("esporta", "File Excel con checklist, annunci e prezzi"),
     ("abbonati", "Il tuo piano e l'abbonamento"),
+    ("segnala", "Un problema o un'idea: /segnala testo (una al giorno)"),
     ("aiuto", "Elenco dei comandi"),
 ]
 OWNER_MENU_COMMANDS = MENU_COMMANDS[:-1] + [
@@ -118,6 +123,7 @@ OWNER_MENU_COMMANDS = MENU_COMMANDS[:-1] + [
     ("canale", "Canale degli affari"),
     ("fonti", "Marketplace da usare (per tutti)"),
     ("intervallo", "Ogni quanti minuti cercare (per tutti)"),
+    ("segnalazioni", "Cosa scrivono gli utenti: problemi e idee"),
     ("aiuto", "Elenco dei comandi"),
 ]
 
@@ -323,6 +329,9 @@ class CommandHandler:
     def handle(self, text: str, chat_id: str = "") -> Reply:
         """Un messaggio può contenere più comandi, uno per riga."""
         self.chat = str(chat_id or "") or self.db.owner_chat_id() or "me"
+        first = (text or "").strip().split(None, 1)
+        if first and first[0].split("@", 1)[0].lower() in WHOLE_MESSAGE_COMMANDS:  # testo libero su più righe
+            return self._safe_one(" ".join(first), chat_id)
         lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
         if len(lines) <= 1:
             return self._safe_one(lines[0] if lines else "", chat_id)
@@ -488,6 +497,10 @@ class CommandHandler:
             return self._review(args)
         if cmd == "/recensioni":
             return self._reviews(chat_id)
+        if cmd in ("/segnala", "/segnalazione"):
+            return self._report(args)
+        if cmd == "/segnalazioni":
+            return self._reports(chat_id)
         if cmd in ("/rimborsa", "/rimborso"):
             return self._refund(chat_id, args)
         if cmd in ("/collezione", "/collezioni", "/set"):
@@ -974,6 +987,36 @@ class CommandHandler:
         for c, p in rows:
             lines.append(f"• {html.escape(self.db.user_name(c))}: {p.get('rating', '–')}/5" +
                          (f" · {html.escape(str(p.get('review'))[:200])}" if p.get("review") else ""))
+        return Reply("\n".join(lines))
+
+    def _report(self, args: str) -> Reply:
+        """/segnala testo – un problema o un'idea per il proprietario, una al giorno."""
+        text = args.strip()
+        if not text:
+            return Reply("💬 Scrivi la segnalazione dopo il comando, per esempio:\n<code>/segnala oggi non mi è arrivato "
+                         "l'avviso di una carta; vorrei poter filtrare per condizione</code>\nUna al giorno: cosa non va o cosa vorresti.")
+        owner = self._is_owner(self.chat)
+        if not owner and reports.sent_today(self.db, self.chat):
+            return Reply("💬 Oggi mi hai già scritto una segnalazione, grazie! Domani puoi mandarne un'altra.")
+        r = reports.add(self.db, self.chat, self.db.user_name(self.chat), plans.tier(self.db, self.chat), text)
+        owner_id = self.db.owner_chat_id()
+        note = (f"💬 <b>Segnalazione</b> di {html.escape(r['name'])}:\n{html.escape(r['text'])}\n"
+                "Tutte con /segnalazioni o nella Mini App.")
+        return Reply("🙏 Grazie, la leggo di sicuro: è così che Pokébot migliora.",
+                     sends=[(owner_id, note, None)] if owner_id and not owner else None)
+
+    def _reports(self, chat_id: str) -> Reply:
+        if not self._is_owner(chat_id):
+            return Reply("Solo il proprietario legge le segnalazioni. Per mandarne una: <code>/segnala il tuo messaggio</code>.")
+        rows = reports.all_reports(self.db)
+        if not rows:
+            return Reply("💬 Nessuna segnalazione ancora.")
+        lines = [f"💬 <b>Segnalazioni</b> ({len(rows)}), dalle più recenti:"]
+        for r in reversed(rows[-20:]):
+            when = dt.datetime.fromtimestamp(float(r["ts"]), ZoneInfo(config.TIMEZONE)).strftime("%d/%m %H:%M")
+            lines.append(f"\n<b>{html.escape(str(r.get('name') or '?'))}</b> · {when}\n{html.escape(str(r.get('text') or ''))}")
+        if len(rows) > 20:
+            lines.append(f"\n… e altre {len(rows) - 20} nella Mini App (Segnalazioni).")
         return Reply("\n".join(lines))
 
     def _channel(self, chat_id: str, args: str) -> Reply:

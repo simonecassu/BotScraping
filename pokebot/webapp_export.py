@@ -11,7 +11,7 @@ import logging
 import os
 import time
 
-from . import cardmarket, channel, config, plans, shopping, vault, watch
+from . import cardmarket, channel, config, plans, reports, shopping, vault, watch
 from . import collections as coll
 from . import stats as pstats
 from .cards import CardIndex
@@ -102,7 +102,18 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300, chat_id: s
         "values": _values(groups, wanted, shared),
         "shopping": _shopping(groups, wanted, shared),
         "copies": db.copies(chat_id),
+        "reports": _reports(db, chat_id),
     }
+
+
+def _reports(db: Database, chat_id: str) -> dict:
+    """Segnalazioni: le proprie (e se oggi è già stata mandata); il proprietario le vede tutte, dalle più recenti."""
+    out = {"sent_today": reports.sent_today(db, chat_id),
+           "mine": [{"text": r["text"], "ts": r["ts"]} for r in reports.mine(db, chat_id)[-5:]][::-1]}
+    if db.owner_chat_id() == chat_id:
+        out["all"] = [{"name": r.get("name") or "?", "tier": r.get("tier") or "", "text": r["text"], "ts": r["ts"]}
+                      for r in reports.all_reports(db)[-200:]][::-1]
+    return out
 
 
 def _found_row(r: dict) -> dict:

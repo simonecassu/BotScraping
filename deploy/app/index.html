@@ -21,9 +21,9 @@ header{position:sticky;top:0;z-index:5;background:linear-gradient(180deg,var(--r
 .title .ball{width:30px;height:30px;border-radius:50%;background:linear-gradient(180deg,#fff 0,#fff 46%,#111 46%,#111 54%,#e3350d 54%);position:relative;flex:none;border:3px solid #111}
 .title .ball::after{content:"";position:absolute;left:50%;top:50%;width:9px;height:9px;border:3px solid #111;border-radius:50%;background:#fff;transform:translate(-50%,-50%)}
 .title small{color:#ffe9a8;font-weight:700;font-size:12px;margin-left:auto}
-main{padding:12px;padding-bottom:40px}.hidden{display:none}
+main{padding:12px;padding-bottom:40px}.hidden{display:none!important}
 .card-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
-input[type=search],select,input[type=number]{padding:9px 12px;border-radius:12px;border:2px solid var(--line);background:var(--sec);color:var(--txt);font:700 15px "Nunito",sans-serif}
+input[type=search],select,input[type=number],textarea{padding:9px 12px;border-radius:12px;border:2px solid var(--line);background:var(--sec);color:var(--txt);font:700 15px "Nunito",sans-serif}
 input[type=search]{flex:1;min-width:150px}
 .pill{font-size:12px;font-weight:800;padding:5px 11px;border-radius:999px;background:var(--sec);color:var(--hint);border:2px solid transparent}.pill.on{color:#1a1a1a;background:var(--yel);border-color:#fff3b0}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(98px,1fr));gap:9px}
@@ -75,6 +75,11 @@ a{color:var(--link);text-decoration:none}
 .coll .st{flex:none;font-size:11px;font-weight:900;padding:4px 9px;border-radius:999px;background:#0a1328;color:var(--hint);border:1px solid var(--line)}
 .coll .st.on{background:var(--yel);color:#1a1a1a;border-color:#fff3b0}
 .seg{display:flex;background:#0a1328;border-radius:999px;padding:3px;margin-bottom:10px;border:2px solid var(--line)}.seg button{flex:1;border:0;border-radius:999px;padding:8px;background:transparent;color:var(--hint);font:800 13px "Nunito",sans-serif}.seg button.on{background:var(--yel);color:#1a1a1a}
+.tile.wide{grid-column:1/-1;min-height:0;flex-direction:row;align-items:center;justify-content:flex-start;gap:14px;padding:14px}.tile.wide b{margin-top:0}
+.tile .new{margin-left:auto;background:var(--red);color:#fff;font-weight:900;font-size:12px;padding:3px 9px;border-radius:999px}
+textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
+.rep{background:var(--sec);border:2px solid var(--line);border-radius:14px;padding:10px 12px;margin-bottom:9px}
+.rep small{display:block;color:var(--hint);font-weight:800;font-size:12px;margin-bottom:4px}.rep p{margin:0;white-space:pre-wrap;word-break:break-word}
 .warn{background:#3a2a0a;border:2px solid var(--warn);color:#ffd9a0;border-radius:12px;padding:9px 12px;font-size:13px;font-weight:700;margin:8px 0}
 </style>
 </head>
@@ -89,6 +94,7 @@ a{color:var(--link);text-decoration:none}
       <div class="tile" data-go="settings"><span class="ic">⚙️</span><div><b>Impostazioni</b><small id="t-set">…</small></div></div>
       <div class="tile yel" id="tile-ai"><span class="ic">🧠</span><div><b>Analisi IA</b><small>in arrivo</small></div></div>
       <div class="tile" data-go="friends"><span class="ic">👥</span><div><b>Amici</b><small id="t-fr">…</small></div></div>
+      <div class="tile wide" data-go="reports"><span class="ic">💬</span><div><b>Segnalazioni</b><small id="t-rep">un problema o un'idea</small></div><span class="new hidden" id="rep-new"></span></div>
     </div>
     <div class="planbar hidden" id="onbar"><span>🔕 Prima segna in <b>Collezioni</b> le carte che hai, poi accendi le notifiche.</span><button class="btn" id="on-go">🔔 Attiva</button></div>
     <div class="planbar hidden" id="planbar"><span id="plan-lbl"></span><button class="btn" id="plan-go">⭐ Abbonati</button></div>
@@ -161,6 +167,16 @@ a{color:var(--link);text-decoration:none}
     </div>
     <h2>I tuoi amici</h2>
     <div id="friend-list"></div>
+  </section>
+
+  <section id="tab-reports" class="hidden">
+    <div id="rep-form">
+      <p class="hint">Hai trovato un problema o vorresti qualcosa di diverso? Scrivilo qui: lo legge direttamente chi ha creato Pokébot. Una segnalazione al giorno.</p>
+      <textarea id="rep-text" maxlength="1000" placeholder="Es. oggi non mi è arrivato l'avviso della 151; vorrei poter filtrare per condizione della carta…"></textarea>
+      <div class="card-row" style="margin-top:8px"><button class="btn" id="rep-send">📨 Invia</button><span class="hint" id="rep-count">0/1000</span></div>
+    </div>
+    <p class="hint hidden" id="rep-done">✅ Oggi hai già mandato la tua segnalazione, grazie! Domani puoi scriverne un'altra.</p>
+    <div id="rep-list"></div>
   </section>
 
   <section id="tab-settings" class="hidden">
@@ -261,7 +277,7 @@ async function load() {
   renderAll();
 }
 
-function renderAll() { renderHome(); renderCollections(); renderChecklist(); renderSettings(); renderFriends(); if (!$("#tab-check").classList.contains("hidden")) { renderChase(); renderFound(); renderPrices(); } }
+function renderAll() { renderHome(); renderCollections(); renderChecklist(); renderSettings(); renderFriends(); renderReports(); if (!$("#tab-check").classList.contains("hidden")) { renderChase(); renderFound(); renderPrices(); } }
 
 /* ---------- Piano ---------- */
 function renderPlan() {
@@ -328,6 +344,42 @@ $("#friendgo").onclick = async () => {
   const code = $("#friendcode").value.trim().replace(/^\/?(amico|accetta)\s+/i, "").toUpperCase(); if (!code) return;
   // un codice amico si usa con /amico, un codice album con /accetta: il bot capisce dal codice
   if (await sendCmd(`/amico ${code}`)) { toast("Codice inviato: tra poco compare qui"); $("#friendcode").value = ""; }
+};
+
+/* ---------- Segnalazioni ---------- */
+const fmtWhen = (ts) => new Date(ts * 1000).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function renderReports() {
+  if (!state) return;
+  const r = state.reports || {}, all = r.all;
+  $("#rep-form").classList.toggle("hidden", !!r.sent_today || isOwner());
+  $("#rep-done").classList.toggle("hidden", !r.sent_today || isOwner());
+  const item = (x, who) => `<div class="rep"><small>${who ? esc(who) + " · " : ""}${fmtWhen(x.ts)}</small><p>${esc(x.text)}</p></div>`;
+  if (all) {  // il proprietario: tutto quello che scrivono gli utenti, dalle più recenti
+    const seen = Number(lsGet("reportsSeen") || 0), fresh = all.filter((x) => x.ts > seen).length;
+    $("#t-rep").textContent = all.length ? `${all.length} dagli utenti` : "ancora nessuna";
+    $("#rep-new").textContent = `${fresh} nuov${fresh === 1 ? "a" : "e"}`;
+    $("#rep-new").classList.toggle("hidden", !fresh);
+    $("#rep-list").innerHTML = `<h2>Cosa scrivono gli utenti (${all.length})</h2>` +
+      (all.map((x) => item(x, x.name + (x.tier && x.tier !== "owner" ? " (" + x.tier + ")" : ""))).join("") || '<p class="hint">Nessuna segnalazione ancora.</p>');
+    return;
+  }
+  const mine = r.mine || [];
+  $("#t-rep").textContent = r.sent_today ? "inviata oggi ✓" : "un problema o un'idea";
+  $("#rep-list").innerHTML = mine.length ? "<h2>Le tue ultime</h2>" + mine.map((x) => item(x)).join("") : "";
+}
+$("#rep-text").oninput = () => { $("#rep-count").textContent = `${$("#rep-text").value.length}/1000`; };
+$("#rep-send").onclick = async () => {
+  const text = $("#rep-text").value.trim();
+  if (text.length < 5) { toast("Scrivi qualche parola in più"); return; }
+  if (await sendCmd("/segnala " + text)) {
+    const r = (state.reports ||= {});
+    r.sent_today = true;
+    r.mine = [{ text, ts: Date.now() / 1000 }, ...(r.mine || [])].slice(0, 5);
+    $("#rep-text").value = ""; $("#rep-count").textContent = "0/1000";
+    renderReports(); toast("📨 Inviata, grazie!");
+  }
 };
 
 /* ---------- Home ---------- */
@@ -733,7 +785,7 @@ function renderSettings() {
 
 
 /* ---------- navigazione ---------- */
-const TITLES = { home: "Pokébot", coll: "Collezioni", settings: "Impostazioni", friends: "Amici" };
+const TITLES = { home: "Pokébot", coll: "Collezioni", settings: "Impostazioni", friends: "Amici", reports: "Segnalazioni" };
 function showCseg(name) {
   document.querySelectorAll("#cseg button").forEach((b) => b.classList.toggle("on", b.dataset.cseg === name));
   ["check", "chase", "found"].forEach((t) => $("#cseg-" + t).classList.toggle("hidden", t !== name));
@@ -744,10 +796,13 @@ document.querySelectorAll("#cseg button").forEach((b) => b.onclick = () => showC
 function showTab(name, push = true) {
   const cur = document.querySelector("main > section:not(.hidden)");
   if (push && cur) stack.push(cur.id.replace("tab-", ""));
-  ["home", "coll", "check", "settings", "friends"].forEach((t) => $("#tab-" + t).classList.toggle("hidden", t !== name));
+  ["home", "coll", "check", "settings", "friends", "reports"].forEach((t) => $("#tab-" + t).classList.toggle("hidden", t !== name));
   $("#ttl").textContent = name === "check" ? (curSet === "home" ? "30th Celebration" : ((extra[curSet] || {}).meta || {}).name || curSet) : TITLES[name];
   $("#back").classList.toggle("hidden", name === "home");
   if (name === "check") { showCseg("check"); setSeg("ann"); renderChecklist(); renderShared(); }
+  if (name === "reports" && state && (state.reports || {}).all) {  // letto: il contatore delle nuove si azzera
+    lsSet("reportsSeen", String(Math.max(0, ...state.reports.all.map((x) => x.ts)))); renderReports();
+  }
   window.scrollTo(0, 0);
 }
 $("#back").onclick = () => { let prev = stack.pop() || "home"; if (prev === "check") prev = "coll"; showTab(prev, false); if (prev === "home") stack.length = 0; };

@@ -188,3 +188,25 @@ def test_state_shows_only_own_cards_of_each_listing(index, monkeypatch):
                  1.0, True)
     st = build_state(index, db, chat_id="2")
     assert [r["cards"] for r in st["found"]] == [["me55-131"]]
+
+
+def test_reports_one_a_day_multiline_and_owner_list(index, monkeypatch):
+    from pokebot import reports
+    from pokebot.webapp_export import build_state
+    monkeypatch.setattr("pokebot.config.TELEGRAM_CHAT_ID", "")
+    db = make_db()
+    db.set_kv("telegram_chat_id", "1")
+    db.add_chat_id("2")
+    db.set_user_name("2", "Anna <b>")
+    h = CommandHandler(index, db)
+    assert "Scrivi la segnalazione" in h.handle("/segnala", "2").text
+    r = h.handle("/segnala oggi niente avviso\n/cerca 151 non mi va\nvorrei i filtri", "2")
+    assert "Grazie" in r.text and r.sends[0][0] == "1" and "Anna &lt;b&gt;" in r.sends[0][1]
+    assert reports.mine(db, "2")[0]["text"] == "oggi niente avviso\n/cerca 151 non mi va\nvorrei i filtri"  # tutto il messaggio
+    assert "già scritto" in h.handle("/segnala ancora", "2").text and len(reports.all_reports(db)) == 1
+    assert "Solo il proprietario" in h.handle("/segnalazioni", "2").text
+    assert "vorrei i filtri" in h.handle("/segnalazioni", "1").text
+    mine, owner = build_state(index, db, chat_id="2")["reports"], build_state(index, db, chat_id="1")["reports"]
+    assert mine["sent_today"] and "all" not in mine and owner["all"][0]["name"] == "Anna <b>"
+    tomorrow = time.time() + 86400
+    assert not reports.sent_today(db, "2", tomorrow)
