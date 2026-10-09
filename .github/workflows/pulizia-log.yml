@@ -59,7 +59,8 @@ jobs:
               ids += [r["id"] for r in runs if r["created_at"] < cutoff and r["id"] not in ids]
               page += 1
           print(f"giri da ripulire: {len(ids)}", flush=True)
-          done = gone = other = 0
+          done = gone = 0
+          failed = []
           for i, run_id in enumerate(ids, 1):
               status, _ = call("DELETE", f"{API}/{run_id}/logs")
               if status == 204:
@@ -67,9 +68,11 @@ jobs:
               elif status in (404, 410):
                   gone += 1  # log già scaduti o già cancellati
               else:
-                  other += 1
+                  failed.append((run_id, status))
               if i % 100 == 0:
                   print(f"{i}/{len(ids)}", flush=True)
-          print(f"log cancellati: {done} · già assenti: {gone} · non cancellati: {other}")
-          if other:
+          print(f"log cancellati: {done} · già assenti: {gone} · non cancellati: {len(failed)}")
+          for run_id, status in failed:
+              print(f"  giro {run_id}: HTTP {status}")
+          if failed:
               raise SystemExit(1)
