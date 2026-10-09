@@ -91,6 +91,10 @@ a{color:var(--link);text-decoration:none}
 textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
 .rep{background:var(--sec);border:2px solid var(--line);border-radius:14px;padding:10px 12px;margin-bottom:9px}
 .rep small{display:block;color:var(--hint);font-weight:800;font-size:12px;margin-bottom:4px}.rep p{margin:0;white-space:pre-wrap;word-break:break-word}
+.usr{background:var(--sec);border:2px solid var(--line);border-radius:14px;padding:12px;margin-bottom:9px}
+.usr .top{display:flex;align-items:center;gap:10px}.usr .top div{flex:1;min-width:0}.usr b{font-weight:900}.usr small{display:block;color:var(--hint);font-weight:700;font-size:12px}
+.usr .act{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.usr .act .btn{padding:7px 11px;font-size:12px}.btn.ghost{background:transparent;color:var(--hint);box-shadow:none;border:2px solid var(--line)}
+.usr.banned{opacity:.55}
 .warn{background:#3a2a0a;border:2px solid var(--warn);color:#ffd9a0;border-radius:12px;padding:9px 12px;font-size:13px;font-weight:700;margin:8px 0}
 </style>
 </head>
@@ -105,6 +109,7 @@ textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
       <div class="tile" data-go="settings"><span class="ic">⚙️</span><div><b>Impostazioni</b><small id="t-set">…</small></div></div>
       <div class="tile yel" id="tile-ai"><span class="ic">🧠</span><div><b>Analisi IA</b><small>in arrivo</small></div></div>
       <div class="tile" data-go="friends"><span class="ic">👥</span><div><b>Amici</b><small id="t-fr">…</small></div></div>
+      <div class="tile wide hidden" data-go="admin" id="tile-admin"><span class="ic">👑</span><div><b>Utenti</b><small id="t-adm">lista d'attesa, piani, abbonamenti</small></div><span class="new hidden" id="adm-new"></span></div>
       <div class="tile wide" data-go="reports"><span class="ic">💬</span><div><b>Segnalazioni</b><small id="t-rep">un problema o un'idea</small></div><span class="new hidden" id="rep-new"></span></div>
     </div>
     <div class="planbar hidden" id="onbar"><span>🔕 Prima segna in <b>Collezioni</b> le carte che hai, poi accendi le notifiche.</span><button class="btn" id="on-go">🔔 Attiva</button></div>
@@ -190,6 +195,13 @@ textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
     <p class="hint hidden" id="rep-done">✅ Oggi hai già mandato la tua segnalazione, grazie! Domani puoi scriverne un'altra.</p>
     <p class="hint">Oppure in chat: scrivi <b>/segnala</b> seguito dal messaggio e invia. <a href="#" id="rep-chat">Apri la chat</a></p>
     <div id="rep-list"></div>
+  </section>
+
+  <section id="tab-admin" class="hidden">
+    <p class="hint">Solo tu vedi questa pagina. Ogni pulsante fa quello che faresti in chat (/approva, /piano, /espelli, /rimborsa…): la conferma arriva in chat tra circa un minuto.</p>
+    <div class="card-row"><button class="btn sec" data-cmd="/invita">🎟 Codice d'invito</button><button class="btn sec" data-cmd="/utenti">📋 Riepilogo in chat</button></div>
+    <div id="adm-wait"></div>
+    <div id="adm-users"></div>
   </section>
 
   <section id="tab-settings" class="hidden">
@@ -293,7 +305,7 @@ async function load() {
   renderAll();
 }
 
-function renderAll() { renderHome(); renderCollections(); renderChecklist(); renderSettings(); renderFriends(); renderReports(); if (!$("#tab-check").classList.contains("hidden")) { renderChase(); renderFound(); renderPrices(); } }
+function renderAll() { renderHome(); renderCollections(); renderChecklist(); renderSettings(); renderFriends(); renderReports(); renderAdmin(); if (!$("#tab-check").classList.contains("hidden")) { renderChase(); renderFound(); renderPrices(); } }
 
 /* ---------- Piano ---------- */
 function renderPlan() {
@@ -366,6 +378,37 @@ $("#friendgo").onclick = async () => {
   // un codice amico si usa con /amico, un codice album con /accetta: il bot capisce dal codice
   if (await sendCmd(`/amico ${code}`)) { toast("Codice inviato: tra poco compare qui"); $("#friendcode").value = ""; }
 };
+
+/* ---------- Utenti (solo proprietario) ---------- */
+function renderAdmin() {
+  const a = state && state.admin;
+  $("#tile-admin").classList.toggle("hidden", !a);
+  if (!a) return;
+  const wl = a.waitlist || [], us = a.users || [];
+  $("#t-adm").textContent = `${us.length} collegat${us.length === 1 ? "o" : "i"}` + (wl.length ? ` · ${wl.length} in attesa` : "");
+  $("#adm-new").textContent = `${wl.length} in attesa`; $("#adm-new").classList.toggle("hidden", !wl.length);
+  const day = (ts) => ts ? new Date(ts * 1000).toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit" }) : "";
+  $("#adm-wait").innerHTML = `<h2>Lista d'attesa (${wl.length})</h2>` + (wl.length ? wl.map((w) => `
+    <div class="usr" data-id="${esc(w.id)}"><div class="top"><div><b>${esc(w.name || "senza nome")}</b><small>id ${esc(w.id)} · chiesto il ${day(w.ts)}${w.source ? " · da " + esc(w.source) : ""}</small></div></div>
+      <div class="act"><button class="btn" data-cmd="/approva ${esc(w.id)}" data-ok="Approvato: parte la prova di ${a.trial_days} giorni">✅ Approva</button>
+      <button class="btn ghost" data-cmd="/rifiuta ${esc(w.id)}" data-confirm="Rifiutare ${esc(w.name || w.id)}?">✕ Rifiuta</button></div></div>`).join("")
+    : '<p class="hint">Nessuno in attesa.</p>');
+  const tierIc = { owner: "👑", pro: "⭐", trial: "🎁", light: "🌱" };
+  $("#adm-users").innerHTML = `<h2>Collegati (${us.length})</h2>` + us.map((u) => {
+    const me = u.tier === "owner", until = u.until && !u.lifetime ? ` · fino al ${day(u.until)}` : "";
+    const plan = (what, label) => `<button class="btn ${u.tier === what.split(" ")[0] ? "" : "ghost"}" data-cmd="/piano ${esc(u.id)} ${what}" data-ok="${esc(u.name)}: piano aggiornato">${label}</button>`;
+    return `<div class="usr ${u.banned ? "banned" : ""}" data-id="${esc(u.id)}"><div class="top"><span class="av">${esc((u.name || "?").slice(0, 1).toUpperCase())}</span>
+      <div><b>${esc(u.name)}${me ? " (tu)" : ""}</b><small>${tierIc[u.tier] || ""} ${esc(u.label)}${until}${u.paid ? " · ha pagato" : ""}</small></div></div>
+      ${me ? "" : `<div class="act">${plan("prova " + a.trial_days, "🎁 Prova " + a.trial_days + "g")}${plan("pro 30", "⭐ Pro 30g")}${plan("sempre", "💎 Pro per sempre")}${plan("light", "🌱 Light")}</div>
+      <div class="act">${u.paid ? `<button class="btn ghost" data-cmd="/rimborsa ${esc(u.id)}" data-confirm="Rimborsare l'ultimo pagamento di ${esc(u.name)}? (intero, solo entro ${a.refund_days} giorni)">💸 Rimborsa</button>
+      <button class="btn ghost" data-cmd="/rimborsa ${esc(u.id)} annulla" data-confirm="Fermare il rinnovo di ${esc(u.name)}?">⏹ Ferma rinnovo</button>` : ""}
+      <button class="btn ghost" data-cmd="/espelli ${esc(u.id)}" data-confirm="Espellere ${esc(u.name)}? Perde l'accesso e non può rientrare da solo.">⛔ Espelli</button></div>`}</div>`;
+  }).join("");
+  document.querySelectorAll("#tab-admin [data-cmd]").forEach((b) => b.onclick = async () => {
+    if (b.dataset.confirm && !confirm(b.dataset.confirm)) return;
+    if (await sendCmd(b.dataset.cmd)) { toast(b.dataset.ok || "Inviato: guarda la chat"); b.closest(".usr") && (b.closest(".usr").style.opacity = .5); }
+  });
+}
 
 /* ---------- Segnalazioni ---------- */
 const fmtWhen = (ts) => new Date(ts * 1000).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -897,12 +940,12 @@ function renderSettings() {
   $("#lastrun").innerHTML = lr ? `Ultimo giro ${new Date(lr.started_at * 1000).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}: ${lr.listings_seen} annunci letti, ${lr.matches} segnalati` +
     (lr.per_source && Object.keys(lr.per_source).length ? " · " + Object.entries(lr.per_source).map(([k, v]) => esc(`${SRC[k] || k} ${v}`)).join(", ") : "") +
     (lr.errors && Object.keys(lr.errors).length ? `<br><span class="err">⚠️ ${Object.entries(lr.errors).map(([k, v]) => esc(k + ": " + String(v).slice(0, 80))).join("<br>")}</span>` : "") : "";
-  document.querySelectorAll("[data-cmd].btn").forEach((b) => b.onclick = async () => { if (await sendCmd(b.dataset.cmd)) toast("Inviato " + b.dataset.cmd + ": guarda la chat"); });
+  document.querySelectorAll("#tab-settings [data-cmd].btn").forEach((b) => b.onclick = async () => { if (await sendCmd(b.dataset.cmd)) toast("Inviato " + b.dataset.cmd + ": guarda la chat"); });
 }
 
 
 /* ---------- navigazione ---------- */
-const TITLES = { home: "Pokébot", coll: "Collezioni", settings: "Impostazioni", friends: "Amici", reports: "Segnalazioni" };
+const TITLES = { home: "Pokébot", coll: "Collezioni", settings: "Impostazioni", friends: "Amici", reports: "Segnalazioni", admin: "Utenti" };
 function showCseg(name) {
   document.querySelectorAll("#cseg button").forEach((b) => b.classList.toggle("on", b.dataset.cseg === name));
   ["check", "chase", "found"].forEach((t) => $("#cseg-" + t).classList.toggle("hidden", t !== name));
@@ -914,7 +957,7 @@ function showTab(name, push = true) {
   if (dupMode && name !== "check") setDupMode(false);  // uscendo dalla collezione si chiude la modalità doppioni (e si salva)
   const cur = document.querySelector("main > section:not(.hidden)");
   if (push && cur) stack.push(cur.id.replace("tab-", ""));
-  ["home", "coll", "check", "settings", "friends", "reports"].forEach((t) => $("#tab-" + t).classList.toggle("hidden", t !== name));
+  ["home", "coll", "check", "settings", "friends", "reports", "admin"].forEach((t) => $("#tab-" + t).classList.toggle("hidden", t !== name));
   $("#ttl").textContent = name === "check" ? setName(curSet === "home" ? "me55" : curSet) : TITLES[name];
   $("#back").classList.toggle("hidden", name === "home");
   if (name === "check") { showCseg("check"); setSeg("ann"); renderChecklist(); renderShared(); }

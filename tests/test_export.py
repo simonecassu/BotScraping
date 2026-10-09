@@ -67,3 +67,12 @@ def test_search_ignores_albums_of_people_who_left(index, monkeypatch):
     assert "me55-131" in db.wanted_of_members()
     db.remove_chat_id("2")
     assert "me55-131" not in db.wanted_of_members()
+
+
+def test_admin_panel_only_for_owner(index, monkeypatch):
+    db = _two_people(monkeypatch)
+    db.add_to_waitlist("9", "Luca", "volantino")
+    owner, user = build_state(index, db, chat_id="1"), build_state(index, db, chat_id="2")
+    assert user["admin"] is None
+    assert [w["id"] for w in owner["admin"]["waitlist"]] == ["9"] and [u["id"] for u in owner["admin"]["users"]] == ["1", "2"]
+    assert owner["admin"]["users"][1]["tier"] in ("light", "trial", "pro") and owner["admin"]["trial_days"] == 5
