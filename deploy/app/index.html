@@ -39,7 +39,7 @@ input[type=search]{flex:1;min-width:150px}
 .c .dup{position:absolute;left:8px;bottom:44px;background:var(--red);color:#fff;font-size:11px;font-weight:900;padding:2px 7px;border-radius:7px;z-index:1}
 .c .step{position:absolute;left:6px;right:6px;bottom:42px;display:flex;align-items:center;justify-content:space-between;background:rgba(10,19,40,.92);border:2px solid var(--yel);border-radius:999px;padding:3px;z-index:2}
 .c .step button{width:34px;height:34px;border-radius:50%;border:0;background:var(--red);color:#fff;font:900 22px/1 "Nunito",sans-serif;padding:0 0 2px}
-.c .step b{font-size:17px;font-weight:900;color:#fff;min-width:22px;text-align:center}
+.c .step b{font-size:17px;font-weight:900;color:#fff;min-width:22px;text-align:center}.c .step button:disabled{opacity:.35}
 h2{font-size:18px;font-weight:900;margin:16px 0 8px;color:var(--yel)}h3{font-size:13px;color:var(--hint);margin:12px 0 6px;font-weight:800;text-transform:uppercase;letter-spacing:.6px}
 .folder{background:var(--sec);border-radius:14px;padding:10px 12px;margin-bottom:9px;border:2px solid var(--line)}
 .folder .hd{display:flex;align-items:center;gap:10px}.folder .hd img{width:36px;height:50px;object-fit:cover;border-radius:5px;border:2px solid var(--yel)}
@@ -207,6 +207,7 @@ const CATALOG_URL = "https://cdn.jsdelivr.net/gh/PokemonTCG/pokemon-tcg-data@mas
 const CARDS_URL = (id) => `https://cdn.jsdelivr.net/gh/PokemonTCG/pokemon-tcg-data@master/cards/en/${id}.json`;
 let state = null, cards = [], byId = {}, wanted = new Set(), pending = new Set(), filterSet = "";
 // extra[id] = { meta, cards, owned:Set, active, loaded } (mancano tutte tranne le possedute); copies[id] = quante copie in più
+// (sulla carta si mostra il totale: copies + 1)
 let catalog = null, curSet = "home", extra = {}, dupMode = false, copies = {};
 const stack = [];
 const overrides = {};  // scelte fatte da poco (id → {ts, want|own}) da tenere finché lo stato del bot non le riflette (max 4 min)
@@ -534,8 +535,8 @@ function renderChecklist() {
     (!q || c.name.toLowerCase().includes(q) || c.number.toLowerCase().includes(q) || (c.code || "").includes(q)));
   $("#grid").innerHTML = list.map((c) => `
     <div class="c ${isMissing(c) ? "miss" : ""} ${pending.has(c.id) ? "pending" : ""}" data-id="${c.id}">
-      ${isMissing(c) ? '<span class="tag">MANCA</span>' : ""}${!dupMode && copies[c.id] ? `<span class="dup">+${copies[c.id]}</span>` : ""}
-      ${dupMode && !isMissing(c) ? `<div class="step"><button data-d="-1" aria-label="Un doppione in meno">−</button><b>${copies[c.id] || 0}</b><button data-d="1" aria-label="Un doppione in più">+</button></div>` : ""}
+      ${isMissing(c) ? '<span class="tag">MANCA</span>' : ""}${!dupMode && copies[c.id] ? `<span class="dup">×${copies[c.id] + 1}</span>` : ""}
+      ${dupMode && !isMissing(c) ? `<div class="step"><button data-d="-1" aria-label="Una copia in meno" ${copies[c.id] ? "" : "disabled"}>−</button><b>${(copies[c.id] || 0) + 1}</b><button data-d="1" aria-label="Una copia in più">+</button></div>` : ""}
       <img loading="lazy" src="${esc(c.image)}" alt="">
       <div class="n">${c.printed ? "#" + esc(c.number) + "/" + c.printed : (curSet === "home" ? esc(c.code) + " · " : "") + "#" + esc(c.number)}</div>
       <div class="nm">${esc(c.name)}</div>
@@ -551,7 +552,8 @@ function stepCopies(id, delta) {
   if (n === (copies[id] || 0)) return;
   n ? (copies[id] = n) : delete copies[id];
   overrides["copy:" + id] = { ts: Date.now(), id, copy: n };  // resta così finché il bot non lo conferma
-  const el = $(`#grid .c[data-id="${id}"] .step b`); if (el) el.textContent = n;
+  const box = $(`#grid .c[data-id="${id}"] .step`);  // sulla carta la quantità totale: quella che hai più i doppioni
+  if (box) { box.querySelector("b").textContent = n + 1; box.querySelector("[data-d='-1']").disabled = !n; }
   clearTimeout(copyTimers[id]);  // tocchi in fila: si manda il numero finale appena ti fermi
   copyTimers[id] = setTimeout(() => saveCopies(id), 700);
 }
@@ -592,7 +594,7 @@ function setDupMode(on) {
   $("#dupmode").classList.toggle("on", dupMode);
   $("#dupmode").textContent = dupMode ? "✔️ Fine doppioni" : "🔁 Doppioni";
   $("#check-hint").innerHTML = dupMode
-    ? "🔁 <b>Doppioni</b>: con <b>+</b> e <b>−</b> segni quante copie in più hai di ogni carta che possiedi. Si salva da solo a ogni tocco. Tocca «Fine doppioni» per tornare alla checklist."
+    ? "🔁 <b>Doppioni</b>: con <b>+</b> e <b>−</b> segni quante copie hai in tutto di ogni carta che possiedi (2 o più = doppioni da scambiare). Si salva da solo a ogni tocco. Tocca «Fine doppioni» per tornare alla checklist."
     : 'Le carte che <b>hai</b> sono accese, quelle che <b>mancano</b> restano al buio. Tocca una carta per cambiarla: ogni tocco diventa un comando per il bot.';
   renderChecklist();
 }
