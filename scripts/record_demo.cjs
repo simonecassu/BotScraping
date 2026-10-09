@@ -112,10 +112,12 @@ async function record(browser) {
   await tap("#back", 1200);
   await tap(".tile[data-go=settings]", 1800);
   await tapEl(page.locator("#settings .sw").nth(2), 1500);
-  await tap("[data-cmd='/amico']", 1800);
+  await top();
+  await tap("#back", 1200);
+  // 8. Amici: codice personale, aggiunta di un amico
+  await tap(".tile[data-go=friends]", 2000);
   await type("#friendcode", "GX7K2P");
   await tap("#friendgo", 2200);
-  await top();
   await tap("#back", 2500);
 
   const video = page.video();

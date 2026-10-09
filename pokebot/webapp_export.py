@@ -66,7 +66,11 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300, chat_id: s
         "owner_chat_id": db.owner_chat_id(),
         "chat_ids": db.chat_ids(),
         "me": {"id": chat_id, "name": db.user_name(chat_id)},
-        "friends": [{"id": f, "name": db.user_name(f)} for f in db.friends(chat_id)],
+        "friends": [{"id": f, "name": db.user_name(f),
+                     "shared": [sid for sid, alb in db.albums_of(chat_id).items() if f in db.album_members(alb)]}
+                    for f in db.friends(chat_id)],
+        "friend_code": db.friend_code(chat_id),
+        "bot_username": db.get_kv("bot_username") or "",
         "home_album": {sid: {"album": db.albums_of(chat_id).get(sid),
                              "shared_with": [{"id": m, "name": db.user_name(m)} for m in db.album_members(db.albums_of(chat_id).get(sid, "")) if m != chat_id]}
                        for sid in config.HOME_SET_IDS},

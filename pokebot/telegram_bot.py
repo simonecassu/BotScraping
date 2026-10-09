@@ -795,13 +795,12 @@ class CommandHandler:
     # ---- amici e album condivisi --------------------------------------------------
     def _friends(self, args: str) -> Reply:
         """/amico – il tuo codice amico · /amico CODICE – diventate amici · /amico togli NOME · /amici – elenco."""
-        import secrets
         a = args.strip()
         if not a:
-            code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
-            self.db.set_kv(f"friendcode:{code}", {"chat": self.chat, "expires": time.time() + 7 * 86400})
-            return Reply("🤝 Il tuo codice amico (vale 7 giorni):\n"
-                         f"<code>/amico {code}</code>\n\nChi lo scrive al bot diventa tuo amico: potrete condividere album con /condividi.")
+            code = self.db.friend_code(self.chat)
+            return Reply("🤝 Il tuo codice amico:\n"
+                         f"<code>/amico {code}</code>\n\nChi lo scrive al bot diventa tuo amico: potrete condividere album con /condividi. "
+                         "Lo trovi sempre anche nella sezione Amici dell'app.")
         verb, _, rest = a.partition(" ")
         if verb.lower() in ("togli", "rimuovi"):
             target = self._friend_by_name(rest)
@@ -817,8 +816,9 @@ class CommandHandler:
         other = str(inv["chat"])
         if other == self.chat:
             return Reply("Quello è il tuo codice 🙂")
+        if other in self.db.friends(self.chat):
+            return Reply(f"Tu e <b>{html.escape(self.db.user_name(other))}</b> siete già amici.")
         self.db.add_friend(self.chat, other)
-        self.db.set_kv(f"friendcode:{verb.upper()}", None)
         return Reply(f"🤝 Ora tu e <b>{html.escape(self.db.user_name(other))}</b> siete amici. "
                      f"Condividi un album con <code>/condividi me55 {html.escape(self.db.user_name(other))}</code>.")
 

@@ -116,3 +116,22 @@ def test_url_button_and_channel_post(index, monkeypatch):
     assert "20:00" in h.handle("/canale 20", "1").text
     h.handle("/canale off", "1")
     assert not db.get_kv("deals_channel") and not channel.due(db, at_hour)
+
+
+def test_friend_code_is_stable_and_reusable(index, monkeypatch):
+    monkeypatch.setattr("pokebot.config.TELEGRAM_CHAT_ID", "")
+    db = _db()
+    for c in ("1", "2", "3"):
+        db.add_chat_id(c) if c != "1" else db.set_kv("telegram_chat_id", "1")
+    h = CommandHandler(index, db)
+    code = db.friend_code("1")
+    assert db.friend_code("1") == code and code in h.handle("/amico", "1").text
+    assert "amici" in h.handle(f"/amico {code}", "2").text
+    assert "amici" in h.handle(f"/amico {code}", "3").text  # riusabile da più persone
+    assert set(db.friends("1")) == {"2", "3"}
+    assert "già amici" in h.handle(f"/amico {code}", "2").text
+    assert "tuo codice" in h.handle(f"/amico {code}", "1").text
+    from pokebot.webapp_export import build_state
+    st = build_state(index, db, chat_id="1")
+    assert st["friend_code"] == code and {f["id"] for f in st["friends"]} == {"2", "3"}
+    assert all("shared" in f for f in st["friends"])

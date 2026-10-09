@@ -278,6 +278,20 @@ class Database:
             if y not in fr and x != y:
                 self.set_kv(f"friends:{x}", fr + [y])
 
+    def friend_code(self, chat_id: str) -> str:
+        """Codice amico personale, riusabile (più persone possono usarlo); si rinnova da solo prima di scadere."""
+        import secrets
+        now = time.time()
+        code = str(self.get_kv(f"myfriendcode:{chat_id}") or "")
+        inv = self.get_kv(f"friendcode:{code}") if code else None
+        if inv and str(inv.get("chat")) == str(chat_id) and float(inv.get("expires") or 0) > now + 7 * 86400:
+            return code
+        if not code or not inv or str(inv.get("chat")) != str(chat_id):
+            code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
+        self.set_kv(f"friendcode:{code}", {"chat": str(chat_id), "expires": now + 30 * 86400})
+        self.set_kv(f"myfriendcode:{chat_id}", code)
+        return code
+
     def remove_friend(self, a: str, b: str) -> None:
         for x, y in ((a, b), (b, a)):
             self.set_kv(f"friends:{x}", [c for c in self.friends(x) if c != y])

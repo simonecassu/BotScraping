@@ -64,6 +64,12 @@ a{color:var(--link);text-decoration:none}
 .tiles{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px}
 .tile{background:var(--sec);border:3px solid #0a1328;box-shadow:0 4px 0 #0a1328;border-radius:18px;padding:18px 14px;min-height:124px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer}
 .tile .ic{font-size:30px}.tile b{font-size:17px;font-weight:900;display:block;margin-top:8px}.tile small{color:var(--hint);font-weight:700;font-size:12px}
+.fcode{background:var(--sec);border:3px solid var(--yel);box-shadow:0 4px 0 var(--yel2);border-radius:18px;padding:16px;text-align:center;margin:6px 0 10px}
+.fcode small{display:block;color:var(--hint);font-weight:800;font-size:12px}.fcode b{display:block;font-size:38px;font-weight:900;letter-spacing:6px;color:var(--yel);margin:4px 0 12px}
+.friend{background:var(--sec);border:2px solid var(--line);border-radius:14px;padding:12px;margin-bottom:9px}
+.friend .top{display:flex;align-items:center;gap:10px}.friend .av{width:42px;height:42px;border-radius:50%;background:var(--red);color:#fff;font-weight:900;font-size:19px;display:flex;align-items:center;justify-content:center;flex:none}
+.friend .top div{flex:1;min-width:0}.friend small{display:block;color:var(--hint);font-weight:700;font-size:12px}
+.friend .act{display:flex;gap:8px;margin-top:10px;align-items:center}.friend select{flex:1;min-width:0}
 .tile.red{border-color:var(--red);box-shadow:0 4px 0 var(--red2)}.tile.yel{border-color:var(--yel);box-shadow:0 4px 0 var(--yel2)}
 .coll{display:flex;gap:12px;align-items:center;background:var(--sec);border:2px solid var(--line);border-radius:14px;padding:10px 12px;margin-bottom:8px;cursor:pointer}
 .coll img{width:64px;height:36px;object-fit:contain;flex:none}.coll .sy{width:64px;text-align:center;color:var(--hint);font-weight:900;flex:none}
@@ -84,6 +90,7 @@ a{color:var(--link);text-decoration:none}
       <div class="tile red" data-go="coll"><span class="ic">📚</span><div><b>Collezioni</b><small id="t-coll">…</small></div></div>
       <div class="tile" data-go="settings"><span class="ic">⚙️</span><div><b>Impostazioni</b><small id="t-set">…</small></div></div>
       <div class="tile yel" id="tile-ai"><span class="ic">🧠</span><div><b>Analisi IA</b><small>in arrivo</small></div></div>
+      <div class="tile" data-go="friends"><span class="ic">👥</span><div><b>Amici</b><small id="t-fr">…</small></div></div>
     </div>
     <p class="hint" id="home-hint" style="margin-top:14px"></p>
   </section>
@@ -144,15 +151,24 @@ a{color:var(--link);text-decoration:none}
 
   
 
+  <section id="tab-friends" class="hidden">
+    <div class="fcode">
+      <small>Il tuo codice amico</small>
+      <b id="fcode">······</b>
+      <div class="card-row" style="justify-content:center;margin:0"><button class="btn" id="fc-share">📤 Invia a un amico</button><button class="btn sec" id="fc-copy">📋 Copia</button></div>
+    </div>
+    <p class="hint">Chi usa il tuo codice diventa tuo amico. Poi potete condividere un album: le carte si spuntano una volta sola e valgono per tutti e due, mentre notifiche e impostazioni restano di ognuno.</p>
+    <h2>Aggiungi un amico</h2>
+    <div class="card-row">
+      <input id="friendcode" type="search" placeholder="Es. GD69W6" style="flex:1;min-width:120px;text-transform:uppercase">
+      <button class="btn" id="friendgo">➕ Aggiungi</button>
+    </div>
+    <h2>I tuoi amici</h2>
+    <div id="friend-list"></div>
+  </section>
+
   <section id="tab-settings" class="hidden">
     <div id="settings"></div>
-    <h2>Amici</h2>
-    <p class="hint" id="friends"></p>
-    <div class="card-row">
-      <button class="btn sec" data-cmd="/amico">🤝 Il mio codice amico</button>
-      <input id="friendcode" type="search" placeholder="Codice amico o album" style="flex:1;min-width:120px;text-transform:uppercase">
-      <button class="btn" id="friendgo">Usa codice</button>
-    </div>
     <h2>Azioni</h2>
     <div class="card-row">
       <button class="btn" data-cmd="/cerca">🔎 Cerca ora</button>
@@ -249,7 +265,53 @@ async function load() {
   renderAll();
 }
 
-function renderAll() { renderHome(); renderCollections(); renderChecklist(); renderSettings(); if (!$("#tab-check").classList.contains("hidden")) { renderChase(); renderFound(); renderPrices(); } }
+function renderAll() { renderHome(); renderCollections(); renderChecklist(); renderSettings(); renderFriends(); if (!$("#tab-check").classList.contains("hidden")) { renderChase(); renderFound(); renderPrices(); } }
+
+/* ---------- Amici ---------- */
+function setName(sid) {
+  if (sid === "me55") return "30th Celebration";
+  if (sid === "me55c") return "Classic Collection";
+  return ((extra[sid] || {}).meta || {}).name || sid;
+}
+function renderFriends() {
+  if (!state) return;
+  const fr = state.friends || [], code = state.friend_code || "";
+  $("#t-fr").textContent = fr.length ? `${fr.length} ${fr.length === 1 ? "amico" : "amici"}` : "aggiungi i tuoi amici";
+  $("#fcode").textContent = code || "······";
+  const mySets = [["me55", "30th Celebration"], ...Object.values(extra).map((e) => [e.meta.id, e.meta.name])];
+  $("#friend-list").innerHTML = fr.length ? fr.map((f) => {
+    const shared = (f.shared || []).filter((sid) => sid !== "me55c").map(setName);
+    const opts = mySets.filter(([id]) => !(f.shared || []).includes(id)).map(([id, n]) => `<option value="${esc(id)}">${esc(n)}</option>`).join("");
+    return `<div class="friend" data-name="${esc(f.name)}"><div class="top"><span class="av">${esc((f.name || "?").slice(0, 1).toUpperCase())}</span>
+      <div><b>${esc(f.name)}</b><small>${shared.length ? "👥 Album in comune: " + esc(shared.join(", ")) : "Nessun album in comune"}</small></div>
+      <button class="btn sec" data-rm="${esc(f.name)}" title="Togli">✕</button></div>
+      ${opts ? `<div class="act"><select>${opts}</select><button class="btn" data-share>👥 Condividi album</button></div>` : ""}</div>`;
+  }).join("") : '<p class="hint">Nessun amico ancora. Manda il tuo codice: appena qualcuno lo usa, compare qui.</p>';
+  $("#friend-list").querySelectorAll("[data-share]").forEach((b) => b.onclick = async () => {
+    const box = b.closest(".friend"), sid = box.querySelector("select").value, name = box.dataset.name;
+    if (await sendCmd(`/condividi ${sid} ${name}`)) toast(`Proposta inviata a ${name}: quando accetta, l'album diventa unico`);
+  });
+  $("#friend-list").querySelectorAll("[data-rm]").forEach((b) => b.onclick = async () => {
+    const name = b.dataset.rm;
+    if (confirm(`Togliere ${name} dagli amici? Gli album condivisi restano come sono.`) && await sendCmd(`/amico togli ${name}`)) { toast(`${name} tolto dagli amici`); b.closest(".friend").style.opacity = .4; }
+  });
+}
+$("#fc-copy").onclick = async () => {
+  const code = (state || {}).friend_code; if (!code) return;
+  try { await navigator.clipboard.writeText(`/amico ${code}`); toast("Copiato: /amico " + code); } catch (e) { prompt("Copia il codice:", `/amico ${code}`); }
+};
+$("#fc-share").onclick = () => {
+  const code = (state || {}).friend_code, bot = (state || {}).bot_username; if (!code) return;
+  const text = `Aggiungimi su Pokébot! Apri il bot e scrivi /amico ${code}`;
+  const url = bot ? `https://t.me/share/url?url=${encodeURIComponent("https://t.me/" + bot)}&text=${encodeURIComponent(text)}`
+    : `https://t.me/share/url?url=${encodeURIComponent(text)}`;
+  if (tg && tg.openTelegramLink) tg.openTelegramLink(url); else window.open(url, "_blank");
+};
+$("#friendgo").onclick = async () => {
+  const code = $("#friendcode").value.trim().replace(/^\/?(amico|accetta)\s+/i, "").toUpperCase(); if (!code) return;
+  // un codice amico si usa con /amico, un codice album con /accetta: il bot capisce dal codice
+  if (await sendCmd(`/amico ${code}`)) { toast("Codice inviato: tra poco compare qui"); $("#friendcode").value = ""; }
+};
 
 /* ---------- Home ---------- */
 function renderHome() {
@@ -610,13 +672,6 @@ function renderSettings() {
     cmd = cmd.replace("{qh}", `${$("#qh1").value} ${$("#qh2").value}`);
     if (await sendCmd(cmd)) { b.classList.toggle("on", on); toast("Inviato: " + cmd); }
   });
-  const fr = state.friends || [];
-  $("#friends").innerHTML = (state.me ? `Tu: <b>${esc(state.me.name)}</b> · ` : "") + (fr.length ? "Amici: " + esc(fr.map((f) => f.name).join(", ")) : "Nessun amico ancora: manda il tuo codice a chi vuoi, chi lo usa diventa tuo amico e potrete condividere album.");
-  $("#friendgo").onclick = async () => {
-    const code = $("#friendcode").value.trim().toUpperCase(); if (!code) return;
-    // un codice amico si usa con /amico, un codice album con /accetta: il bot capisce dal codice
-    if (await sendCmd(`/amico ${code}`)) { toast("Codice inviato: guarda la chat"); $("#friendcode").value = ""; }
-  };
   const lr = state.last_run;
   $("#lastrun").innerHTML = lr ? `Ultimo giro ${new Date(lr.started_at * 1000).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}: ${lr.listings_seen} annunci letti, ${lr.matches} segnalati` +
     (lr.per_source && Object.keys(lr.per_source).length ? " · " + Object.entries(lr.per_source).map(([k, v]) => `${SRC[k] || k} ${v}`).join(", ") : "") +
@@ -626,7 +681,7 @@ function renderSettings() {
 
 
 /* ---------- navigazione ---------- */
-const TITLES = { home: "Pokébot", coll: "Collezioni", settings: "Impostazioni" };
+const TITLES = { home: "Pokébot", coll: "Collezioni", settings: "Impostazioni", friends: "Amici" };
 function showCseg(name) {
   document.querySelectorAll("#cseg button").forEach((b) => b.classList.toggle("on", b.dataset.cseg === name));
   ["check", "chase", "found"].forEach((t) => $("#cseg-" + t).classList.toggle("hidden", t !== name));
@@ -637,7 +692,7 @@ document.querySelectorAll("#cseg button").forEach((b) => b.onclick = () => showC
 function showTab(name, push = true) {
   const cur = document.querySelector("main > section:not(.hidden)");
   if (push && cur) stack.push(cur.id.replace("tab-", ""));
-  ["home", "coll", "check", "settings"].forEach((t) => $("#tab-" + t).classList.toggle("hidden", t !== name));
+  ["home", "coll", "check", "settings", "friends"].forEach((t) => $("#tab-" + t).classList.toggle("hidden", t !== name));
   $("#ttl").textContent = name === "check" ? (curSet === "home" ? "30th Celebration" : ((extra[curSet] || {}).meta || {}).name || curSet) : TITLES[name];
   $("#back").classList.toggle("hidden", name === "home");
   if (name === "check") { showCseg("check"); renderChecklist(); renderShared(); }

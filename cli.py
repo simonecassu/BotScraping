@@ -91,6 +91,11 @@ def main(argv: list[str] | None = None) -> int:
         from pokebot.watch import run_watches
         for line in run_watches(index, db):  # inseguimenti (/insegui): a ogni sveglia, 5 minuti
             print(f"inseguimento · {line}")
+        if commands.enabled and not db.get_kv("bot_username"):
+            try:  # serve all'app per il link "aggiungimi" e al canale per il pulsante
+                db.set_kv("bot_username", commands.client.get_me())
+            except Exception as exc:  # noqa: BLE001
+                print(f"getMe: {exc}")
         if commands.enabled:
             from pokebot import channel
             line = channel.post_daily(db, index, commands.client)  # canale degli affari: una volta al giorno
