@@ -55,9 +55,14 @@ def main() -> None:
             if not c[3] or img[sid].replace("{n}", c[0]) == c[3]:
                 del c[3]  # come l'espansione: niente da dire
     names_it = italian_names(sets)
+    # il catalogo delle espansioni (nome, serie, data, logo): così la Mini App non dipende da un altro server
+    catalog = [{"id": s["id"], "name": s["name"], "series": s.get("series") or "", "total": s.get("total") or 0,
+                "printed_total": s.get("printedTotal"), "release": (s.get("releaseDate") or "").replace("/", "-"),
+                "logo": (s.get("images") or {}).get("logo") or "", "symbol": (s.get("images") or {}).get("symbol") or ""}
+               for s in sets]
     with open(out, "w", encoding="utf-8") as f:
-        json.dump({"built": int(time.time()), "rarities": rarities, "sets": index, "img": img, "names_it": names_it}, f,
-                  ensure_ascii=False, separators=(",", ":"))
+        json.dump({"built": int(time.time()), "rarities": rarities, "sets": index, "img": img, "names_it": names_it,
+                   "catalog": catalog}, f, ensure_ascii=False, separators=(",", ":"))
     print(f"{n} carte in {len(index)} collezioni, {len(names_it)} nomi italiani → {out}")
 
 

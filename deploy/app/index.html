@@ -475,13 +475,16 @@ $("#tile-ai").onclick = () => toast("🧠 Analisi IA: in arrivo");
 
 /* ---------- Collezioni ---------- */
 async function loadCatalog() {
+  // il catalogo delle espansioni arriva con l'indice delle carte (dal ponte); il server esterno è solo una riserva
+  await loadCardIndex();
+  if (catalog && catalog.length) return;
   try { const c = JSON.parse(localStorage.getItem("catalog") || "null"); if (c && Date.now() - c.ts < 86400e3) { catalog = c.sets; return; } } catch (e) {}
   try {
     const r = await fetch(CATALOG_URL); const raw = await r.json();
     catalog = raw.map((s) => ({ id: s.id, name: s.name, series: s.series || "", total: s.total || 0, printed_total: s.printedTotal, release: (s.releaseDate || "").replace(/\//g, "-"),
       logo: (s.images || {}).logo || "", symbol: (s.images || {}).symbol || "" })).sort((a, b) => (b.release || "").localeCompare(a.release || ""));
     try { localStorage.setItem("catalog", JSON.stringify({ ts: Date.now(), sets: catalog })); } catch (e) {}
-  } catch (e) { catalog = []; }
+  } catch (e) { catalog = catalog || []; }
 }
 /* ---------- ricerca delle carte in tutte le espansioni (indice cards.json, generato dal deploy) ---------- */
 let cardIndex = null, cardIndexLoading = null, rarityNames = [], hitRarity = "", imgPattern = {};
@@ -489,7 +492,11 @@ const fold = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g,
 function loadCardIndex() {
   if (cardIndex || cardIndexLoading) return cardIndexLoading;
   cardIndexLoading = fetch("/app/cards.json", { cache: "force-cache" }).then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-    .then((d) => { cardIndex = d.sets || {}; rarityNames = d.rarities || []; imgPattern = d.img || {}; namesIt = d.names_it || {}; renderAll(); })
+    .then((d) => {
+      cardIndex = d.sets || {}; rarityNames = d.rarities || []; imgPattern = d.img || {}; namesIt = d.names_it || {};
+      if (d.catalog && d.catalog.length) catalog = d.catalog.slice().sort((a, b) => (b.release || "").localeCompare(a.release || ""));
+      renderAll();
+    })
     .catch((e) => { cardIndexError = e.message || String(e); cardIndexLoading = null; renderCollections(); });  // si riprova alla prossima ricerca
   return cardIndexLoading;
 }
@@ -977,7 +984,7 @@ function showTab(name, push = true) {
 $("#back").onclick = () => { let prev = stack.pop() || "home"; if (prev === "check") prev = "coll"; showTab(prev, false); if (prev === "home") stack.length = 0; };
 if (tg && tg.BackButton) { tg.BackButton.onClick(() => $("#back").click()); new MutationObserver(() => $("#back").classList.contains("hidden") ? tg.BackButton.hide() : tg.BackButton.show()).observe($("#back"), { attributes: true }); }
 // all'apertura: si mostra subito quello che c'è, il bot viene svegliato e appena ripubblica l'App si aggiorna da sola
-load(true).then(loadCatalog).then(() => { renderCollections(); if (itNames()) loadCardIndex(); if (state) awaitRefresh("aggiorno", true); });
+load(true).then(loadCatalog).then(() => { renderCollections(); if (state) awaitRefresh("aggiorno", true); });
 setInterval(load, 90000);
 </script>
 </body>
