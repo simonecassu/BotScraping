@@ -68,12 +68,24 @@ function base64(bytes) {
 
 // Un file di stato dal branch bot-state (state.json = riepilogo, state-<impronta>.json = una persona), decifrato.
 // Dall'API di GitHub con il token del ponte: sempre aggiornato (niente cache del CDN) e senza i limiti delle letture anonime.
+// Il bot risalva lo stato a ogni giro (force-push): per qualche secondo GitHub può non servire ancora il file nuovo.
+// Allora si riprova una volta e, se ancora niente, vale l'ultimo stato letto bene (tenuto in memoria per un'ora).
+const lastGood = new Map();
 async function readState(env, name = "state.json") {
-  try {
-    const r = await gh(env, "GET", `/repos/${repoOf(env)}/contents/${name}.enc?ref=bot-state`, undefined, "application/vnd.github.raw");
-    if (r.ok) return JSON.parse(new TextDecoder().decode(await unseal(env, await r.arrayBuffer())));
-  } catch {}
-  return null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await gh(env, "GET", `/repos/${repoOf(env)}/contents/${name}.enc?ref=bot-state`, undefined, "application/vnd.github.raw");
+      if (r.ok) {
+        const st = JSON.parse(new TextDecoder().decode(await unseal(env, await r.arrayBuffer())));
+        lastGood.set(name, { st, ts: Date.now() });
+        return st;
+      }
+      if (r.status === 401 || r.status === 403) break; // token: inutile riprovare
+    } catch {}
+    await new Promise((res) => setTimeout(res, 1500));
+  }
+  const prev = lastGood.get(name);
+  return prev && Date.now() - prev.ts < 3600e3 ? prev.st : null;
 }
 
 // Chat autorizzate: il proprietario e le persone accettate (dal riepilogo del bot). null se il riepilogo non si legge:

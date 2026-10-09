@@ -258,7 +258,7 @@ async function sendCmd(text) {
   } catch (e) { toast("Rete non disponibile"); return false; }
 }
 
-let refreshing = null;
+let refreshing = null, loadRetries = 0;
 async function awaitRefresh(what) {
   // dopo un comando: il bot gira su GitHub (30-60 s); resta in ascolto e aggiorna da solo appena lo stato cambia
   if (refreshing) return;
@@ -288,7 +288,13 @@ async function load() {
     state = d;
   } catch (e) {
     $("#upd").textContent = "stato non disponibile";
-    if (!state) $("#home-hint").innerHTML = `<span class="err">${esc(e.message || e)}</span>`;
+    if (!state) {  // primo caricamento: il bot sta salvando? si riprova da soli prima di mostrare l'errore
+      loadRetries = (loadRetries || 0) + 1;
+      if (loadRetries <= 4 && !/apri la Mini App|non sei/.test(e.message || "")) {
+        $("#home-hint").innerHTML = '<span class="hint">⏳ Il bot sta salvando: riprovo tra qualche secondo…</span>';
+        setTimeout(load, 4000);
+      } else $("#home-hint").innerHTML = `<span class="err">${esc(e.message || e)}</span>`;
+    }
     return;
   }
   cards = state.sets.flatMap((s) => s.cards.map((c) => ({ ...c, set: s.id, setName: s.name, printed: s.printed_total })));
