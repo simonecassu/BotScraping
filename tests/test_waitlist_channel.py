@@ -102,11 +102,15 @@ def test_url_button_and_channel_post(index, monkeypatch):
     _cm(db, "me55-132", low=8, trend=10)
     db.add_found("good", "vinted", "Articuno 132", "https://v/good", "9 €", "", "single",
                  [{"id": "me55-132", "sure": True}], None, True)
+    _cm(db, "me55-133", low=10, trend=10)
+    db.add_found("fair", "wallapop", "Zapdos 133", "https://w/fair", "12 €", "", "single",
+                 [{"id": "me55-133", "sure": True}], None, True)
     deals = channel.pick_deals(db, index, now)
-    assert [d["verdict"] for d in deals] == ["deal", "good"]
+    assert [d["verdict"] for d in deals] == ["deal", "good", "fair"]  # anche sopra Cardmarket il post esce, etichettato
     assert deals[0]["url"] == "https://w/deal" and deals[0]["price"] == 12 and deals[1]["url"] == "https://v/good"
     text, buttons = channel.format_post(deals, "fakebot")
     assert "migliori occasioni" in text and "12.00 €" in text and "🔥 Affare" in text and "👍 Sotto il valore" in text
+    assert "📌 Vicino al valore" in text and "120% del valore Cardmarket" in text
     assert "40% del valore Cardmarket" in text
     assert "Affari Pokémon" in channel.format_post(deals[:1], "fakebot")[0]
     assert buttons == [[("🤖 Attiva Pokébot", "https://t.me/fakebot?start=canale")]]

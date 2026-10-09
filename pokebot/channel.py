@@ -26,13 +26,14 @@ DEFAULT_HOUR = 19  # ora locale del post giornaliero
 def pick_deals(db: Database, index: CardIndex, now: float | None = None, hours: int = 24, limit: int = 3) -> list[dict]:
     """Le `limit` migliori occasioni, una per carta, giudicate solo sui prezzi Cardmarket.
 
-    Prima gli affari veri (🔥), poi gli ottimi prezzi (💰), poi quelli sotto il valore (👍): così il post del giorno
-    esce sempre, ma ogni voce dice onestamente di che tipo è. Se nelle ultime 24 ore non basta, si allarga a 72.
+    Prima gli affari veri (🔥), poi gli ottimi prezzi (💰), quelli sotto il valore (👍) e infine quelli vicini al valore
+    (📌, fino al 30% sopra): così il post del giorno esce sempre, ma ogni voce dice onestamente di che tipo è.
+    Le ultime 24 ore hanno la precedenza; i 3 giorni prima servono solo a riempire i posti rimasti.
     """
     now = now or time.time()
     rows = db.list_found()
     cm = cardmarket.all_prices(db)
-    rank = {"deal": 0, "great": 1, "good": 2}
+    rank = {"deal": 0, "great": 1, "good": 2, "fair": 3}
     cands = []
     for r in rows:
         age = now - float(r.get("created_at") or 0)
@@ -44,7 +45,7 @@ def pick_deals(db: Database, index: CardIndex, now: float | None = None, hours: 
         cid = sure[0]["id"]
         price = parse_price(r.get("price"))
         p = cm.get(cid)
-        v, ratio = cardmarket.verdict(price, p)
+        v, ratio = cardmarket.verdict(price, p, fair=True)
         if v:
             cands.append((age > hours * 3600, rank[v], ratio, r, cid, price, p, v))
     # prima le ultime 24 ore, migliori per categoria; i giorni prima servono solo a riempire i posti rimasti

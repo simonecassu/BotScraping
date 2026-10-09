@@ -121,3 +121,10 @@ def test_personal_deal_uses_cardmarket(index, monkeypatch):
     assert sent == []
     search._deliver([(mk("b", 8.0), Res)], N(), settings, [], False, None, None, cm)
     assert sent == [(8.0, 20.0, "del trend Cardmarket")]
+
+
+def test_fair_only_on_request():
+    p = CMPrice(low=8.0, trend=10.0, avg7=None, avg30=None)
+    assert cmk.verdict(12.0, p) == (None, 1.2)
+    assert cmk.verdict(12.0, p, fair=True)[0] == "fair"
+    assert cmk.verdict(14.0, p, fair=True)[0] is None

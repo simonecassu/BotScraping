@@ -8,6 +8,7 @@ Regole di prezzo (verdict):
   🔥 affare        prezzo ≤ pct% del trend (70% di default), ≤ minimo Cardmarket, carta da almeno 5 € di trend
   💰 ottimo prezzo prezzo ≤ 85% del trend, carta da almeno 3 €
   👍 sotto valore  prezzo < trend, carta da almeno 2 €
+  📌 vicino        fino al 30% sopra il trend, carta da almeno 2 € (solo per non lasciare vuoto il canale)
 Sotto il 20% del trend è quasi sempre un errore di riconoscimento o un annuncio sospetto: scartato.
 """
 from __future__ import annotations
@@ -36,9 +37,10 @@ DEAL_MIN_TREND = 5.0
 GREAT_PCT = 85
 GREAT_MIN_TREND = 3.0
 GOOD_MIN_TREND = 2.0
+FAIR_MAX_RATIO = 1.30  # solo per riempire il canale: Vinted e Wallapop stanno spesso sopra Cardmarket
 SUSPICIOUS_RATIO = 0.20
 
-VERDICT_LABEL = {"deal": "🔥 Affare", "great": "💰 Ottimo prezzo", "good": "👍 Sotto il valore"}
+VERDICT_LABEL = {"deal": "🔥 Affare", "great": "💰 Ottimo prezzo", "good": "👍 Sotto il valore", "fair": "📌 Vicino al valore"}
 
 
 @dataclass
@@ -58,8 +60,8 @@ class CMPrice:
         return None
 
 
-def verdict(price: float | None, cm: CMPrice | None, pct: float = DEAL_PCT) -> tuple[str | None, float | None]:
-    """('deal'|'great'|'good'|None, prezzo/trend)."""
+def verdict(price: float | None, cm: CMPrice | None, pct: float = DEAL_PCT, fair: bool = False) -> tuple[str | None, float | None]:
+    """('deal'|'great'|'good'|'fair'|None, prezzo/trend). 'fair' solo se richiesto (il canale)."""
     if price is None or price <= 0 or cm is None or not cm.ref:
         return None, None
     ref = cm.ref
@@ -72,6 +74,8 @@ def verdict(price: float | None, cm: CMPrice | None, pct: float = DEAL_PCT) -> t
         return "great", ratio
     if ref >= GOOD_MIN_TREND and ratio < 1:
         return "good", ratio
+    if fair and ref >= GOOD_MIN_TREND and ratio <= FAIR_MAX_RATIO:
+        return "fair", ratio
     return None, ratio
 
 

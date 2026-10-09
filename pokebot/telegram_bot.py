@@ -1254,7 +1254,7 @@ class CommandHandler:
                 note = ""
                 if ref and len(p.cards) == 1:
                     v, _ = cardmarket.verdict(p.price, cm[p.cards[0].id])
-                    note = f" · CM {pstats.fmt_eur(ref)}" + (f" {cardmarket.VERDICT_LABEL[v].split()[0]}" if v else (" ⚠️ sopra Cardmarket" if p.price > ref * 1.15 else ""))
+                    note = f" · CM {pstats.fmt_eur(ref)}" + (f" {cardmarket.VERDICT_LABEL[v].split()[0]}" if v else (" ⚠️ molto sopra Cardmarket" if p.price > ref * cardmarket.FAIR_MAX_RATIO else ""))
                 lines.append(f'• {pstats.fmt_eur(p.price)}{tag}{note} <a href="{html.escape(p.row["url"], quote=True)}">{html.escape(names[:90])}</a>')
         if sl.uncovered:
             lines.append("\n❌ Senza annuncio recente: " + ", ".join(html.escape(c.label) for c in sl.uncovered[:15])
