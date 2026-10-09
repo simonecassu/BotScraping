@@ -383,6 +383,29 @@ class Database:
         self.set_kv("telegram_extra_chat_ids", [c for c in extra if c != chat_id])
         return True
 
+    # ---- lista d'attesa (chi scrive /start senza invito) ----------------------
+    def waitlist(self) -> dict:
+        """chat_id → {name, ts, source}: persone che hanno chiesto di entrare e aspettano l'approvazione."""
+        return dict(self.get_kv("waitlist", {}) or {})
+
+    def add_to_waitlist(self, chat_id: str, name: str = "", source: str = "") -> bool:
+        """Mette in lista; False se era già in lista. Conta ogni nuova richiesta per il traguardo di lancio."""
+        chat_id = str(chat_id).strip()
+        wl = self.waitlist()
+        if not chat_id or chat_id in wl or chat_id in self.chat_ids():
+            return False
+        wl[chat_id] = {"name": name[:40], "ts": time.time(), "source": source[:20]}
+        self.set_kv("waitlist", wl)
+        self.set_kv("signups_total", int(self.get_kv("signups_total", 0) or 0) + 1)
+        return True
+
+    def remove_from_waitlist(self, chat_id: str) -> dict | None:
+        wl = self.waitlist()
+        entry = wl.pop(str(chat_id).strip(), None)
+        if entry is not None:
+            self.set_kv("waitlist", wl)
+        return entry
+
     def prune(self, seen_days: int = 45, keep_found: int = 2000, keep_runs: int = 50) -> None:
         """Mantiene il database piccolo (utile quando viene salvato su GitHub a ogni esecuzione)."""
         with self.connect() as c:

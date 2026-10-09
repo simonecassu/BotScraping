@@ -91,6 +91,11 @@ def main(argv: list[str] | None = None) -> int:
         from pokebot.watch import run_watches
         for line in run_watches(index, db):  # inseguimenti (/insegui): a ogni sveglia, 5 minuti
             print(f"inseguimento · {line}")
+        if commands.enabled:
+            from pokebot import channel
+            line = channel.post_daily(db, index, commands.client)  # canale degli affari: una volta al giorno
+            if line:
+                print(f"canale · {line}")
         if not (args.force or want_search or _search_due(db)):
             from pokebot.search import flush_all_queues
             flush_all_queues(db, index.by_id)  # chi ha finito pausa o notte riceve quello che si è accumulato

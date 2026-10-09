@@ -58,6 +58,8 @@ HELP = """<b>Comandi</b>
 /insegui 151 – per 6 ore cerca la 151 ogni 5 minuti e ti avvisa appena spunta un annuncio nuovo
 /insegui 151 2h · /insegui 151 2h ogni 10m · /insegui 131 151 – durata, frequenza, più carte · /insegui – attivi · /insegui stop
 /invita – codice per collegare un'altra persona (stesse notifiche, stessa checklist, stessa app) · /utenti · /espelli ID
+/attesa – chi ha scritto /start e aspetta l'accesso · /approva ID (o tutti) · /rifiuta ID
+/canale @nome – canale pubblico dove ogni giorno pubblico i 3 affari migliori · /canale ora · /canale 20 · /canale off
 /collezione – le collezioni seguite · /collezione sv8 – passa a quella (scaricata al volo, parte da "mi mancano tutte"): da lì /mancanti, /aggiungi, /ho, /progresso, /prezzi lavorano su di lei · /collezione 30th – torna alla 30th
 /collezione sv8 attiva – ⚠️ la cerca anche sui marketplace · /collezione sv8 disattiva · sv8:7 – una sua carta in qualsiasi comando (es. /insegui sv8:7)
 /resetvisti – rinotifica anche gli annunci già visti
@@ -154,8 +156,7 @@ class TelegramClient:
         for i, chunk in enumerate(chunks):
             payload = {"chat_id": chat_id, "text": chunk, "parse_mode": "HTML", "disable_web_page_preview": True}
             if buttons and i == len(chunks) - 1:
-                payload["reply_markup"] = {"inline_keyboard": [[{"text": lbl, "callback_data": data[:64]} for lbl, data in row]
-                                                               for row in buttons]}
+                payload["reply_markup"] = {"inline_keyboard": [[_button(lbl, data) for lbl, data in row] for row in buttons]}
             requests.post(f"{self.base}/sendMessage", json=payload, timeout=config.HTTP_TIMEOUT)
 
     def send_document(self, chat_id: str | int, filename: str, content: bytes, caption: str = "") -> None:
@@ -167,6 +168,13 @@ class TelegramClient:
             requests.post(f"{self.base}/answerCallbackQuery", json={"callback_query_id": callback_id}, timeout=config.HTTP_TIMEOUT)
         except requests.RequestException:
             pass
+
+
+def _button(label: str, data: str) -> dict:
+    """Pulsante inline: un link se il dato è un URL, altrimenti un comando (callback)."""
+    if data.startswith("https://") or data.startswith("http://"):
+        return {"text": label, "url": data}
+    return {"text": label, "callback_data": data[:64]}
 
 
 def _chunks(text: str) -> list[str]:
@@ -336,6 +344,14 @@ class CommandHandler:
             return self._users(chat_id)
         if cmd in ("/espelli", "/rimuoviutente"):
             return self._kick(chat_id, args)
+        if cmd in ("/attesa", "/lista_attesa"):
+            return self._waitlist(chat_id)
+        if cmd in ("/approva", "/accetta_utente"):
+            return self._approve(chat_id, args)
+        if cmd == "/rifiuta":
+            return self._reject(chat_id, args)
+        if cmd == "/canale":
+            return self._channel(chat_id, args)
         if cmd in ("/collezione", "/collezioni", "/set"):
             return self._collection(args)
         if cmd == "/resetvisti":
@@ -569,6 +585,124 @@ class CommandHandler:
         if self.db.remove_chat_id(target):
             return Reply(f"👋 Chat <code>{target}</code> scollegata: non riceve più notifiche né comandi.")
         return Reply("Quell'ID non è tra le persone collegate (vedi /utenti).")
+
+    # ---- lista d'attesa e canale degli affari ---------------------------------
+    def waitlist_signup(self, chat_id: str, name: str = "", source: str = "") -> Reply:
+        """Qualcuno senza invito ha scritto /start: va in lista d'attesa e il proprietario viene avvisato."""
+        chat_id = str(chat_id)
+        if not self.db.add_to_waitlist(chat_id, name, source):
+            pos = list(self.db.waitlist()).index(chat_id) + 1 if chat_id in self.db.waitlist() else 0
+            return Reply("⏳ Sei già in lista d'attesa" + (f" (posizione {pos})" if pos else "") +
+                         ". Ti scrivo io appena il tuo accesso viene attivato.")
+        wl = self.db.waitlist()
+        pos = len(wl)
+        total = int(self.db.get_kv("signups_total", 0) or 0)
+        owner = self.db.owner_chat_id()
+        sends = []
+        if owner:
+            label = html.escape(name or chat_id)
+            src = f" · da {html.escape(source)}" if source else ""
+            sends.append((owner,
+                          f"🙋 <b>Nuova richiesta di accesso</b>: {label} (<code>{chat_id}</code>){src}\n"
+                          f"In attesa: {pos} · richieste totali: {total}/{self._goal()}\n"
+                          f"/approva {chat_id} · /rifiuta {chat_id} · /attesa per la lista",
+                          [[("✅ Approva", f"/approva {chat_id}"), ("❌ Rifiuta", f"/rifiuta {chat_id}")]]))
+        return Reply("👋 Benvenuto su <b>Pokébot</b>!\n\n"
+                     "Pokébot cerca su Wallapop, Vinted ed eBay le carte che mancano alla tua collezione e ti avvisa "
+                     "appena spuntano, con prezzi, affari 🔥, lista della spesa e album da condividere con gli amici.\n\n"
+                     f"⏳ Per ora l'accesso è su invito: sei in lista d'attesa (posizione {pos}). "
+                     "Ti scrivo io qui appena viene attivato, non devi fare altro.", sends=sends)
+
+    def _goal(self) -> int:
+        return int(self.db.get_kv("launch_goal", 250) or 250)
+
+    def _waitlist(self, chat_id: str) -> Reply:
+        if not self._is_owner(chat_id):
+            return Reply("Solo il proprietario del bot vede la lista d'attesa.")
+        wl = self.db.waitlist()
+        total = int(self.db.get_kv("signups_total", 0) or 0)
+        users = len(self.db.chat_ids())
+        lines = [f"📋 <b>Lista d'attesa</b>: {len(wl)} in attesa · {users} dentro · richieste totali {total}/{self._goal()}"]
+        now = time.time()
+        for cid, e in sorted(wl.items(), key=lambda kv: float(kv[1].get("ts") or 0)):
+            days = (now - float(e.get("ts") or now)) / 86400
+            ago = "oggi" if days < 1 else f"{int(days)} g fa"
+            src = f" · da {html.escape(str(e.get('source')))}" if e.get("source") else ""
+            lines.append(f"• {html.escape(str(e.get('name') or cid))} <code>{cid}</code> · {ago}{src}")
+        if wl:
+            lines.append("\n/approva ID · /approva tutti · /rifiuta ID")
+        return Reply("\n".join(lines))
+
+    def _approve(self, chat_id: str, args: str) -> Reply:
+        if not self._is_owner(chat_id):
+            return Reply("Solo il proprietario del bot può approvare le richieste.")
+        from . import collections as coll
+        wl = self.db.waitlist()
+        target = args.strip().lower()
+        ids = list(wl) if target in ("tutti", "tutte", "all") else [args.strip()]
+        done, sends = [], []
+        for cid in ids:
+            entry = self.db.remove_from_waitlist(cid)
+            if entry is None:
+                continue
+            self.db.add_chat_id(cid)
+            for sid in config.HOME_SET_IDS:
+                coll.album_for(self.db, cid, sid)
+            done.append(f"{html.escape(str(entry.get('name') or cid))} (<code>{cid}</code>)")
+            sends.append((cid, "🎉 <b>Il tuo Pokébot è attivo!</b>\n\n"
+                               "Parti così:\n"
+                               "1. Apri la Mini App dal pulsante <b>App</b> qui sotto e segna le carte che hai: il resto lo cerco io.\n"
+                               "2. Oppure da qui: /aggiungi 131 132 per le mancanti, /mancanti per vederle, /cerca per cercare subito.\n"
+                               "3. /collezione per seguire altre espansioni, /insegui 151 per inseguire una carta, /amico per gli amici.\n\n"
+                               "Con /aiuto hai tutti i comandi. Buona caccia! 🃏", None))
+        if not done:
+            return Reply("Nessuno con quell'ID in lista d'attesa (vedi /attesa). Usa <code>/approva ID</code> o <code>/approva tutti</code>.")
+        return Reply("✅ Accesso attivato per: " + ", ".join(done) + f"\nIn attesa: {len(self.db.waitlist())}", sends=sends)
+
+    def _reject(self, chat_id: str, args: str) -> Reply:
+        if not self._is_owner(chat_id):
+            return Reply("Solo il proprietario del bot può rifiutare le richieste.")
+        entry = self.db.remove_from_waitlist(args.strip())
+        if entry is None:
+            return Reply("Nessuno con quell'ID in lista d'attesa (vedi /attesa).")
+        return Reply(f"🗑 {html.escape(str(entry.get('name') or args.strip()))} tolto dalla lista d'attesa (non riceve nulla).")
+
+    def _channel(self, chat_id: str, args: str) -> Reply:
+        """/canale @nome – imposta il canale degli affari · /canale ora – pubblica subito · /canale 20 – ora del post · /canale off."""
+        if not self._is_owner(chat_id):
+            return Reply("Solo il proprietario del bot gestisce il canale.")
+        from . import channel as ch
+        a = args.strip()
+        cur = self.db.get_kv("deals_channel") or ""
+        hour = int(self.db.get_kv("deals_channel_hour", ch.DEFAULT_HOUR) or ch.DEFAULT_HOUR)
+        if not a:
+            if not cur:
+                return Reply("📣 Nessun canale impostato.\nCrea un canale Telegram, aggiungi il bot come amministratore e scrivi "
+                             "<code>/canale @nomecanale</code>: ogni giorno pubblico i 3 affari migliori con un pulsante che porta qui.")
+            last = self.db.get_kv("deals_channel_last") or "mai"
+            return Reply(f"📣 Canale affari: <code>{html.escape(cur)}</code> · post alle {hour}:00 · ultimo: {last}\n"
+                         "/canale ora – pubblica adesso · /canale 20 – cambia ora · /canale off – spegni")
+        if a.lower() in ("off", "no", "spegni"):
+            self.db.set_kv("deals_channel", None)
+            return Reply("📣 Canale affari spento.")
+        if a.lower() in ("ora", "adesso", "test"):
+            if not cur:
+                return Reply("Prima imposta il canale con <code>/canale @nomecanale</code>.")
+            deals = ch.pick_deals(self.db, self.index)
+            if not deals:
+                return Reply("Nessun affare nelle ultime 24 ore: niente da pubblicare. Riprova quando il bot ha trovato qualcosa 🔥.")
+            text, buttons = ch.format_post(deals, self.db.get_kv("bot_username") or "")
+            return Reply(f"📣 Pubblico sul canale {len(deals)} affari.", sends=[(cur, text, buttons)])
+        if a.isdigit() and 0 <= int(a) <= 23:
+            self.db.set_kv("deals_channel_hour", int(a))
+            return Reply(f"📣 Post giornaliero alle {int(a)}:00.")
+        if a.startswith("@") or a.lstrip("-").isdigit():
+            self.db.set_kv("deals_channel", a)
+            return Reply(f"📣 Canale affari: <code>{html.escape(a)}</code>. Ti mando subito un messaggio di prova lì: "
+                         "se non arriva, controlla che il bot sia amministratore del canale.\n"
+                         f"Ogni giorno alle {hour}:00 pubblico i 3 affari migliori delle ultime 24 ore (se ce ne sono).",
+                         sends=[(a, "✅ Pokébot collegato a questo canale: da qui in poi pubblico gli affari del giorno.", None)])
+        return Reply("Usa <code>/canale @nomecanale</code>, <code>/canale ora</code>, <code>/canale 20</code> o <code>/canale off</code>.")
 
     def _collection(self, args: str) -> Reply:
         """/collezione – le mie · /collezione sv8 – seguila (album mio) e rendila corrente · … attiva|disattiva · … ho|manca N… · … tutte|svuota."""
@@ -1158,6 +1292,10 @@ class CommandHandler:
         return "\n".join(lines)
 
 
+def _is_start(text: str) -> bool:
+    return text.strip().split()[0].split("@", 1)[0].lower() == "/start" if text.strip() else False
+
+
 class TelegramCommands:
     """Legge i messaggi in arrivo, li esegue e risponde. Il chat id viene salvato al primo /start."""
 
@@ -1228,7 +1366,10 @@ class TelegramCommands:
             if not chat_id or not text:
                 continue
             if not self._authorized(chat_id, text):
-                log.warning("Messaggio ignorato da chat non autorizzata %s", chat_id)
+                if _is_start(text):
+                    self._deliver(chat_id, self._signup(chat_id, text, str(frm.get("first_name") or "")))
+                else:
+                    log.warning("Messaggio ignorato da chat non autorizzata %s", chat_id)
                 continue
             reply = self.handler.handle(text, chat_id)
             want_search = want_search or reply.run_search
@@ -1253,14 +1394,26 @@ class TelegramCommands:
         text = str(payload.get("text") or "")
         if not chat_id or not text:
             return False
+        name = str(payload.get("name") or "")[:40]
         if not self._authorized(chat_id, text):
-            log.warning("Comando via ponte ignorato da chat non autorizzata %s", chat_id)
+            if _is_start(text):
+                self._deliver(chat_id, self._signup(chat_id, text, name))
+            else:
+                log.warning("Comando via ponte ignorato da chat non autorizzata %s", chat_id)
             return False
-        if payload.get("name"):
-            self.db.set_user_name(chat_id, str(payload["name"])[:40])
+        if name:
+            self.db.set_user_name(chat_id, name)
         reply = self.handler.handle(text, chat_id)
         self._deliver(chat_id, reply)
         return reply.run_search
+
+    def _signup(self, chat_id: str, text: str, name: str) -> Reply:
+        """Sconosciuto con /start (senza codice valido): lista d'attesa. `/start canale` dice da dove arriva."""
+        parts = text.strip().split()
+        source = parts[1][:20] if len(parts) > 1 else ""
+        if name:
+            self.db.set_user_name(chat_id, name)
+        return self.handler.waitlist_signup(chat_id, name, source)
 
     def _authorized(self, chat_id: str, text: str) -> bool:
         """Proprietario (dall'ambiente o dal primo /start) e persone invitate (`/start CODICE` entro 48 ore)."""

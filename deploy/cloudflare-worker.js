@@ -78,6 +78,13 @@ function timerReason(st, nowSec) {
   if (!st) return "stato non disponibile";
   const s = st.settings || {};
   if ((st.watches || []).some((w) => Number(w.until) > nowSec)) return "inseguimento attivo";
+  const ch = st.channel || {};
+  if (ch.set) { // canale degli affari: il post del giorno è dovuto
+    const local = new Date(nowSec * 1000);
+    const hour = Number(new Intl.DateTimeFormat("it-IT", { hour: "numeric", hour12: false, timeZone: "Europe/Rome" }).format(local));
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Rome" }).format(local); // YYYY-MM-DD
+    if (hour >= Number(ch.hour || 19) && ch.last !== today) return "post del canale dovuto";
+  }
   const interval = Number(s.interval_minutes || 20) * 60;
   if (nowSec - Number(st.last_search_ts || 0) >= interval - 30) return "ricerca completa dovuta";
   if (Number(st.queued || 0) > 0 && !s.paused) {
@@ -196,7 +203,7 @@ export default {
         const user = await verifyInitData(env, body.initData);
         if (!user) return Response.json({ ok: false, error: "non autenticato" }, { status: 401 });
         const ids = await allowedChatIds(env);
-        if (!ids.has(String(user.id))) return Response.json({ ok: false, error: "non sei tra le persone collegate al bot (serve un /invita)" }, { status: 403 });
+        if (!ids.has(String(user.id))) return Response.json({ ok: false, error: "non sei ancora tra le persone collegate al bot: scrivi /start al bot per metterti in lista d'attesa" }, { status: 403 });
         file = `state-${user.id}.json`;
       }
       const r = await fetch(STATE_URL(env).replace("state.json", file) + "?t=" + Date.now(), { cf: { cacheTtl: 0 } });
@@ -213,7 +220,7 @@ export default {
       const user = await verifyInitData(env, body.initData);
       if (!user) return Response.json({ ok: false, error: "non autenticato" }, { status: 401 });
       const ids = await allowedChatIds(env);
-      if (!ids.has(String(user.id))) return Response.json({ ok: false, error: "non sei tra le persone collegate al bot (serve un /invita)" }, { status: 403 });
+      if (!ids.has(String(user.id))) return Response.json({ ok: false, error: "non sei ancora tra le persone collegate al bot: scrivi /start al bot per metterti in lista d'attesa" }, { status: 403 });
       const text = String(body.text || "").trim().slice(0, 4000);
       if (!text.startsWith("/")) return Response.json({ ok: false, error: "comando non valido" }, { status: 400 });
       const res = await sendCommand(env, user.id, text, user.first_name || user.username || "");
@@ -275,10 +282,16 @@ export default {
     if (env.TELEGRAM_CHAT_ID && chatId !== String(env.TELEGRAM_CHAT_ID)) return new Response("ok");
 
     const frm = (update.callback_query ? update.callback_query.from : msg.from) || {};
+    const known = (await allowedChatIds(env)).has(chatId);
+    const isStart = /^\/start(@\w+)?(\s|$)/i.test(text.trim());
+    if (!known && !isStart) { // sconosciuto: solo /start va al bot (lista d'attesa), il resto si ferma qui
+      await telegram(env, "sendMessage", { chat_id: chatId, text: "👋 Pokébot è su invito. Scrivi /start per metterti in lista d'attesa: ti avviso io appena l'accesso viene attivato." });
+      return new Response("ok");
+    }
     const gh = await sendCommand(env, chatId, text, frm.first_name || frm.username || "");
 
     const ack = gh.status === 204
-      ? "⏳ Ricevuto, avvio il bot: risposta tra circa un minuto."
+      ? (known ? "⏳ Ricevuto, avvio il bot: risposta tra circa un minuto." : "👋 Benvenuto! Un momento, ti registro: conferma tra circa un minuto.")
       : `⚠️ GitHub ha risposto ${gh.status}: controlla GITHUB_TOKEN nel Worker.`;
     await telegram(env, "sendMessage", { chat_id: chatId, text: ack });
     return new Response("ok");

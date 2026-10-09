@@ -143,6 +143,9 @@ def build_summary(index: CardIndex, db: Database) -> dict:
         "watches": any_watch,
         "settings": {k: db.get_settings().get(k) for k in ("interval_minutes", "paused", "quiet_hours")},
         "per_user": True,
+        "channel": {"set": bool(db.get_kv("deals_channel")), "hour": int(db.get_kv("deals_channel_hour", 19) or 19),
+                    "last": db.get_kv("deals_channel_last") or ""},
+        "waitlist": len(db.waitlist()),
     }
 
 
