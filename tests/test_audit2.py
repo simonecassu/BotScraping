@@ -210,3 +210,15 @@ def test_reports_one_a_day_multiline_and_owner_list(index, monkeypatch):
     assert mine["sent_today"] and "all" not in mine and owner["all"][0]["name"] == "Anna <b>"
     tomorrow = time.time() + 86400
     assert not reports.sent_today(db, "2", tomorrow)
+
+
+def test_copies_set_exact_number_silently(index):
+    db = make_db()
+    h = CommandHandler(index, db)
+    r = h.handle("/doppioni imposta me55:131 3")
+    assert r.text == "" and db.copies("me") == {"me55-131": 3}
+    h.handle("/doppioni imposta me55:131 0")
+    assert db.copies("me") == {}
+    assert "Usa" in h.handle("/doppioni imposta me55:131").text
+    both = h.handle("/doppioni imposta me55:131 2\n/mancanti")  # in un messaggio con altro: nessuna riga vuota
+    assert not both.text.startswith("\n") and db.copies("me") == {"me55-131": 2}

@@ -336,7 +336,7 @@ class CommandHandler:
         if len(lines) <= 1:
             return self._safe_one(lines[0] if lines else "", chat_id)
         replies = [self._safe_one(ln, chat_id) for ln in lines]
-        return Reply("\n\n".join(r.text for r in replies), run_search=any(r.run_search for r in replies),
+        return Reply("\n\n".join(r.text for r in replies if r.text), run_search=any(r.run_search for r in replies),
                      buttons=next((r.buttons for r in reversed(replies) if r.buttons), None),
                      document=next((r.document for r in reversed(replies) if r.document), None),
                      sends=[x for r in replies for x in (r.sends or [])] or None)
@@ -1431,6 +1431,14 @@ class CommandHandler:
         if verb.lower() in ("azzera", "reset"):
             self.db.set_kv(f"copies:{self.chat}", {})
             return Reply("🔁 Doppioni azzerati.")
+        if verb.lower() in ("imposta", "="):  # /doppioni imposta 131 2 – quante copie in più (dalla Mini App, + e −)
+            *what, n = rest.split() or [""]
+            cards, unknown = self.resolve(" ".join(what))
+            if not n.isdigit() or not cards or unknown:
+                return Reply("Usa <code>/doppioni imposta 131 2</code>: la carta e quante copie in più ne hai.")
+            for c in cards:
+                self.db.set_copies(c.id, min(int(n), 99), self.chat)
+            return Reply("")  # dalla Mini App, un tocco alla volta su + e −: nessun messaggio in chat per ogni tocco
         remove = verb.lower() in ("togli", "rimuovi", "meno", "-")
         cards, unknown = self.resolve(rest if remove else a)
         if not cards:
@@ -1794,7 +1802,8 @@ class TelegramCommands:
 
     def _deliver(self, chat_id: str, reply: Reply) -> None:
         try:
-            self.client.send(chat_id, reply.text, reply.buttons)
+            if reply.text.strip():  # risposta vuota: comando silenzioso (es. i + e − dei doppioni nella Mini App)
+                self.client.send(chat_id, reply.text, reply.buttons)
             if reply.document:
                 self.client.send_document(chat_id, reply.document[0], reply.document[1])
             for other, text, buttons in (reply.sends or []):
