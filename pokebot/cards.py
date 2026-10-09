@@ -113,7 +113,7 @@ class CardIndex:
         base = normalize(name)
         variants = {base}
         # "Rayquaza-EX" -> "rayquaza ex" già gestito da normalize; aggiungi forme senza spazio
-        variants.add(base.replace(" ex", "ex") if base.endswith(" ex") else base)
+        variants.add(base[:-3] + "ex" if base.endswith(" ex") else base)
         if "'s " in base:  # "erika's jigglypuff" -> "jigglypuff di erika"
             owner, _, rest = base.partition("'s ")
             variants.add(f"{rest} di {owner}")

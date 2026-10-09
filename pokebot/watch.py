@@ -11,7 +11,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from . import config
-from .cards import CardIndex, Card
+from .cards import CardIndex
 from .db import Database
 
 log = logging.getLogger(__name__)
@@ -47,13 +47,13 @@ def parse_watch_args(args: str) -> tuple[str, int, int]:
     i = 0
     while i < len(tokens):
         t = tokens[i].lower()
-        if t == "ogni" and i + 1 < len(tokens):
-            nxt = tokens[i + 1]
+        if t == "ogni":
+            nxt = tokens[i + 1] if i + 1 < len(tokens) else ""
             d = parse_duration(nxt) or (int(nxt) * 60 if nxt.isdigit() else None)
             if d:
                 every = d
-                i += 2
-                continue
+            i += 2 if d is not None or nxt.isdigit() else 1  # "ogni" non è mai una carta
+            continue
         d = parse_duration(t)
         if d is not None:
             duration = d
@@ -92,7 +92,7 @@ def resolve_card(index: CardIndex, db: Database, card_id: str):
     card = next((c for c in cs.cards if c.id == card_id), None)
     if not card:
         return None, index
-    return card, CardIndex(list(index.sets) + [cs])
+    return card, CardIndex(list(index.sets) + [cs], index.aliases)
 
 
 def code_for(index: CardIndex, card) -> str:
@@ -100,7 +100,7 @@ def code_for(index: CardIndex, card) -> str:
     return index.code_of.get(card.id) or f"{card.set_id}:{card.number}"
 
 
-# ---- stato (kv "watches": {card_id: {...}}) -------------------------------------
+# ---- stato (kv "watches:<chat>": {card_id: {...}}) ---------------------------------
 def _chat(db: Database, chat_id: str) -> str:
     return chat_id or db.owner_chat_id() or "me"
 
@@ -157,6 +157,15 @@ def record_found(db: Database, card_id: str, listings: list, chat_id: str = "") 
     db.set_kv(f"watch_found:{chat_id}", log_[-MAX_FOUND_LOG:])
 
 
+def sent_keys(db: Database, chat_id: str) -> set[str]:
+    """Annunci che gli inseguimenti hanno già mandato a quella persona (la ricerca completa non li rimanda)."""
+    keys = {f.get("key") for f in found_log(db, chat_id)}
+    for w in list_watches(db, chat_id).values():
+        keys.update(w.get("sent") or [])
+    keys.discard(None)
+    return keys
+
+
 def found_log(db: Database, chat_id: str = "") -> list[dict]:
     log_ = db.get_kv(f"watch_found:{_chat(db, chat_id)}", []) or []
     return log_ if isinstance(log_, list) else []
@@ -183,12 +192,14 @@ def describe(index: CardIndex, db: Database, chat_id: str = "") -> str:
 def run_watches(index: CardIndex, db: Database, notifier=None, scrapers: dict | None = None) -> list[str]:
     """Esegue gli inseguimenti dovuti di ogni persona, con le sue impostazioni; notifica solo lei."""
     from .notifier import TelegramNotifier
+    from .search import build_scrapers
     out: list[str] = []
     for chat, watches in all_watches(db):
         if not watches:
             continue
-        ntf = notifier or TelegramNotifier(chat_ids=[chat] if chat != "me" else db.chat_ids())
-        out += _run_for(index, db, chat, watches, ntf, scrapers)
+        if scrapers is None:  # una volta per giro, condivisi da tutti gli inseguimenti
+            scrapers = build_scrapers(db.get_settings())
+        out += _run_for(index, db, chat, watches, notifier or TelegramNotifier(chat_ids=[chat]), scrapers)
     return out
 
 
@@ -203,6 +214,9 @@ def _run_for(index: CardIndex, db: Database, chat: str, watches: dict, notifier,
     now = time.time()
     log_lines: list[str] = []
     changed = False
+    first_seen = {}
+    for r in db.list_found():
+        first_seen[r["listing_key"]] = min(float(r["created_at"]), first_seen.get(r["listing_key"], float("inf")))
     for cid, w in list(watches.items()):
         card, idx = resolve_card(index, db, cid)
         if not card:
@@ -220,9 +234,12 @@ def _run_for(index: CardIndex, db: Database, chat: str, watches: dict, notifier,
         every = float(w["every"]) if plans.is_full(db, chat) else max(float(w["every"]), plans.LIGHT_WATCH_EVERY_S)
         if now - float(w.get("last", 0)) < every - 30:
             continue
-        items, errors = search_card(idx, db, card, settings, scrapers, limit=20, only_new=True)
+        # nuovi per questa persona: mai mandati da questo inseguimento e non già visti dal bot prima che partisse
+        older = {k for k, ts in first_seen.items() if ts < float(w["started"])}
+        items, errors = search_card(idx, db, card, settings, scrapers, limit=20, exclude=older | set(w.get("sent") or []))
         w["last"] = now
         w["checks"] = int(w.get("checks", 0)) + 1
+        w["sent"] = (list(w.get("sent") or []) + [lst.key for lst, _ in items])[-300:]
         changed = True
         if items:
             sent = notifier.notify_many(items, max_per_card=int(settings.get("max_per_card", 5) or 5),

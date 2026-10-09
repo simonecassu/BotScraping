@@ -16,7 +16,7 @@ DB_PATH = Path(os.getenv("POKEBOT_DB_PATH", DATA_DIR / "pokebot.db"))
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
-# eBay: se presenti usa l'API ufficiale Browse, altrimenti scraping HTML.
+# eBay: API ufficiale Browse (senza credenziali eBay non viene cercato).
 EBAY_CLIENT_ID = os.getenv("EBAY_CLIENT_ID", "").strip()
 EBAY_CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET", "").strip()
 

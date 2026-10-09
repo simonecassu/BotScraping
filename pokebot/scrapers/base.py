@@ -49,8 +49,11 @@ def parse_price(text: str | None) -> float | None:
     if not m:
         return None
     raw = m.group(1)
-    if "," in raw and "." in raw:
-        raw = raw.replace(".", "").replace(",", ".")
+    if "," in raw and "." in raw:  # il separatore più a destra è quello dei decimali: 1.250,00 e 1,250.00
+        dec, thousands = (",", ".") if raw.rfind(",") > raw.rfind(".") else (".", ",")
+        raw = raw.replace(thousands, "").replace(dec, ".")
+    elif raw.count(",") > 1:
+        raw = raw.replace(",", "")
     elif "," in raw:
         raw = raw.replace(",", ".")
     elif raw.count(".") > 1 or (raw.count(".") == 1 and len(raw.split(".")[1]) == 3):

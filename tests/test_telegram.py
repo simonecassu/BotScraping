@@ -386,9 +386,9 @@ def test_invite_adds_second_person_and_notifier_sends_to_all(index, monkeypatch)
     assert "non si può" in h.handle("/espelli 7", "7").text
 
     db.add_chat_id("8")
-    n = TelegramNotifier.from_db(db)
+    n = TelegramNotifier(chat_ids=db.chat_ids())
     n.token = "t"
-    assert n.chat_ids == ["7", "8"] and n.chat_id == "7"
+    assert n.chat_ids == ["7", "8"]
     posted = []
 
     class R:

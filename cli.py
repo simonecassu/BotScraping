@@ -133,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Stato scritto in {args.path}")
         return 0
     if args.cmd == "test-telegram":
-        ok = TelegramNotifier().test_message()
+        ok = TelegramNotifier(chat_ids=db.chat_ids()[:1] or None).test_message()
         print("Inviato." if ok else "Invio fallito: controlla TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID.")
         return 0 if ok else 1
     if args.cmd == "mancanti":

@@ -23,7 +23,8 @@ _EXCLUDE_RE = [(re.compile(p), why) for p, why in EXCLUDE_PATTERNS]
 
 # "scambio" va bene solo se si vende anche.
 _TRADE_RE = re.compile(r"\b(scambio|scambi|scambiare|trade|swap)\b")
-_SELL_RE = re.compile(r"\b(vendo|vendita|vendesi|in vendita|prezzo|€|euro|eur)\b")
+_SELL_RE = re.compile(r"\b(vendo|vendita|vendesi|in vendita|prezzo|euro|eur)\b")
+_EURO_AMOUNT_RE = re.compile(r"\d\s*€|€\s*\d")  # sul testo originale: normalize toglie il simbolo
 
 # parole che indicano un lotto vero e proprio
 _LOT_WORDS_RE = re.compile(r"\b(lotto|lotti|lot|bundle|collezione|stock|blocco)\b")
@@ -34,8 +35,8 @@ _STATED_COUNT_RE = re.compile(r"\b(\d{1,3})\s+(carte|cards|pezzi|pz)\b|\b(carte|
 
 # Annunci in altre lingue (usato con l'impostazione lingua = "ita")
 _LANG_PATTERNS: list[tuple[str, str]] = [
-    (r"\b(fr|vf|francese|french|francais|française|francaise)\b|"
-     r"\b(cartes|neuve|neuf|etat|tres bon|jamais jouee|envoi|30 ans|\d+ ans|serie ?:|celebrations 30|lot de|pieces|carte pokemon)\b|"
+    (r"\b(fr|vf|francese|french|francais|francaise)\b|"
+     r"\b(cartes|neuve|neuf|etat|tres bon|jamais jouee|envoi|30 ans|\d+ ans|celebrations 30|lot de|pieces)\b|"
      r"\b(lokhlass|sulfura|artikodin|electhor|noadkoko|dracaufeu|ectoplasma|miaouss|nymphali|drattak|amphinobi|chochodile|"
      r"lugulabre|lougaroc|ekaiser|gromago|baggiguane|mentali|evoli|carapuce|salameche)\b", "francese"),
     (r"\b(eng|en|english|inglese|english version|usa)\b", "inglese"),
@@ -127,7 +128,7 @@ class Matcher:
         for rx, why in _EXCLUDE_RE:
             if rx.search(title_n) or (rx.search(text) and why in ("carta non originale", "codice / digitale")):
                 return MatchResult("excluded", False, why)
-        if _TRADE_RE.search(title_n) and not _SELL_RE.search(text):
+        if _TRADE_RE.search(title_n) and not (_SELL_RE.search(text) or _EURO_AMOUNT_RE.search(f"{title} {description}")):
             return MatchResult("excluded", False, "solo scambio")
 
         has_set_kw = bool(self._set_kw_re and self._set_kw_re.search(text))
@@ -145,10 +146,12 @@ class Matcher:
         # una sola carta riconosciuta con "x2" o "2 pezzi" = più copie della stessa carta, non un lotto.
         # Se c'è almeno una carta identificata con certezza, i nomi senza numero ("... Pikachu Nintendo")
         # sono quasi sempre rumore del titolo: non bastano da soli a fare un lotto.
+        # "collezione", "completa" e simili contano solo nel titolo: in descrizione sono quasi sempre frasi
+        # come "carta da collezione" o "spedizione con protezione completa"
         distinct = len(refs) if refs else len(ambiguous)
         is_lot = (
-            bool(_LOT_WORDS_RE.search(text))
-            or bool(_FULL_SET_RE.search(text))
+            bool(_LOT_WORDS_RE.search(title_n))
+            or bool(_FULL_SET_RE.search(title_n))
             or distinct >= 2
         )
         if is_lot:

@@ -144,10 +144,17 @@ def _today(now: float) -> str:
 
 
 # ---- riepilogo giornaliero della Light ---------------------------------------------
-def digest_due(db: Database, chat: str, now: float | None = None) -> bool:
+def digest_due(db: Database, chat: str, now: float | None = None, oldest: float | None = None) -> bool:
+    """Dalle 19, una volta al giorno. Se il riepilogo di ieri è saltato (ore silenziose sulle 19), parte al primo
+    momento utile: lo si capisce dall'annuncio più vecchio in coda (`oldest`), che sarebbe dovuto uscire ieri sera."""
     now = now or time.time()
     local = dt.datetime.fromtimestamp(now, ZoneInfo(config.TIMEZONE))
-    return local.hour >= DIGEST_HOUR and db.get_kv(f"digest_last:{chat}") != local.date().isoformat()
+    if db.get_kv(f"digest_last:{chat}") == local.date().isoformat():
+        return False
+    if local.hour >= DIGEST_HOUR:
+        return True
+    yesterday_digest = (local - dt.timedelta(days=1)).replace(hour=DIGEST_HOUR, minute=0, second=0, microsecond=0)
+    return oldest is not None and oldest < yesterday_digest.timestamp()
 
 
 def mark_digest(db: Database, chat: str, now: float | None = None) -> None:

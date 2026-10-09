@@ -1,6 +1,8 @@
 """Un ciclo di ricerca: interroga i marketplace, riconosce le carte, notifica."""
 from __future__ import annotations
 
+import dataclasses
+import html
 import logging
 import re
 import time
@@ -15,7 +17,7 @@ from . import cardmarket
 from . import plans
 from . import stats as pstats
 
-from .cards import CardIndex
+from .cards import CardIndex, normalize
 from .db import Database
 from .matcher import Matcher, MatchResult
 from .notifier import TelegramNotifier
@@ -69,6 +71,29 @@ def build_queries(index: CardIndex, wanted_ids: set[str], settings: dict, db: Da
     return out
 
 
+def _run_filters(db: Database) -> tuple[str, float, float]:
+    """Filtri del giro: i più larghi tra quelli delle persone collegate (lingua, soglia lotti, prezzo massimo).
+    Quelli di ognuno si riapplicano alla consegna, in `_for_person`."""
+    people = [db.settings_for(c) for c in db.chat_ids()] or [db.get_settings()]
+    language = "ita" if all(str(s.get("language", "ita") or "ita") == "ita" for s in people) else "tutte"
+    lot_ratio = min(float(s.get("lot_min_ratio", 0.5)) for s in people)
+    prices = [float(s.get("max_price", 0) or 0) for s in people]
+    max_price = 0.0 if any(p == 0 for p in prices) else max(prices)
+    return language, lot_ratio, max_price
+
+
+def build_scrapers(settings: dict) -> dict:
+    """Uno scraper per ogni fonte attiva."""
+    out = {}
+    for name in settings.get("sources", []):
+        cls = SCRAPERS.get(name)
+        if name == "ebay" and not (config.EBAY_CLIENT_ID and config.EBAY_CLIENT_SECRET):
+            continue  # senza credenziali eBay ogni query fallirebbe
+        if cls:
+            out[name] = cls(only_italy=bool(settings.get("only_italy", True)))
+    return out
+
+
 def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None = None,
                scrapers: dict | None = None, dry_run: bool = False) -> RunReport:
     report = RunReport(started_at=time.time())
@@ -86,21 +111,16 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
         return report
 
     matcher = Matcher(index, settings.get("set_keywords"))
-    lot_ratio = float(settings.get("lot_min_ratio", 0.5))
-    max_price = float(settings.get("max_price", 0) or 0)
-    only_italy = bool(settings.get("only_italy", True))
-    unverifiable = bool(settings.get("notify_unverifiable_lots", False))
-    max_per_card = int(settings.get("max_per_card", 5) or 5)
-    language = str(settings.get("language", "ita") or "ita")
     if notifier is None:
-        flush_all_queues(db, index.by_id)
-
+        language, lot_ratio, max_price = _run_filters(db)
+        if not dry_run:
+            flush_all_queues(db, index.by_id)
+    else:  # un destinatario esplicito (prove): valgono le impostazioni condivise
+        language = str(settings.get("language", "ita") or "ita")
+        lot_ratio = float(settings.get("lot_min_ratio", 0.5))
+        max_price = float(settings.get("max_price", 0) or 0)
     if scrapers is None:
-        scrapers = {}
-        for name in settings.get("sources", []):
-            cls = SCRAPERS.get(name)
-            if cls:
-                scrapers[name] = cls(only_italy=only_italy)
+        scrapers = build_scrapers(settings)
 
     queries = build_queries(index, wanted, settings, db)
     report.queries = len(queries)
@@ -123,16 +143,15 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
                     continue
                 seen_this_run.add(lst.key)
                 report.new_listings += 1
-                _handle_listing(lst, matcher, wanted, lot_ratio, max_price, unverifiable, db, report, pending, language)
+                _handle_listing(lst, matcher, wanted, lot_ratio, max_price, db, report, pending, language)
             if q.lower() in generic:
                 st = qstats.setdefault(q.lower(), {"new": 0, "matches": 0})
                 st["new"] += report.new_listings - new_before
                 st["matches"] += report.matches - match_before
+        if error and report.per_source.get(name):
+            report.errors[name] = "parziale: " + error  # qualche query è riuscita: errore non bloccante
     if qstats and not dry_run:
         record_query_stats(db, qstats)
-        if name in report.errors and report.per_source.get(name):
-            # qualche query è riuscita: l'errore è parziale, non bloccante
-            report.errors[name] = "parziale: " + report.errors[name]
 
     _notify_pending(pending, db, report, dry_run, notifier=notifier, settings=settings)
     report.finished_at = time.time()
@@ -193,8 +212,10 @@ def scrape_all(scrapers: dict, queries: list[str]) -> list[tuple[str, list[tuple
 
 
 def _handle_listing(lst: Listing, matcher: Matcher, wanted: set[str], lot_ratio: float, max_price: float,
-                    unverifiable: bool, db: Database, report: RunReport, pending: list, language: str = "tutte") -> None:
-    result = matcher.analyze(lst.title, lst.description, wanted, lot_ratio, unverifiable, lst.is_auction, language)
+                    db: Database, report: RunReport, pending: list, language: str = "tutte") -> None:
+    result = matcher.analyze(lst.title, lst.description, wanted, lot_ratio, False, lst.is_auction, language)
+    if language != "ita":  # qualcuno accetta ogni lingua: la lingua si annota e si filtra persona per persona
+        lst.extra["lang"] = matcher.detect_other_language(normalize(lst.title), normalize(f"{lst.title} . {lst.description}"))
     if result.kind == "single" and result.refs and lst.price and lst.price > 0:
         # prezzo di una carta riconosciuta con certezza, mancante o no: serve per il valore della collezione
         db.add_price_point(result.refs[0].card.id, lst.key, lst.source, lst.price, lst.seller)
@@ -230,17 +251,18 @@ def notifications_suppressed(settings: dict) -> bool:
     return False
 
 
-def _row_to_pair(row: dict, index_by_id: dict | None = None) -> tuple[Listing, MatchResult]:
-    """Ricostruisce annuncio e risultato da una riga della tabella found (per inviare la coda)."""
-    from .cards import Card  # noqa: F401 - solo per i type hint
+def _row_to_pair(row: dict, index_by_id: dict | None = None, mine: set[str] | None = None) -> tuple[Listing, MatchResult]:
+    """Ricostruisce annuncio e risultato da una riga della tabella found (per inviare la coda).
+    Con `mine`, solo le carte che mancano ancora a quella persona."""
     from .scrapers.base import parse_price
     lst = Listing(row["source"], row["listing_key"].split(":", 1)[-1], row["title"], row["url"],
-                  price=parse_price(row.get("price")), price_text=row.get("price") or "", location=row.get("location") or "")
+                  price=parse_price(row.get("price")), price_text=row.get("price") or "", location=row.get("location") or "",
+                  image=row.get("image") or "", seller=row.get("seller") or "")
     wanted = []
     possible = []
     for m in row["matched"]:
         card = (index_by_id or {}).get(m["id"])
-        if card is None:
+        if card is None or (mine is not None and card.id not in mine):
             continue
         (wanted if m.get("sure", True) else possible).append(card)
     res = MatchResult(row["kind"], True, "dalla coda", wanted=wanted, possible_wanted=possible,
@@ -248,23 +270,24 @@ def _row_to_pair(row: dict, index_by_id: dict | None = None) -> tuple[Listing, M
     return lst, res
 
 
-def flush_queued(db: Database, notifier: TelegramNotifier, settings: dict, index_by_id: dict | None = None,
-                 chat_id: str | None = None, header: str = "🌅 <b>Accumulati durante la pausa: {n} annunci</b>") -> int:
-    """Invia gli annunci accumulati (per una persona) durante la sua pausa o le sue ore notturne, raggruppati per carta."""
+def _mine(db: Database, chat: str) -> set[str]:
+    """Carte che mancano a quella persona nelle collezioni con la ricerca accesa."""
+    on = set(db.active_sets(chat))
+    return {cid for cid in db.wanted_for(chat) if cid.rsplit("-", 1)[0] in on}
+
+
+def flush_queued(db: Database, notifier: TelegramNotifier, settings: dict, index_by_id: dict,
+                 chat_id: str = "", header: str = "🌅 <b>Accumulati durante la pausa: {n} annunci</b>") -> int:
+    """Invia gli annunci accumulati da una persona (pausa, ore notturne o riepilogo della Light), raggruppati per carta.
+    Quelli di carte che nel frattempo ha trovato, o di collezioni spente, si scartano."""
     rows = db.queued_found(chat_id)
     if not rows:
         return 0
-    if index_by_id is None:
-        from .cards import load_sets
-        index_by_id = load_sets().by_id
+    mine = _mine(db, chat_id) if chat_id else None
     pairs = []
     ids = []
-    seen_ids: set[int] = set()
     for r in rows:
-        if r["id"] in seen_ids:
-            continue
-        seen_ids.add(r["id"])
-        lst, res = _row_to_pair(r, index_by_id)
+        lst, res = _row_to_pair(r, index_by_id, mine)
         if not (res.wanted or res.possible_wanted) and r["kind"] != "lot":
             db.mark_sent([r["id"]], False, chat_id)
             continue
@@ -284,12 +307,18 @@ def flush_queued(db: Database, notifier: TelegramNotifier, settings: dict, index
 def flush_all_queues(db: Database, index_by_id: dict | None = None) -> int:
     """Per ogni persona con annunci in coda e notifiche attive: invia con le sue impostazioni."""
     total = 0
+    members = set(db.chat_ids())
     for chat in db.queued_chats():
+        if chat not in members:  # scollegato: la sua coda non si manda più
+            db.mark_sent([r["id"] for r in db.queued_found(chat)], False, chat)
+            continue
         settings = db.settings_for(chat)
         if notifications_suppressed(settings):
             continue
         if not plans.is_full(db, chat):  # Light: una volta al giorno, alle 19
-            if not plans.digest_due(db, chat):
+            rows = db.queued_found(chat)
+            oldest = min((float(r["created_at"]) for r in rows), default=None)
+            if not plans.digest_due(db, chat, oldest=oldest):
                 continue
             n = flush_queued(db, TelegramNotifier(chat_ids=[chat]), settings, index_by_id, chat,
                              header="📬 <b>Il tuo riepilogo di oggi: {n} annunci</b>\n"
@@ -307,6 +336,9 @@ def _notify_pending(pending: list, db: Database, report: RunReport, dry_run: boo
     (pausa, notte, foto, quanti per carta, affari). Chi ha le notifiche sospese li trova in coda al risveglio."""
     if not pending:
         return
+    if dry_run:
+        log.info("Prova senza invio: %d annunci da consegnare", len(pending))
+        return
     found_ids: dict[str, int] = {}
     for lst, result in pending:
         found_ids[lst.key] = db.add_found(lst.key, lst.source, lst.title, lst.url,
@@ -323,15 +355,12 @@ def _notify_pending(pending: list, db: Database, report: RunReport, dry_run: boo
     pending_keys = set(found_ids)
     sent_any: set[str] = set()
     deal_keys: set[str] = set()
-    for i, (chat, ntf, st) in enumerate(recipients):
-        first = i == 0  # i contatori del giro si riferiscono alla prima persona (il proprietario)
-        if chat:  # solo gli annunci che riguardano le carte mancanti nei SUOI album con la ricerca accesa
+    from .watch import sent_keys
+    for chat, ntf, st in recipients:
+        if chat:  # gli annunci delle carte che mancano a LEI, con i SUOI filtri
             if plans.onboarding(db, chat):
                 continue  # sta ancora segnando le carte che ha: nessuna notifica, niente in coda
-            on = {plans._home_key(sid) for sid in db.active_sets(chat)}
-            mine = {cid for cid in db.wanted_for(chat) if plans._home_key(cid.rsplit("-", 1)[0]) in on}
-            pending = [(lst, res) for lst, res in all_pending
-                       if any(c.id in mine for c in (res.wanted + res.possible_wanted))]
+            pending = _for_person(all_pending, _mine(db, chat), st, sent_keys(db, chat))
         else:
             pending = all_pending
         if not pending:
@@ -339,16 +368,40 @@ def _notify_pending(pending: list, db: Database, report: RunReport, dry_run: boo
         light = bool(chat) and not plans.is_full(db, chat)
         if light or notifications_suppressed(st):  # Light: tutto nel riepilogo delle 19
             db.enqueue(chat, [found_ids[lst.key] for lst, _ in pending])
-            if first:
-                report.queued += len(pending)
-            log.info("Notifiche sospese per %s (pausa/notte): %d annunci in coda", chat or "destinatario", len(pending))
+            report.queued += len(pending)
+            log.info("In coda per %s (%s): %d annunci", chat or "destinatario", "Light" if light else "pausa/notte", len(pending))
             continue
-        delivered, deals = _deliver(pending, ntf, st, history, dry_run, report if first else None, pending_keys, cm)
+        delivered, deals = _deliver(pending, ntf, st, history, dry_run, report, pending_keys, cm)
         log.info("Consegna a %s: %d annunci, %d inviati", chat or "destinatario", len(pending), len(delivered))
         sent_any |= delivered
         deal_keys |= deals
     db.mark_notified([found_ids[k] for k in sent_any])
     db.mark_deal([found_ids[k] for k in deal_keys])
+
+
+def _for_person(pending: list, mine: set[str], st: dict, already: set[str]) -> list:
+    """Gli annunci del giro che interessano una persona: solo le carte che mancano a lei, con lingua, prezzo massimo
+    e soglia dei lotti suoi; esclusi quelli che le ha già mandato un inseguimento."""
+    ita = str(st.get("language", "ita") or "ita") == "ita"
+    max_price = float(st.get("max_price", 0) or 0)
+    min_ratio = float(st.get("lot_min_ratio", 0.5))
+    out = []
+    for lst, res in pending:
+        if lst.key in already or (ita and lst.extra.get("lang")):
+            continue
+        if max_price and lst.price is not None and lst.price > max_price:
+            continue
+        wanted = [c for c in res.wanted if c.id in mine]
+        possible = [c for c in res.possible_wanted if c.id in mine]
+        if res.kind == "lot":
+            count = len(wanted) + sum(1 for a in res.ambiguous if any(c.id in mine for c in a.candidates))
+            ratio = count / res.total_cards if res.total_cards else 0.0
+            if not count or ratio < min_ratio:
+                continue
+            out.append((lst, dataclasses.replace(res, wanted=wanted, possible_wanted=possible, wanted_count=count, ratio=ratio)))
+        elif wanted or possible:
+            out.append((lst, dataclasses.replace(res, wanted=wanted, possible_wanted=possible)))
+    return out
 
 
 def _deliver(pending: list, notifier: TelegramNotifier, settings: dict, history: list[dict], dry_run: bool,
@@ -382,8 +435,8 @@ def _deliver(pending: list, notifier: TelegramNotifier, settings: dict, history:
             log.info("Affari trovati: %d, inviati solo i %d migliori", len(candidates), max_deals)
         for _, lst, result, median, ref_label, extra in candidates[:max_deals]:
             ok = False if dry_run else notifier.notify_deal(lst, result, median, images, ref_label, extra)
-            deals.add(lst.key)
-            if ok:
+            if ok:  # se l'avviso non parte, l'annuncio va almeno nel messaggio normale
+                deals.add(lst.key)
                 sent.add(lst.key)
             if report:
                 report.deals += int(ok)
@@ -401,7 +454,7 @@ def _deliver(pending: list, notifier: TelegramNotifier, settings: dict, history:
             skipped_groups = groups[max_msgs:]
             n_over = sum(1 for lst, _ in rest if lst.key not in keep_keys)
             rest = [(lst, res) for lst, res in rest if lst.key in keep_keys]
-            names = ", ".join(t.replace("🃏 ", "").replace("📦 ", "").replace("❔ ", "") for _, t, _ in skipped_groups[:12])
+            names = html.escape(", ".join(t.replace("🃏 ", "").replace("📦 ", "").replace("❔ ", "") for _, t, _ in skipped_groups[:12]))
             overflow_note = (f"⚠️ Giro insolitamente ricco: {len(groups)} carte con novità, inviate le prime {max_msgs}. "
                              f"Le altre ({n_over} annunci) sono nello storico: {names}" + (" …" if len(skipped_groups) > 12 else "") +
                              "\nUsa /storico o /cerca &lt;carta&gt;.")
@@ -448,11 +501,11 @@ def card_queries(card, index: CardIndex | None = None) -> list[str]:
 
 
 def search_card(index: CardIndex, db: Database, card, settings: dict | None = None, scrapers: dict | None = None,
-                limit: int = 10, only_new: bool = False) -> tuple[list[tuple[Listing, "MatchResult"]], dict[str, str]]:
-    """Ricerca mirata di una carta su tutte le fonti: restituisce gli annunci in vendita adesso, dal più economico.
+                limit: int = 10, exclude: set[str] | None = None) -> tuple[list[tuple[Listing, "MatchResult"]], dict[str, str]]:
+    """Ricerca mirata di una carta su tutte le fonti: gli annunci in vendita adesso, dal più economico.
 
-    Include anche annunci già visti (con `only_new=True` restituisce solo quelli mai visti né registrati).
-    Gli annunci vengono registrati nello storico e segnati come visti.
+    `exclude`: chiavi da saltare (per un inseguimento, quelle che ha già mandato). Gli annunci nuovi finiscono nello
+    storico, ma NON vengono segnati come visti: la ricerca completa li consegna comunque a chi altro li cerca.
     """
     settings = settings or db.get_settings()
     matcher = Matcher(index, settings.get("set_keywords"))
@@ -460,11 +513,7 @@ def search_card(index: CardIndex, db: Database, card, settings: dict | None = No
     lot_ratio = float(settings.get("lot_min_ratio", 0.5))
     max_price = float(settings.get("max_price", 0) or 0)
     if scrapers is None:
-        scrapers = {}
-        for name in settings.get("sources", []):
-            cls = SCRAPERS.get(name)
-            if cls:
-                scrapers[name] = cls(only_italy=bool(settings.get("only_italy", True)))
+        scrapers = build_scrapers(settings)
     found: dict[str, tuple[Listing, MatchResult]] = {}
     errors: dict[str, str] = {}
     for name, listings_by_query, error in scrape_all(scrapers, card_queries(card, index)):
@@ -480,13 +529,12 @@ def search_card(index: CardIndex, db: Database, card, settings: dict | None = No
                     continue
                 found[lst.key] = (lst, res)
     items = sorted(found.values(), key=lambda pair: (pair[0].price if pair[0].price is not None else float("inf")))
+    if exclude:
+        items = [pair for pair in items if pair[0].key not in exclude]
     existing = {r["listing_key"] for r in db.list_found()}
-    if only_new:
-        items = [pair for pair in items if pair[0].key not in existing and not db.is_seen(pair[0].key)]
     for lst, res in items[:limit]:
         if lst.key not in existing:
             db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),
                          lst.location, res.kind, res.matched_payload or [{"id": card.id, "label": card.label, "sure": True}],
                          res.ratio, True, image=lst.image, seller=lst.seller)
-        db.mark_seen(lst.key, notified=True)
     return items[:limit], errors

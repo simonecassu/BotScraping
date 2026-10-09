@@ -54,8 +54,8 @@ class WallapopScraper(BaseScraper):
                 data = resp.json()
             except ValueError as exc:
                 raise ScraperError("Wallapop: risposta non JSON") from exc
-            except ScraperError:
-                raise ScraperError(f"Wallapop: {first_exc}") from first_exc
+            except ScraperError as second_exc:
+                raise ScraperError(f"{first_exc} · seconda via: {second_exc}") from first_exc
         items = self.parse(data)
         if self.only_italy:
             items = [i for i in items if (i.extra.get("country") or "IT") == "IT"]

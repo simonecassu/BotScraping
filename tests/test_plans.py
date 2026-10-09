@@ -175,15 +175,10 @@ def test_onboarding_welcome_and_no_notifications_until_ready(index, monkeypatch)
     delivered = []
     monkeypatch.setattr(search, "_deliver", lambda pending, ntf, st, *a, **k: (delivered.append(len(pending)) or (set(), set())))
 
-    class Res:
-        kind = "single"
-        wanted = [index.by_id["me55-131"]]
-        possible_wanted = []
-        matched_payload = [{"id": "me55-131", "sure": True}]
-        ratio = None
-
-    class Lst:
-        key, source, title, url, price, price_text, location, image, seller = "k", "vinted", "Lapras", "u", 5.0, "5 €", "", "", ""
+    from pokebot.matcher import MatchResult
+    from pokebot.scrapers.base import Listing
+    Res = MatchResult("single", True, "x", wanted=[index.by_id["me55-131"]])
+    Lst = Listing("vinted", "k", "Lapras", "u", price=5.0, price_text="5 €")
 
     monkeypatch.setattr(search, "TelegramNotifier", lambda chat_ids=None: None)
     rep = search.RunReport(started_at=0)
@@ -192,7 +187,7 @@ def test_onboarding_welcome_and_no_notifications_until_ready(index, monkeypatch)
     assert delivered == [] and db.queued_found("2") == []
     r = tc.handler.handle("/riprendi", "2")
     assert "Notifiche accese" in r.text and r.run_search and not plans.onboarding(db, "2")
-    Lst.key = "k2"
+    Lst = Listing("vinted", "k2", "Lapras", "u", price=5.0, price_text="5 €")
     search._notify_pending([(Lst, Res)], db, rep, False)
     assert delivered == [1]
 

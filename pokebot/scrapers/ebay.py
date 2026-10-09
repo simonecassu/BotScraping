@@ -1,14 +1,12 @@
-"""eBay.it: API Browse ufficiale se configurata, altrimenti scraping della pagina di ricerca.
+"""eBay.it tramite l'API Browse ufficiale (servono EBAY_CLIENT_ID e EBAY_CLIENT_SECRET).
 
-In entrambi i casi vengono richiesti solo annunci "Compralo Subito" (niente aste),
-così la carta è acquistabile immediatamente.
+Solo annunci "Compralo Subito" (niente aste): la carta è acquistabile immediatamente.
 """
 from __future__ import annotations
 
 import base64
 import time
 from typing import Any
-from urllib.parse import urlencode
 
 import requests
 
@@ -101,5 +99,3 @@ class EbayScraper(BaseScraper):
                 extra={"condition": it.get("condition", "")},
             ))
         return out
-
-    # ---- scraping HTML ----------------------------------------------------

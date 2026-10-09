@@ -1,4 +1,4 @@
-"""Vinted.it tramite l'API del catalogo (richiede i cookie di sessione anonima)."""
+"""Vinted.it: pagina di ricerca del catalogo (con i cookie di una sessione anonima), letta dall'HTML."""
 from __future__ import annotations
 
 import re
@@ -78,8 +78,10 @@ class VintedScraper(BaseScraper):
         return items[:limit]
 
     # ------------------------------------------------------------------
-    _PRICE_IN_TITLE = re.compile(r"(?:prezzo|price)\s*:\s*(€?\s*\d{1,5}(?:[.,]\d{1,2})?\s*€?)", re.IGNORECASE)
-    _ANY_PRICE = re.compile(r"\d{1,5}(?:[.,]\d{1,2})?\s*€|€\s*\d{1,5}(?:[.,]\d{1,2})?")
+    # importi anche con le migliaia: 15,00 € · 1.250,00 € · 1,250.00 €
+    _AMOUNT = r"(?:\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?|\d{1,5}(?:[.,]\d{1,2})?)"
+    _PRICE_IN_TITLE = re.compile(r"(?:prezzo|price)\s*:\s*(€?\s*" + _AMOUNT + r"\s*€?)", re.IGNORECASE)
+    _ANY_PRICE = re.compile(_AMOUNT + r"\s*€|€\s*" + _AMOUNT)
     # il "title" dei link Vinted è "Titolo, Brand: X, Condizioni: Y, 15.00 €, 16.45 €" (il secondo prezzo include la protezione acquisti)
     _TITLE_META = re.compile(r",\s*(brand|marca|condizioni|condizione|condition|taglia|size|prezzo|price)\s*:", re.IGNORECASE)
 
@@ -126,5 +128,3 @@ class VintedScraper(BaseScraper):
                 extra={"via": "html"},
             ))
         return out
-
-    # ------------------------------------------------------------------

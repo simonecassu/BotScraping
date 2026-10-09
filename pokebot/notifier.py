@@ -16,22 +16,17 @@ SOURCE_LABELS = {"wallapop": "Wallapop", "vinted": "Vinted", "ebay": "eBay.it"}
 
 
 class TelegramNotifier:
+    """Manda messaggi ai destinatari indicati (di solito una persona sola).
+    Senza destinatari usa la chat del proprietario indicata in TELEGRAM_CHAT_ID."""
+
     def __init__(self, token: str | None = None, chat_id: str | None = None, chat_ids: list[str] | None = None):
         self.token = (token or config.TELEGRAM_BOT_TOKEN).strip()
         ids = [str(c).strip() for c in (chat_ids or []) if str(c).strip()]
-        first = (chat_id or config.TELEGRAM_CHAT_ID).strip()
-        if first and first not in ids:
-            ids.insert(0, first)
+        if chat_id and str(chat_id).strip() not in ids:
+            ids.insert(0, str(chat_id).strip())
+        if not ids and chat_ids is None and config.TELEGRAM_CHAT_ID:
+            ids = [config.TELEGRAM_CHAT_ID]
         self.chat_ids = ids
-
-    @classmethod
-    def from_db(cls, db) -> "TelegramNotifier":
-        """Token dall'ambiente; destinatari: proprietario (dall'ambiente o dal primo /start) più le persone invitate."""
-        return cls(chat_ids=db.chat_ids())
-
-    @property
-    def chat_id(self) -> str:
-        return self.chat_ids[0] if self.chat_ids else ""
 
     @property
     def configured(self) -> bool:
@@ -39,7 +34,7 @@ class TelegramNotifier:
 
     def _post(self, method: str, payload: dict, files: dict | None = None, timeout_mult: float = 1.0,
               log_level: int = logging.ERROR) -> bool:
-        """Invia lo stesso messaggio a ogni persona collegata; True se almeno una consegna è riuscita."""
+        """Invia lo stesso messaggio a ogni destinatario; True se almeno una consegna è riuscita."""
         url = f"https://api.telegram.org/bot{self.token}/{method}"
         ok_any = False
         for cid in self.chat_ids:
@@ -63,9 +58,6 @@ class TelegramNotifier:
             log.warning("Telegram non configurato: imposta TELEGRAM_BOT_TOKEN e scrivi /start al bot")
             return False
         return self._post("sendMessage", {"text": text, "parse_mode": "HTML", "disable_web_page_preview": disable_preview})
-
-    def notify_listing(self, listing: Listing, result: MatchResult) -> bool:
-        return self.send(format_listing(listing, result))
 
     def send_photo(self, photo_url: str, caption: str) -> bool:
         """Foto con didascalia (max 1024 caratteri); False se Telegram rifiuta (si ripiega sul testo)."""
@@ -150,9 +142,11 @@ class TelegramNotifier:
             self._collage_rows = [{"image": lst.image, "price": lst.price_text or (f"{lst.price:.2f} €" if lst.price is not None else ""),
                                    "source": lst.source, "title": lst.title, "location": lst.location,
                                    "lot": res.kind == "lot"} for lst, res in chosen]
-            ok = any(listing_photos) and self.send_group_with_photos(text, listing_photos, image, images)
+            # send_group_with_photos ripiega già sull'immagine della carta: niente secondo tentativo (doppioni)
+            ok = (self.send_group_with_photos(text, listing_photos, image, images) if any(listing_photos)
+                  else self.send_with_image(text, image, images))
             self._collage_rows = None
-            if ok or self.send_with_image(text, image, images):
+            if ok:
                 sent_keys.update(lst.key for lst, _ in chosen)
         return [lst.key in sent_keys for lst, _ in items]
 
@@ -211,52 +205,4 @@ def format_group(title: str, chosen: list[tuple[Listing, MatchResult]], total: i
             extra = f"\n    ✅ {esc(cards)} ({res.wanted_count}/{res.total_cards})"
         loc = f" · {esc(lst.location)}" if lst.location else ""
         lines.append(f'{i}. <b>{price}</b> · {esc(src)}{loc}\n    <a href="{esc(lst.url, quote=True)}">{esc(lst.title[:70])}</a>{extra}')
-    return "\n".join(lines)
-
-
-def format_listing_compact(listing: Listing, result: MatchResult) -> str:
-    esc = html.escape
-    src = SOURCE_LABELS.get(listing.source, listing.source)
-    kind = "📦" if result.kind == "lot" else "🃏"
-    cards = ", ".join(c.label for c in (result.wanted or result.possible_wanted)[:3])
-    if len(result.wanted or result.possible_wanted) > 3:
-        cards += ", …"
-    if result.kind == "lot" and result.total_cards:
-        cards += f" ({result.wanted_count}/{result.total_cards})"
-    price = esc(listing.price_text or (f"{listing.price:.2f} €" if listing.price is not None else "prezzo n.d."))
-    verify = " ⚠️" if (result.possible_wanted and not result.wanted) else ""
-    return (f'{kind} <a href="{esc(listing.url, quote=True)}">{esc(listing.title[:70])}</a>\n'
-            f'   💶 {price} · {esc(src)}{verify}\n   ✅ {esc(cards)}')
-
-
-def format_listing(listing: Listing, result: MatchResult) -> str:
-    esc = html.escape
-    src = SOURCE_LABELS.get(listing.source, listing.source)
-    if result.kind == "lot":
-        head = f"📦 <b>LOTTO</b> · {result.wanted_count}/{result.total_cards} carte mancanti"
-        if result.ratio is not None:
-            head += f" ({result.ratio:.0%})"
-    else:
-        head = "🃏 <b>CARTA SINGOLA</b>"
-        if result.possible_wanted and not result.wanted:
-            head += " · ⚠️ numero non indicato, da verificare"
-    lines = [head, f"<b>{esc(listing.title)}</b>"]
-    meta = []
-    if listing.price_text or listing.price is not None:
-        meta.append(f"💶 {esc(listing.price_text or f'{listing.price:.2f} €')}")
-    meta.append(f"🛒 {esc(src)}")
-    if listing.location:
-        meta.append(f"📍 {esc(listing.location)}")
-    lines.append(" · ".join(meta))
-    cards = [c.label for c in result.wanted]
-    poss = [c.label for c in result.possible_wanted]
-    if cards:
-        shown = cards[:12]
-        more = f" (+{len(cards) - len(shown)} altre)" if len(cards) > len(shown) else ""
-        lines.append("✅ " + esc(", ".join(shown)) + more)
-    if poss:
-        shown = poss[:8]
-        more = f" (+{len(poss) - len(shown)})" if len(poss) > len(shown) else ""
-        lines.append("❔ Potrebbe essere: " + esc(", ".join(shown)) + more)
-    lines.append(f'🔗 <a href="{esc(listing.url, quote=True)}">Apri annuncio</a>')
     return "\n".join(lines)
