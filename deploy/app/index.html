@@ -428,12 +428,12 @@ async function loadCatalog() {
   } catch (e) { catalog = []; }
 }
 /* ---------- ricerca delle carte in tutte le espansioni (indice cards.json, generato dal deploy) ---------- */
-let cardIndex = null, cardIndexLoading = null;
+let cardIndex = null, cardIndexLoading = null, rarityNames = [], hitRarity = "";
 const fold = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 function loadCardIndex() {
   if (cardIndex || cardIndexLoading) return cardIndexLoading;
   cardIndexLoading = fetch("/app/cards.json").then((r) => r.ok ? r.json() : { sets: {} }).catch(() => ({ sets: {} }))
-    .then((d) => { cardIndex = d.sets || {}; namesIt = d.names_it || {}; renderAll(); });
+    .then((d) => { cardIndex = d.sets || {}; rarityNames = d.rarities || []; namesIt = d.names_it || {}; renderAll(); });
   return cardIndexLoading;
 }
 function cardHits(q) {
@@ -442,19 +442,27 @@ function cardHits(q) {
   const hit = (number, name) => isNum ? number === fq : fold(name).includes(fq);
   const groups = [];
   const home = cards.filter((c) => hit(c.number, c.name));
-  if (home.length) groups.push({ id: "home", name: setName("me55"), cards: home.map((c) => ({ number: c.number, name: c.name })) });
+  if (home.length) groups.push({ id: "home", name: setName("me55"), cards: home.map((c) => ({ number: c.number, name: c.name, rarity: c.rarity || "" })) });
   for (const s of (catalog || [])) {
     if (HOME_SETS.includes(s.id)) continue;
-    const found = ((cardIndex || {})[s.id] || []).filter(([n, nm]) => hit(n, nm)).map(([number, name]) => ({ number, name }));
+    const found = ((cardIndex || {})[s.id] || []).filter(([n, nm]) => hit(n, nm)).map(([number, name, r]) => ({ number, name, rarity: rarityNames[r] || "" }));
     if (found.length) groups.push({ id: s.id, name: setName(s.id, s.name), cards: found });
   }
   return groups;
 }
 function renderCardHits(q) {
   if (!cardIndex) { loadCardIndex(); return '<h2>Carte</h2><p class="hint">Carico l\'elenco delle carte…</p>'; }
-  const groups = cardHits(q), total = groups.reduce((a, g) => a + g.cards.length, 0);
+  let groups = cardHits(q);
   if (!groups.length) return "";
-  return `<h2>Carte (${total})</h2>` + groups.slice(0, 40).map((g) => `<h3>${esc(g.name)}</h3><div class="hits">` +
+  // filtro per rarità: le rarità presenti nei risultati, con quante carte ciascuna
+  const counts = {};
+  groups.forEach((g) => g.cards.forEach((c) => { counts[c.rarity || "?"] = (counts[c.rarity || "?"] || 0) + 1; }));
+  if (hitRarity && !counts[hitRarity]) hitRarity = "";
+  const pills = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([r, n]) =>
+    `<span class="pill ${hitRarity === r ? "on" : ""}" data-rar="${esc(r)}">${esc(r === "?" ? "senza rarità" : r)} ${n}</span>`).join("");
+  if (hitRarity) groups = groups.map((g) => ({ ...g, cards: g.cards.filter((c) => (c.rarity || "?") === hitRarity) })).filter((g) => g.cards.length);
+  const total = groups.reduce((a, g) => a + g.cards.length, 0);
+  return `<h2>Carte (${total})</h2><div class="card-row" id="hitpills">${pills}</div>` + groups.slice(0, 40).map((g) => `<h3>${esc(g.name)}</h3><div class="hits">` +
     g.cards.slice(0, 24).map((c) => `<span class="hit" data-set="${esc(g.id)}" data-num="${esc(c.number)}">${esc(c.name)}<small>#${esc(c.number)}</small></span>`).join("") +
     (g.cards.length > 24 ? `<span class="hit" data-set="${esc(g.id)}">… e altre ${g.cards.length - 24}</span>` : "") + "</div>").join("") +
     (groups.length > 40 ? `<p class="hint">… e altre ${groups.length - 40} espansioni: scrivi qualche lettera in più.</p>` : "");
@@ -498,6 +506,7 @@ function renderCollections() {
   $("#coll-list").innerHTML = html;
   $("#coll-list").querySelectorAll(".coll").forEach((el) => el.onclick = () => openSet(el.dataset.go));
   $("#coll-list").querySelectorAll(".hit").forEach((el) => el.onclick = () => openCard(el.dataset.set, el.dataset.num || q));
+  $("#coll-list").querySelectorAll("#hitpills [data-rar]").forEach((p) => p.onclick = () => { hitRarity = hitRarity === p.dataset.rar ? "" : p.dataset.rar; renderCollections(); });
 }
 $("#qc").oninput = renderCollections;
 

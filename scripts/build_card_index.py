@@ -2,7 +2,8 @@
 
   python scripts/build_card_index.py deploy/app/cards.json
 
-Formato: {"built": <epoch>, "sets": {"sv8": [["7", "Pikachu ex"], ...], ...}, "names_it": {"sv8": "Scintille Folgoranti", ...}}.
+Formato: {"built": <epoch>, "rarities": ["Common", ...], "sets": {"sv8": [["7", "Pikachu ex", <indice rarità>], ...], ...},
+"names_it": {"sv8": "Scintille Folgoranti", ...}}.
 I nomi italiani vengono da TCGdex (abbinamento per nome inglese, come cardmarket.set_map). Lo genera ponte.yml a ogni deploy.
 """
 from __future__ import annotations
@@ -36,14 +37,20 @@ def main() -> None:
         except Exception as exc:  # noqa: BLE001 - un set mancante non ferma l'indice
             print(f"  {s['id']}: {exc}", file=sys.stderr)
             return s["id"], []
-        return s["id"], [[str(c["number"]), c["name"]] for c in cards]
+        return s["id"], [[str(c["number"]), c["name"], c.get("rarity") or ""] for c in cards]
 
     with ThreadPoolExecutor(max_workers=8) as ex:
         index = dict(ex.map(one, sets))
     n = sum(len(v) for v in index.values())
+    rarities = sorted({r for v in index.values() for _, _, r in v if r})  # le rarità come indice: file più piccolo
+    rid = {r: i for i, r in enumerate(rarities)}
+    for v in index.values():
+        for c in v:
+            c[2] = rid.get(c[2], -1)
     names_it = italian_names(sets)
     with open(out, "w", encoding="utf-8") as f:
-        json.dump({"built": int(time.time()), "sets": index, "names_it": names_it}, f, ensure_ascii=False, separators=(",", ":"))
+        json.dump({"built": int(time.time()), "rarities": rarities, "sets": index, "names_it": names_it}, f,
+                  ensure_ascii=False, separators=(",", ":"))
     print(f"{n} carte in {len(index)} collezioni, {len(names_it)} nomi italiani → {out}")
 
 
