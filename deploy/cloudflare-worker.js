@@ -199,6 +199,25 @@ async function sendCommand(env, chatId, text, name, extra) {
   return true;
 }
 
+// Diagnosi (per il log del deploy): cosa risponde GitHub al ponte e se il riepilogo si decifra. Nessun dato personale.
+async function diag(env) {
+  const out = { token: tok(env).length, repo: repoOf(env) };
+  try {
+    const r = await gh(env, "GET", `/repos/${repoOf(env)}/contents/state.json.enc?ref=bot-state`);
+    out.contents_http = r.status;
+    const meta = await r.json();
+    out.encoding = meta.encoding; out.size = meta.size; out.has_content = !!meta.content; out.message = meta.message;
+    if (meta.content) {
+      const bytes = fromBase64(meta.content);
+      out.bytes = bytes.length; out.magic = String.fromCharCode(...bytes.slice(0, 4));
+      try { const st = JSON.parse(new TextDecoder().decode(await unseal(env, bytes))); out.decrypt = "ok"; out.chat_ids = (st.chat_ids || []).length; out.generated_at = st.generated_at; }
+      catch (e) { out.decrypt = "ERRORE " + (e && e.message); }
+    }
+  } catch (e) { out.error = String(e && e.message || e); }
+  out.lastGood = [...lastGood.keys()];
+  return out;
+}
+
 // Apertura della Mini App: una sveglia del bot (non più di una al minuto per istanza del worker, non serve di più).
 let lastAppWake = 0;
 async function wakeForApp(env) {
@@ -300,9 +319,10 @@ export default {
 
     if (request.method === "GET") {
       if (!tok(env) || !env.GITHUB_TOKEN) return page("⚠️ Ponte non configurato", "<p>Esegui il workflow «Ponte Telegram».</p>");
-      // /setup e /reset solo con la chiave (la manda ponte.yml): nessun altro può spostare il webhook
-      if (url.pathname === "/setup" || url.pathname === "/reset") {
+      // /setup, /reset e /diag solo con la chiave (la manda ponte.yml): nessun altro può spostare il webhook
+      if (url.pathname === "/setup" || url.pathname === "/reset" || url.pathname === "/diag") {
         if (!sameText(request.headers.get("X-Pokebot-Key"), await adminKey(env))) return new Response("forbidden", { status: 403 });
+        if (url.pathname === "/diag") return Response.json(await diag(env));
         if (url.pathname === "/reset") {
           const res = await telegram(env, "deleteWebhook", { drop_pending_updates: false });
           return page(res.ok ? "Ponte disattivato" : "❌ Errore", `<pre>${JSON.stringify(res, null, 2)}</pre>`);

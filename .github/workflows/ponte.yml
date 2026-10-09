@@ -78,6 +78,7 @@ jobs:
             out=$(curl -sS -H "X-Pokebot-Key: $key" "$url/setup" || true)
             if echo "$out" | grep -q "Ponte attivo"; then
               echo "$out" | sed 's/<[^>]*>//g' | grep -v '^\s*$'
+              echo "Diagnosi (lettura dello stato da GitHub): $(curl -sS -H "X-Pokebot-Key: $key" "$url/diag")"
               echo "::notice::Ponte attivo su $url — ogni messaggio al bot avvia subito la ricerca"
               exit 0
             fi
