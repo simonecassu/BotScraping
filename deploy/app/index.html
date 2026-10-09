@@ -972,6 +972,19 @@ window.addEventListener("scroll", () => {
 }, { passive: true });
 document.querySelectorAll("input[type=search]").forEach((i) => i.addEventListener("focus", () => { scrollY0 = window.scrollY; }));
 
+/* ---------- scorri dal bordo sinistro verso destra = indietro (come nelle app di iPhone) ---------- */
+let swipe = null;
+document.addEventListener("touchstart", (e) => {
+  const t = e.touches[0];
+  swipe = t.clientX < 40 && !$("#back").classList.contains("hidden") ? { x: t.clientX, y: t.clientY, t: Date.now() } : null;
+}, { passive: true });
+document.addEventListener("touchend", (e) => {
+  if (!swipe) return;
+  const t = e.changedTouches[0], dx = t.clientX - swipe.x, dy = Math.abs(t.clientY - swipe.y);
+  if (dx > 70 && dy < 60 && Date.now() - swipe.t < 800) $("#back").click();
+  swipe = null;
+}, { passive: true });
+
 /* ---------- navigazione ---------- */
 const TITLES = { home: "Pokébot", coll: "Collezioni", settings: "Impostazioni", friends: "Amici", reports: "Segnalazioni", admin: "Utenti" };
 function showCseg(name) {
