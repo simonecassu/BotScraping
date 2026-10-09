@@ -401,7 +401,8 @@ function renderAdmin() {
     : '<p class="hint">Nessuno in attesa.</p>');
   $("#adm-users").innerHTML = `<h2>Collegati (${us.length})</h2>` + us.map((u) => {
     const me = u.tier === "owner";
-    const plan = (what, label) => `<button class="btn ${u.tier === what.split(" ")[0] ? "" : "ghost"}" data-cmd="/piano ${esc(u.id)} ${what}" data-ok="${esc(u.name)}: piano aggiornato">${label}</button>`;
+    const current = u.tier === "pro" ? (u.lifetime ? "sempre" : "pro") : u.tier;  // quale pulsante è il piano di adesso
+    const plan = (what, label) => `<button class="btn ${current === what.split(" ")[0] ? "" : "ghost"}" data-cmd="/piano ${esc(u.id)} ${what}" data-ok="${esc(u.name)}: piano aggiornato">${label}</button>`;
     return `<div class="usr ${u.banned ? "banned" : ""}" data-id="${esc(u.id)}"><div class="top"><span class="av">${esc((u.name || "?").slice(0, 1).toUpperCase())}</span>
       <div><b>${esc(u.name)}${me ? " (tu)" : ""}</b><small>${esc(u.label)}${u.paid ? " · ha pagato" : ""}${u.banned ? " · espulso" : ""}</small></div></div>
       ${me ? "" : `<div class="act">${plan("prova " + a.trial_days, "🎁 Prova " + a.trial_days + "g")}${plan("pro 30", "⭐ Pro 30g")}${plan("sempre", "💎 Pro per sempre")}${plan("light", "🌱 Light")}</div>
