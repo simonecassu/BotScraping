@@ -64,6 +64,8 @@ a{color:var(--link);text-decoration:none}
 .tiles{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px}
 .tile{background:var(--sec);border:3px solid #0a1328;box-shadow:0 4px 0 #0a1328;border-radius:18px;padding:18px 14px;min-height:124px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer}
 .tile .ic{font-size:30px}.tile b{font-size:17px;font-weight:900;display:block;margin-top:8px}.tile small{color:var(--hint);font-weight:700;font-size:12px}
+.planbar{display:flex;align-items:center;gap:10px;justify-content:space-between;background:var(--sec);border:2px solid var(--yel);border-radius:14px;padding:10px 12px;margin-top:14px;font-weight:800;font-size:13px}
+.planbar .btn{flex:none}
 .fcode{background:var(--sec);border:3px solid var(--yel);box-shadow:0 4px 0 var(--yel2);border-radius:18px;padding:16px;text-align:center;margin:6px 0 10px}
 .fcode small{display:block;color:var(--hint);font-weight:800;font-size:12px}.fcode b{display:block;font-size:38px;font-weight:900;letter-spacing:6px;color:var(--yel);margin:4px 0 12px}
 .friend{background:var(--sec);border:2px solid var(--line);border-radius:14px;padding:12px;margin-bottom:9px}
@@ -92,6 +94,7 @@ a{color:var(--link);text-decoration:none}
       <div class="tile yel" id="tile-ai"><span class="ic">🧠</span><div><b>Analisi IA</b><small>in arrivo</small></div></div>
       <div class="tile" data-go="friends"><span class="ic">👥</span><div><b>Amici</b><small id="t-fr">…</small></div></div>
     </div>
+    <div class="planbar hidden" id="planbar"><span id="plan-lbl"></span><button class="btn" id="plan-go">⭐ Abbonati</button></div>
     <p class="hint" id="home-hint" style="margin-top:14px"></p>
   </section>
 
@@ -267,6 +270,23 @@ async function load() {
 
 function renderAll() { renderHome(); renderCollections(); renderChecklist(); renderSettings(); renderFriends(); if (!$("#tab-check").classList.contains("hidden")) { renderChase(); renderFound(); renderPrices(); } }
 
+/* ---------- Piano ---------- */
+function renderPlan() {
+  const p = state.plan || {}, bar = $("#planbar");
+  bar.classList.toggle("hidden", !p.tier || p.tier === "owner");
+  $("#plan-lbl").textContent = p.label || "";
+  $("#plan-go").classList.toggle("hidden", p.tier === "pro");
+  $("#plan-go").textContent = p.tier === "light" ? `⭐ Completo · ${p.price || 250} Stars` : "⭐ Abbonati";
+}
+$("#plan-go").onclick = async () => {
+  const p = (state || {}).plan || {};
+  if (p.invoice && tg && tg.openInvoice) {
+    tg.openInvoice(p.invoice, (status) => { if (status === "paid") { toast("🎉 Grazie! Attivo tutto tra un minuto"); awaitRefresh(); } });
+    return;
+  }
+  if (await sendCmd("/abbonati")) toast("Ti ho mandato il pulsante per abbonarti in chat");
+};
+
 /* ---------- Amici ---------- */
 function setName(sid) {
   if (sid === "me55") return "30th Celebration";
@@ -320,6 +340,7 @@ function renderHome() {
   $("#t-coll").textContent = `30th Celebration · ${homeMissing()} mancanti` + (nExtraActive ? ` · +${nExtraActive} attive` : "") + (ws.length ? ` · ${ws.length} inseguit${ws.length === 1 ? "a" : "e"}` : "");
   const s = state.settings;
   $("#t-set").textContent = s.paused ? "⏸ in pausa" : `ogni ${s.interval_minutes} min · ${(s.sources || []).length} fonti`;
+  renderPlan();
   const lr = state.last_run;
   $("#home-hint").textContent = lr ? `Ultimo giro ${new Date(lr.started_at * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}: ${lr.listings_seen} annunci letti, ${lr.matches} segnalati.` : "";
 }

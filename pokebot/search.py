@@ -11,6 +11,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from . import config
+from . import plans
 from . import stats as pstats
 
 from .cards import CardIndex
@@ -247,7 +248,7 @@ def _row_to_pair(row: dict, index_by_id: dict | None = None) -> tuple[Listing, M
 
 
 def flush_queued(db: Database, notifier: TelegramNotifier, settings: dict, index_by_id: dict | None = None,
-                 chat_id: str | None = None) -> int:
+                 chat_id: str | None = None, header: str = "🌅 <b>Accumulati durante la pausa: {n} annunci</b>") -> int:
     """Invia gli annunci accumulati (per una persona) durante la sua pausa o le sue ore notturne, raggruppati per carta."""
     rows = db.queued_found(chat_id)
     if not rows:
@@ -270,7 +271,7 @@ def flush_queued(db: Database, notifier: TelegramNotifier, settings: dict, index
         ids.append(r["id"])
     if not pairs:
         return 0
-    notifier.send(f"🌅 <b>Accumulati durante la pausa: {len(pairs)} annunci</b>", disable_preview=True)
+    notifier.send(header.format(n=len(pairs)), disable_preview=True)
     outcomes = notifier.notify_many(pairs, max_per_card=int(settings.get("max_per_card", 5) or 5),
                                     images=bool(settings.get("images", True)))
     for row_id, sent in zip(ids, outcomes):
@@ -285,6 +286,15 @@ def flush_all_queues(db: Database, index_by_id: dict | None = None) -> int:
     for chat in db.queued_chats():
         settings = db.settings_for(chat)
         if notifications_suppressed(settings):
+            continue
+        if not plans.is_full(db, chat):  # Light: una volta al giorno, alle 19
+            if not plans.digest_due(db, chat):
+                continue
+            n = flush_queued(db, TelegramNotifier(chat_ids=[chat]), settings, index_by_id, chat,
+                             header="📬 <b>Il tuo riepilogo di oggi: {n} annunci</b>\n"
+                                    "Con /abbonati li ricevi nel momento in cui escono, prima degli altri.")
+            plans.mark_digest(db, chat)
+            total += n
             continue
         total += flush_queued(db, TelegramNotifier(chat_ids=[chat]), settings, index_by_id, chat)
     return total
@@ -321,7 +331,8 @@ def _notify_pending(pending: list, db: Database, report: RunReport, dry_run: boo
             pending = all_pending
         if not pending:
             continue
-        if notifications_suppressed(st):
+        light = bool(chat) and not plans.is_full(db, chat)
+        if light or notifications_suppressed(st):  # Light: tutto nel riepilogo delle 19
             db.enqueue(chat, [found_ids[lst.key] for lst, _ in pending])
             if first:
                 report.queued += len(pending)

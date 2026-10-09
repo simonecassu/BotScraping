@@ -59,6 +59,8 @@ HELP = """<b>Comandi</b>
 /insegui 151 2h · /insegui 151 2h ogni 10m · /insegui 131 151 – durata, frequenza, più carte · /insegui – attivi · /insegui stop
 /invita – codice per collegare un'altra persona (stesse notifiche, stessa checklist, stessa app) · /utenti · /espelli ID
 /attesa – chi ha scritto /start e aspetta l'accesso · /approva ID (o tutti) · /rifiuta ID
+/abbonati – il tuo piano e l'abbonamento (250 ⭐ al mese) · /voto 1-5 · /recensione testo
+/piano ID sempre|pro 30|prova 5|light – (proprietario) cambia il piano di qualcuno · /recensioni
 /canale @nome – canale pubblico dove ogni giorno pubblico i 3 affari migliori · /canale ora · /canale 20 · /canale off
 /collezione – le collezioni seguite · /collezione sv8 – passa a quella (scaricata al volo, parte da "mi mancano tutte"): da lì /mancanti, /aggiungi, /ho, /progresso, /prezzi lavorano su di lei · /collezione 30th – torna alla 30th
 /collezione sv8 attiva – ⚠️ la cerca anche sui marketplace · /collezione sv8 disattiva · sv8:7 – una sua carta in qualsiasi comando (es. /insegui sv8:7)
@@ -77,7 +79,7 @@ BOT_SHORT_DESCRIPTION = "Cerca su Vinted, Wallapop ed eBay le carte Pokémon che
 PROFILE_VERSION = 1
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
-MENU_VERSION = 16
+MENU_VERSION = 17
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -101,6 +103,7 @@ MENU_COMMANDS = [
     ("insegui", "Cerca una carta ogni 5 minuti per 6 ore: /insegui 151 (o /insegui 151 2h ogni 10m)"),
     ("amico", "Il tuo codice amico, o /amico CODICE per aggiungerne uno"),
     ("condividi", "Album in comune con un amico: /condividi me55 NOME"),
+    ("abbonati", "Il tuo piano e l'abbonamento completo"),
     ("invita", "Codice per collegare un'altra persona al bot"),
     ("utenti", "Chi e' collegato al bot"),
     ("collezione", "Collezioni seguite; /collezione sv8 passa a quella; /collezione sv8 attiva la cerca"),
@@ -160,6 +163,18 @@ class TelegramClient:
                              json={"commands": [{"command": c, "description": d[:256]} for c, d in commands]},
                              timeout=config.HTTP_TIMEOUT)
         return resp.status_code == 200 and bool(resp.json().get("ok"))
+
+    def create_invoice_link(self, title: str, description: str, payload: str, amount: int, period: int = 0) -> str:
+        """Link di pagamento in Telegram Stars (XTR); con `period` è un abbonamento che si rinnova da solo."""
+        body = {"title": title, "description": description[:255], "payload": payload, "currency": "XTR",
+                "prices": [{"label": title, "amount": int(amount)}]}
+        if period:
+            body["subscription_period"] = int(period)
+        resp = requests.post(f"{self.base}/createInvoiceLink", json=body, timeout=config.HTTP_TIMEOUT)
+        data = resp.json()
+        if not data.get("ok"):
+            raise requests.RequestException(f"createInvoiceLink: {data.get('description', resp.status_code)}")
+        return str(data["result"])
 
     def set_profile(self, description: str, short_description: str) -> bool:
         """Testi che vede chi apre il bot prima di premere Avvia (descrizione) e nel profilo (about)."""
@@ -371,6 +386,16 @@ class CommandHandler:
             return self._reject(chat_id, args)
         if cmd == "/canale":
             return self._channel(chat_id, args)
+        if cmd in ("/abbonati", "/abbonamento", "/premium", "/pro"):
+            return self._subscribe()
+        if cmd == "/piano":
+            return self._plan(chat_id, args)
+        if cmd == "/voto":
+            return self._vote(args)
+        if cmd in ("/recensione", "/commento"):
+            return self._review(args)
+        if cmd == "/recensioni":
+            return self._reviews(chat_id)
         if cmd in ("/collezione", "/collezioni", "/set"):
             return self._collection(args)
         if cmd == "/resetvisti":
@@ -583,14 +608,18 @@ class CommandHandler:
                      "gestisce la stessa checklist e apre la stessa Mini App dal pulsante App.")
 
     def _users(self, chat_id: str) -> Reply:
+        if not self._is_owner(chat_id):
+            return Reply("Solo il proprietario del bot vede le persone collegate. Per i tuoi amici usa /amici.")
         ids = self.db.chat_ids()
         if not ids:
             return Reply("Nessuno collegato ancora.")
+        from . import plans
         lines = [f"👥 <b>Persone collegate</b> ({len(ids)})"]
-        for i, cid in enumerate(ids):
-            lines.append(f"• <code>{cid}</code>{' · proprietario' if i == 0 else ''}{' · tu' if cid == str(chat_id) else ''}")
+        for cid in ids:
+            lines.append(f"• {html.escape(self.db.user_name(cid))} <code>{cid}</code> · {plans.describe(self.db, cid)}"
+                         f"{' · tu' if cid == str(chat_id) else ''}")
         if self._is_owner(chat_id):
-            lines.append("\n/invita per aggiungere qualcuno · /espelli ID per scollegarlo")
+            lines.append("\n/invita per aggiungere qualcuno · /espelli ID per scollegarlo · /piano ID per cambiare piano · /recensioni")
         return Reply("\n".join(lines))
 
     def _kick(self, chat_id: str, args: str) -> Reply:
@@ -615,7 +644,6 @@ class CommandHandler:
                          ". Ti scrivo io appena il tuo accesso viene attivato.")
         wl = self.db.waitlist()
         pos = len(wl)
-        total = int(self.db.get_kv("signups_total", 0) or 0)
         owner = self.db.owner_chat_id()
         sends = []
         if owner:
@@ -623,7 +651,7 @@ class CommandHandler:
             src = f" · da {html.escape(source)}" if source else ""
             sends.append((owner,
                           f"🙋 <b>Nuova richiesta di accesso</b>: {label} (<code>{chat_id}</code>){src}\n"
-                          f"In attesa: {pos} · richieste totali: {total}/{self._goal()}\n"
+                          f"In attesa: {pos}\n"
                           f"/approva {chat_id} · /rifiuta {chat_id} · /attesa per la lista",
                           [[("✅ Approva", f"/approva {chat_id}"), ("❌ Rifiuta", f"/rifiuta {chat_id}")]]))
         return Reply("👋 Benvenuto su <b>Pokébot</b>!\n\n"
@@ -632,16 +660,12 @@ class CommandHandler:
                      f"⏳ Per ora l'accesso è su invito: sei in lista d'attesa (posizione {pos}). "
                      "Ti scrivo io qui appena viene attivato, non devi fare altro.", sends=sends)
 
-    def _goal(self) -> int:
-        return int(self.db.get_kv("launch_goal", 250) or 250)
-
     def _waitlist(self, chat_id: str) -> Reply:
         if not self._is_owner(chat_id):
             return Reply("Solo il proprietario del bot vede la lista d'attesa.")
         wl = self.db.waitlist()
-        total = int(self.db.get_kv("signups_total", 0) or 0)
         users = len(self.db.chat_ids())
-        lines = [f"📋 <b>Lista d'attesa</b>: {len(wl)} in attesa · {users} dentro · richieste totali {total}/{self._goal()}"]
+        lines = [f"📋 <b>Lista d'attesa</b>: {len(wl)} in attesa · {users} dentro"]
         now = time.time()
         for cid, e in sorted(wl.items(), key=lambda kv: float(kv[1].get("ts") or 0)):
             days = (now - float(e.get("ts") or now)) / 86400
@@ -656,6 +680,7 @@ class CommandHandler:
         if not self._is_owner(chat_id):
             return Reply("Solo il proprietario del bot può approvare le richieste.")
         from . import collections as coll
+        from . import plans
         wl = self.db.waitlist()
         target = args.strip().lower()
         ids = list(wl) if target in ("tutti", "tutte", "all") else [args.strip()]
@@ -665,10 +690,12 @@ class CommandHandler:
             if entry is None:
                 continue
             self.db.add_chat_id(cid)
+            plans.start_trial(self.db, cid)
             for sid in config.HOME_SET_IDS:
                 coll.album_for(self.db, cid, sid)
             done.append(f"{html.escape(str(entry.get('name') or cid))} (<code>{cid}</code>)")
-            sends.append((cid, "🎉 <b>Il tuo Pokébot è attivo!</b>\n\n"
+            sends.append((cid, "🎉 <b>Il tuo Pokébot è attivo!</b>\n"
+                               f"Hai {plans.TRIAL_DAYS} giorni di prova con tutte le funzioni.\n\n"
                                "Parti così:\n"
                                "1. Apri la Mini App dal pulsante <b>App</b> qui sotto e segna le carte che hai: il resto lo cerco io.\n"
                                "2. Oppure da qui: /aggiungi 131 132 per le mancanti, /mancanti per vederle, /cerca per cercare subito.\n"
@@ -685,6 +712,94 @@ class CommandHandler:
         if entry is None:
             return Reply("Nessuno con quell'ID in lista d'attesa (vedi /attesa).")
         return Reply(f"🗑 {html.escape(str(entry.get('name') or args.strip()))} tolto dalla lista d'attesa (non riceve nulla).")
+
+    # ---- piani: prova, Light, abbonamento ---------------------------------------
+    def _subscribe(self) -> Reply:
+        from . import plans
+        t = plans.tier(self.db, self.chat)
+        head = plans.describe(self.db, self.chat)
+        if t == "owner":
+            return Reply(head)
+        if t == "pro":
+            return Reply(head + "\nL'abbonamento si gestisce (e si disdice) dalle impostazioni di Telegram, alla voce Stars.")
+        link = plans.invoice_link(self.db, TelegramClient(), self.chat)
+        text = (f"{head}\n\n⭐ <b>Pokébot completo · {plans.PRICE_STARS} Stars al mese</b>\n"
+                "• avvisi nel momento in cui esce l'annuncio, non una volta al giorno\n"
+                "• affari 🔥 sotto il prezzo medio\n"
+                "• inseguimenti ogni 5 minuti, fino a 10 carte insieme\n"
+                "• collezioni illimitate\n\n"
+                "Si paga con le Stars di Telegram (anche con Apple Pay) e si rinnova ogni mese: disdici quando vuoi.")
+        if not link:
+            return Reply(text + "\n\n⚠️ Il pagamento non è disponibile in questo momento, riprova tra poco.")
+        return Reply(text, buttons=[[(f"⭐ Abbonati · {plans.PRICE_STARS} Stars", link)]])
+
+    def _plan(self, chat_id: str, args: str) -> Reply:
+        """/piano – il tuo piano · (proprietario) /piano ID [sempre|light|pro 30|prova 5]."""
+        from . import plans
+        a = args.split()
+        if not a or not self._is_owner(chat_id):
+            return Reply(plans.describe(self.db, self.chat) + "\n/abbonati per i dettagli dell'abbonamento.")
+        target = a[0]
+        if target not in self.db.chat_ids():
+            return Reply("Quell'ID non è tra le persone collegate (vedi /utenti).")
+        who = html.escape(self.db.user_name(target))
+        if len(a) == 1:
+            return Reply(f"{who}: {plans.describe(self.db, target)}")
+        what = a[1].lower()
+        n = int(a[2]) if len(a) > 2 and a[2].isdigit() else 0
+        if what in ("sempre", "gratis", "regala"):
+            plans.set_pro(self.db, target, lifetime=True)
+        elif what == "light":
+            plans.set_light(self.db, target)
+        elif what == "pro":
+            plans.set_pro(self.db, target, until=time.time() + (n or 30) * 86400)
+        elif what == "prova":
+            plans.start_trial(self.db, target, n or plans.TRIAL_DAYS)
+        else:
+            return Reply("Usa <code>/piano ID sempre</code>, <code>/piano ID pro 30</code>, <code>/piano ID prova 5</code> o <code>/piano ID light</code>.")
+        return Reply(f"✅ {who}: {plans.describe(self.db, target)}")
+
+    def _vote(self, args: str) -> Reply:
+        from . import plans
+        a = args.strip()
+        if not a.isdigit() or not 1 <= int(a) <= 5:
+            return Reply("Vota da 1 a 5, per esempio <code>/voto 4</code>.")
+        p = plans.get(self.db, self.chat)
+        p["rating"] = int(a)
+        p["rating_ts"] = time.time()
+        self.db.set_kv(f"plan:{self.chat}", p)
+        owner = self.db.owner_chat_id()
+        sends = [(owner, f"⭐ {html.escape(self.db.user_name(self.chat))} ha votato <b>{a}/5</b>", None)] if owner and owner != self.chat else []
+        return Reply("🙏 Grazie! Se vuoi, dimmi in una riga cosa ti è piaciuto o cosa manca: "
+                     "<code>/recensione il tuo commento</code>.", sends=sends)
+
+    def _review(self, args: str) -> Reply:
+        from . import plans
+        text = args.strip()[:500]
+        if not text:
+            return Reply("Scrivi il commento dopo il comando, per esempio <code>/recensione mi ha trovato il Charizard!</code>")
+        p = plans.get(self.db, self.chat)
+        p["review"] = text
+        p["review_ts"] = time.time()
+        self.db.set_kv(f"plan:{self.chat}", p)
+        owner = self.db.owner_chat_id()
+        sends = [(owner, f"💬 Recensione di {html.escape(self.db.user_name(self.chat))}: {html.escape(text)}", None)] if owner and owner != self.chat else []
+        return Reply("🙏 Grazie, la leggo di sicuro.", sends=sends)
+
+    def _reviews(self, chat_id: str) -> Reply:
+        from . import plans
+        if not self._is_owner(chat_id):
+            return Reply("Solo il proprietario vede le recensioni.")
+        rows = [(c, plans.get(self.db, c)) for c in self.db.chat_ids()]
+        rows = [(c, p) for c, p in rows if p.get("rating") or p.get("review")]
+        if not rows:
+            return Reply("Nessun voto ancora.")
+        votes = [int(p["rating"]) for _, p in rows if p.get("rating")]
+        lines = [f"⭐ <b>Recensioni</b>: media {sum(votes) / len(votes):.1f}/5 su {len(votes)} voti" if votes else "⭐ <b>Recensioni</b>"]
+        for c, p in rows:
+            lines.append(f"• {html.escape(self.db.user_name(c))}: {p.get('rating', '–')}/5" +
+                         (f" · {html.escape(str(p.get('review'))[:200])}" if p.get("review") else ""))
+        return Reply("\n".join(lines))
 
     def _channel(self, chat_id: str, args: str) -> Reply:
         """/canale @nome – imposta il canale degli affari · /canale ora – pubblica subito · /canale 20 – ora del post · /canale off."""
@@ -749,6 +864,11 @@ class CommandHandler:
         if set_id in ("30th", "30", "celebration"):
             set_id = "me55"
         rest = rest.strip()
+        from . import plans
+        if (set_id not in self.db.albums_of(self.chat) and not plans.is_full(self.db, self.chat)
+                and plans.collections_count(self.db, self.chat) >= plans.LIGHT_MAX_COLLECTIONS):
+            return Reply(f"🌱 Con la versione Light segui fino a {plans.LIGHT_MAX_COLLECTIONS} collezioni. "
+                         "/abbonati per seguirne quante vuoi.")
         try:
             cs, album, created = coll.follow(self.db, self.chat, set_id)
         except KeyError:
@@ -944,10 +1064,19 @@ class CommandHandler:
         cards, unknown = self.resolve(card_args)
         if not cards:
             return Reply("Carta non riconosciuta. Es. <code>/insegui 151</code>, <code>/insegui c4 2h</code>, <code>/insegui 151 2h ogni 10m</code>.")
+        from . import plans
+        light = not plans.is_full(self.db, self.chat)
+        max_w = plans.LIGHT_MAX_WATCHES if light else watch.MAX_WATCHES
+        if light:
+            every = max(every, plans.LIGHT_WATCH_EVERY_S)
+            duration = max(duration, every)
         active = watch.list_watches(self.db, self.chat)
-        room = watch.MAX_WATCHES - len({cid for cid in active if cid not in {c.id for c in cards}})
+        room = max_w - len({cid for cid in active if cid not in {c.id for c in cards}})
         cards = cards[:max(0, room)]
         if not cards:
+            if light:
+                return Reply(f"🌱 Con la versione Light puoi inseguire una carta alla volta, controllata ogni 2 ore. "
+                             "Ferma quella attiva con /insegui stop, oppure /abbonati per inseguirne fino a 10 ogni 5 minuti.")
             return Reply(f"Al massimo {watch.MAX_WATCHES} inseguimenti insieme: ferma qualcosa con /insegui stop.")
         for c in cards:
             w = watch.add_watch(self.db, c.id, duration, every, self.chat)
@@ -1420,6 +1549,9 @@ class TelegramCommands:
             return False
         chat_id = str(payload.get("chat_id") or "")
         text = str(payload.get("text") or "")
+        if chat_id and isinstance(payload.get("payment"), dict):  # scritto solo dal ponte, mai dal testo dell'utente
+            self._payment(chat_id, payload["payment"], str(payload.get("name") or ""))
+            return False
         if not chat_id or not text:
             return False
         name = str(payload.get("name") or "")[:40]
@@ -1434,6 +1566,27 @@ class TelegramCommands:
         reply = self.handler.handle(text, chat_id)
         self._deliver(chat_id, reply)
         return reply.run_search
+
+    def _payment(self, chat_id: str, pay: dict, name: str) -> None:
+        from . import plans
+        if pay.get("currency") != "XTR" or not str(pay.get("invoice_payload", "")).startswith("pro:"):
+            log.warning("Pagamento ignorato (non è l'abbonamento): %s", pay)
+            return
+        if name:
+            self.db.set_user_name(chat_id, name[:40])
+        if chat_id not in self.db.chat_ids():  # ha pagato prima di essere approvato: entra subito
+            self.db.remove_from_waitlist(chat_id)
+            self.db.add_chat_id(chat_id)
+        p = plans.record_payment(self.db, chat_id, pay)
+        renewal = bool(pay.get("is_recurring")) and not pay.get("is_first_recurring")
+        log.info("Pagamento Stars da %s: %s (rinnovo: %s)", chat_id, pay.get("total_amount"), renewal)
+        self._deliver(chat_id, Reply(
+            ("🔁 Abbonamento rinnovato, grazie!" if renewal else "🎉 <b>Grazie!</b> Ora hai Pokébot completo: avvisi immediati, affari 🔥, "
+             "inseguimenti ogni 5 minuti e collezioni illimitate.") + f"\n{plans.describe(self.db, chat_id)}"))
+        owner = self.db.owner_chat_id()
+        if owner and owner != chat_id:
+            self._deliver(owner, Reply(f"💰 {'Rinnovo' if renewal else 'Nuovo abbonamento'}: {html.escape(self.db.user_name(chat_id))} "
+                                       f"(<code>{chat_id}</code>) · {int(pay.get('total_amount') or 0)} ⭐ · fino al {plans._date(p.get('pro_until'))}"))
 
     def _signup(self, chat_id: str, text: str, name: str) -> Reply:
         """Sconosciuto con /start (senza codice valido): lista d'attesa. `/start canale` dice da dove arriva."""
@@ -1462,6 +1615,8 @@ class TelegramCommands:
         if (isinstance(inv, dict) and inv.get("code") and parts[1].upper() == str(inv["code"]).upper()
                 and float(inv.get("expires") or 0) > time.time()):
             self.db.add_chat_id(chat_id)
+            from . import plans
+            plans.start_trial(self.db, chat_id)
             self.db.set_kv("invite_code", None)  # monouso
             log.info("Nuova persona collegata con invito: %s", chat_id)
             return True

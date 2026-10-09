@@ -193,6 +193,7 @@ def run_watches(index: CardIndex, db: Database, notifier=None, scrapers: dict | 
 
 
 def _run_for(index: CardIndex, db: Database, chat: str, watches: dict, notifier, scrapers: dict | None) -> list[str]:
+    from . import plans
     from .search import notifications_suppressed, search_card
 
     settings = db.settings_for(chat)
@@ -216,7 +217,8 @@ def _run_for(index: CardIndex, db: Database, chat: str, watches: dict, notifier,
                           True)
             log_lines.append(f"{card.label}: terminata")
             continue
-        if now - float(w.get("last", 0)) < float(w["every"]) - 30:
+        every = float(w["every"]) if plans.is_full(db, chat) else max(float(w["every"]), plans.LIGHT_WATCH_EVERY_S)
+        if now - float(w.get("last", 0)) < every - 30:
             continue
         items, errors = search_card(idx, db, card, settings, scrapers, limit=20, only_new=True)
         w["last"] = now

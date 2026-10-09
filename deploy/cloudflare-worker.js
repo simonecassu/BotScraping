@@ -21,6 +21,19 @@ async function secretFor(env) {
   return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 40);
 }
 
+// tipi di aggiornamento che Telegram manda al ponte (pre_checkout_query: conferma dei pagamenti in Stars)
+const ALLOWED_UPDATES = ["message", "callback_query", "pre_checkout_query"];
+
+// Se il webhook è stato registrato con un elenco vecchio (senza pagamenti), lo aggiorna mantenendo URL e segreto.
+async function ensureWebhook(env) {
+  const info = await telegram(env, "getWebhookInfo", {});
+  const w = (info && info.result) || {};
+  if (!w.url) return;
+  const have = w.allowed_updates || [];
+  if (ALLOWED_UPDATES.every((u) => have.includes(u))) return;
+  await telegram(env, "setWebhook", { url: w.url, secret_token: await secretFor(env), allowed_updates: ALLOWED_UPDATES, drop_pending_updates: false });
+}
+
 const STATE_URL = (env) => `https://raw.githubusercontent.com/${env.GITHUB_REPO || DEFAULT_REPO}/bot-state/state.json`;
 
 async function hmac(keyBytes, message) {
@@ -149,8 +162,8 @@ async function enqueue(env, cmd) {
 }
 
 // Mette in coda e sveglia il bot. Se la coda non è scrivibile, il comando viaggia nel payload del dispatch (come prima).
-async function sendCommand(env, chatId, text, name) {
-  const cmd = { chat_id: String(chatId), text, ts: Date.now() / 1000, name: name || "" };
+async function sendCommand(env, chatId, text, name, extra) {
+  const cmd = { chat_id: String(chatId), text, ts: Date.now() / 1000, name: name || "", ...(extra || {}) };
   const queued = await enqueue(env, cmd);
   return dispatch(env, { event_type: "telegram", client_payload: queued ? { queued: true } : cmd });
 }
@@ -235,7 +248,7 @@ export default {
         const res = await telegram(env, "setWebhook", {
           url: `${url.origin}/`,
           secret_token: await secretFor(env),
-          allowed_updates: ["message", "callback_query"],
+          allowed_updates: ALLOWED_UPDATES,
           drop_pending_updates: false,
         });
         // pulsante "App" accanto alla chat che apre la Mini App
@@ -267,6 +280,24 @@ export default {
       update = await request.json();
     } catch {
       return new Response("bad request", { status: 400 });
+    }
+    // pagamento in Stars: la conferma va data entro 10 secondi, quindi la dà il ponte
+    if (update.pre_checkout_query) {
+      const q = update.pre_checkout_query;
+      const ok = q.currency === "XTR" && String(q.invoice_payload || "").startsWith("pro:");
+      await telegram(env, "answerPreCheckoutQuery", ok ? { pre_checkout_query_id: q.id, ok: true }
+        : { pre_checkout_query_id: q.id, ok: false, error_message: "Pagamento non riconosciuto." });
+      return new Response("ok");
+    }
+    if (update.message && update.message.successful_payment) {
+      const m = update.message, p = m.successful_payment;
+      const payment = { currency: p.currency, total_amount: p.total_amount, invoice_payload: p.invoice_payload,
+        telegram_payment_charge_id: p.telegram_payment_charge_id, subscription_expiration_date: p.subscription_expiration_date || 0,
+        is_recurring: !!p.is_recurring, is_first_recurring: !!p.is_first_recurring };
+      const frm = m.from || {};
+      await sendCommand(env, String(m.chat.id), "/pagamento", frm.first_name || frm.username || "", { payment });
+      await telegram(env, "sendMessage", { chat_id: m.chat.id, text: "⭐ Pagamento ricevuto, grazie! Attivo tutto: conferma tra circa un minuto." });
+      return new Response("ok");
     }
     // messaggio normale oppure pulsante toccato (callback_query: il dato del pulsante è un comando)
     let msg = update.message;
@@ -300,6 +331,7 @@ export default {
   // Timer (vedi [triggers] in wrangler.toml): avvia la ricerca periodica su GitHub.
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
+      try { await ensureWebhook(env); } catch (e) {}
       const st = await readState(env);
       const reason = timerReason(st, event.scheduledTime / 1000);
       if (!reason) return; // niente da fare: nessun run su GitHub

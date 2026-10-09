@@ -36,7 +36,7 @@ def test_stranger_start_goes_to_waitlist_and_owner_approves(index, monkeypatch):
     assert any("Nuova richiesta" in t and "Anna" in t and "da canale" in t for t in owner_msgs)
     # lista e approvazione
     r = tc.handler.handle("/attesa", "1")
-    assert "2 in attesa" in r.text and "Anna" in r.text and "2/250" in r.text
+    assert "2 in attesa" in r.text and "Anna" in r.text
     assert "Solo il proprietario" in tc.handler.handle("/attesa", "2").text
     assert tc.handle_payload({"chat_id": 1, "text": "/approva 2"}) is False
     assert db.chat_ids() == ["1", "2"] and set(db.waitlist()) == {"3"}

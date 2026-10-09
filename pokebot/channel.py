@@ -74,7 +74,7 @@ def format_post(deals: list[dict], bot_username: str, day: dt.date | None = None
                      f'   <a href="{esc(d["url"], quote=True)}">{esc(d["title"][:70])}</a>')
     lines.append("")
     lines.append("Trovati da Pokébot, che cerca su Wallapop, Vinted ed eBay le carte che mancano alla tua collezione "
-                 "e ti avvisa appena spuntano. Gratis, su invito.")
+                 "e ti avvisa appena spuntano. 5 giorni di prova con tutto, poi gratis in versione Light.")
     url = f"https://t.me/{bot_username}?start=canale" if bot_username else ""
     buttons = [[("🤖 Attiva Pokébot", url)]] if url else []
     return "\n".join(lines), buttons

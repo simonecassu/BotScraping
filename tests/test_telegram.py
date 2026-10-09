@@ -380,7 +380,8 @@ def test_invite_adds_second_person_and_notifier_sends_to_all(index, monkeypatch)
 
     h = CommandHandler(index, db)
     assert "Solo il proprietario" in h.handle("/espelli 8", "8").text
-    assert "proprietario" in h.handle("/utenti", "8").text
+    assert "Solo il proprietario" in h.handle("/utenti", "8").text
+    assert "Proprietario" in h.handle("/utenti", "7").text
     assert "scollegata" in h.handle("/espelli 8", "7").text and db.chat_ids() == ["7"]
     assert "non si può" in h.handle("/espelli 7", "7").text
 

@@ -70,6 +70,7 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300, chat_id: s
                      "shared": [sid for sid, alb in db.albums_of(chat_id).items() if f in db.album_members(alb)]}
                     for f in db.friends(chat_id)],
         "friend_code": db.friend_code(chat_id),
+        "plan": _plan_info(db, chat_id),
         "bot_username": db.get_kv("bot_username") or "",
         "home_album": {sid: {"album": db.albums_of(chat_id).get(sid),
                              "shared_with": [{"id": m, "name": db.user_name(m)} for m in db.album_members(db.albums_of(chat_id).get(sid, "")) if m != chat_id]}
@@ -135,15 +136,26 @@ def _shopping(index: CardIndex, wanted: set[str], rows: list[dict], albums: dict
     return out
 
 
+def _plan_info(db: Database, chat_id: str) -> dict:
+    from . import plans
+    p = plans.get(db, chat_id)
+    return {"tier": plans.tier(db, chat_id), "label": plans.describe(db, chat_id),
+            "trial_until": float(p.get("trial_until") or 0), "pro_until": float(p.get("pro_until") or 0),
+            "lifetime": bool(p.get("lifetime")), "price": plans.PRICE_STARS,
+            "invoice": str(db.get_kv(f"invoice:{chat_id}") or "")}
+
+
 def build_summary(index: CardIndex, db: Database) -> dict:
     """state.json: solo ciò che serve al ponte (timer, persone collegate), senza dati personali."""
+    from . import plans
     any_watch = [{"until": w.get("until")} for _, ws in watch.all_watches(db) for w in ws.values()]
     return {
         "generated_at": time.time(),
         "owner_chat_id": db.owner_chat_id(),
         "chat_ids": db.chat_ids(),
         "last_search_ts": float(db.get_kv("last_search_ts", 0) or 0),
-        "queued": len(db.queued_found()),
+        # in coda e da mandare appena possibile: la Light aspetta il riepilogo delle 19 (non sveglia il bot ogni 5 minuti)
+        "queued": sum(len(db.queued_found(c)) for c in db.queued_chats() if plans.is_full(db, c)),
         "watches": any_watch,
         "settings": {k: db.get_settings().get(k) for k in ("interval_minutes", "paused", "quiet_hours")},
         "per_user": True,

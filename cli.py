@@ -73,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "actions":
         commands = TelegramCommands(index, db)
         commands.ensure_menu()  # menu comandi e presentazione del bot, solo quando cambiano
+        from pokebot import plans
+        plans.migrate(db)  # chi era dentro prima dei piani tiene tutto
         # ogni persona collegata ha i suoi album di casa (nati "tutte mancanti"): devono esistere nel database salvato
         for chat in db.chat_ids():
             for sid in config.HOME_SET_IDS:
@@ -98,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
             except Exception as exc:  # noqa: BLE001
                 print(f"getMe: {exc}")
         if commands.enabled:
+            for line in plans.check_trials(db, commands.client):  # promemoria e fine della prova
+                print(f"piani · {line}")
             from pokebot import channel
             line = channel.post_daily(db, index, commands.client)  # canale degli affari: una volta al giorno
             if line:
