@@ -23,7 +23,7 @@ header{position:sticky;top:0;z-index:5;background:linear-gradient(180deg,var(--r
 .title small{color:#ffe9a8;font-weight:700;font-size:12px;margin-left:auto}
 main{padding:12px;padding-bottom:40px}.hidden{display:none!important}
 .card-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
-input[type=search],select,input[type=number],textarea{padding:9px 12px;border-radius:12px;border:2px solid var(--line);background:var(--sec);color:var(--txt);font:700 15px "Nunito",sans-serif}
+input[type=search],select,input[type=number],textarea{padding:9px 12px;border-radius:12px;border:2px solid var(--line);background:var(--sec);color:var(--txt);font:700 16px "Nunito",sans-serif}  /* 16px: sotto, iOS zooma la pagina quando scrivi */
 input[type=search]{flex:1;min-width:150px}
 .pill{font-size:12px;font-weight:800;padding:5px 11px;border-radius:999px;background:var(--sec);color:var(--hint);border:2px solid transparent}.pill.on{color:#1a1a1a;background:var(--yel);border-color:#fff3b0}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(98px,1fr));gap:9px}
@@ -121,7 +121,7 @@ textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
   </section>
 
   <section id="tab-coll" class="hidden">
-    <div class="card-row"><input id="qc" type="search" placeholder="Cerca una collezione o una carta…"></div>
+    <div class="card-row"><input id="qc" type="search" enterkeyhint="search" placeholder="Cerca una collezione o una carta…"></div>
     <div id="coll-list"><p class="hint">Carico il catalogo…</p></div>
   </section>
 
@@ -130,7 +130,7 @@ textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
     <div id="cseg-check">
     <div id="check-head"></div>
     <div class="card-row">
-      <input id="q" type="search" placeholder="Cerca nome o numero…">
+      <input id="q" type="search" enterkeyhint="search" placeholder="Cerca nome o numero…">
       <select id="rar"><option value="">Tutte le rarità</option></select>
     </div>
     <div class="card-row" id="setpills"></div>
@@ -154,7 +154,7 @@ textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
     <div id="cseg-found" class="hidden">
     <div class="seg"><button data-seg="ann" class="on">Annunci</button><button data-seg="prz">Prezzi</button><button data-seg="spesa">🛒 Spesa</button></div>
     <div id="seg-ann">
-      <div class="card-row"><input id="qf" type="search" placeholder="Filtra per carta…"><span class="pill" id="fcount"></span></div>
+      <div class="card-row"><input id="qf" type="search" enterkeyhint="search" placeholder="Filtra per carta…"><span class="pill" id="fcount"></span></div>
       <div id="folders"></div>
     </div>
     <div id="seg-prz" class="hidden">
@@ -962,6 +962,15 @@ function renderSettings() {
   document.querySelectorAll("#tab-settings [data-cmd].btn").forEach((b) => b.onclick = async () => { if (await sendCmd(b.dataset.cmd)) toast("Inviato " + b.dataset.cmd + ": guarda la chat"); });
 }
 
+
+/* ---------- tastiera: Invio la chiude, e si chiude anche scorrendo i risultati ---------- */
+document.querySelectorAll("input[type=search]").forEach((i) => i.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); i.blur(); } }));
+let scrollY0 = 0;
+window.addEventListener("scroll", () => {
+  const a = document.activeElement;
+  if (a && a.matches("input[type=search]") && Math.abs(window.scrollY - scrollY0) > 40) a.blur();
+}, { passive: true });
+document.querySelectorAll("input[type=search]").forEach((i) => i.addEventListener("focus", () => { scrollY0 = window.scrollY; }));
 
 /* ---------- navigazione ---------- */
 const TITLES = { home: "Pokébot", coll: "Collezioni", settings: "Impostazioni", friends: "Amici", reports: "Segnalazioni", admin: "Utenti" };
