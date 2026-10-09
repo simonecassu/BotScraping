@@ -389,15 +389,12 @@ class Database:
         self.set_kv(f"active_sets:{chat_id}", ids)
 
     def current_set(self, chat_id: str = "") -> str:
-        """Collezione su cui lavorano i comandi: personale per chat, altrimenti quella generale."""
-        if chat_id:
-            v = self.get_kv(f"current_set:{chat_id}")
-            if v:
-                return str(v)
-        return str(self.get_kv("current_set") or config.HOME_SET_IDS[0])
+        """Collezione su cui lavorano i comandi di quella persona (all'inizio la 30th)."""
+        chat_id = chat_id or self.owner_chat_id() or "me"
+        return str(self.get_kv(f"current_set:{chat_id}") or config.HOME_SET_IDS[0])
 
     def set_current(self, set_id: str, chat_id: str = "") -> None:
-        self.set_kv(f"current_set:{chat_id}" if chat_id else "current_set", set_id)
+        self.set_kv(f"current_set:{chat_id or self.owner_chat_id() or 'me'}", set_id)
 
     # ---- persone collegate (proprietario + invitati) --------------------------
     def owner_chat_id(self) -> str:
@@ -592,6 +589,11 @@ class Database:
         if ids:
             with self.connect() as c:
                 c.executemany("UPDATE found SET notified = 1 WHERE id = ?", [(i,) for i in ids])
+
+    def found_keys(self) -> set[str]:
+        """Tutti gli annunci già trovati dalla ricerca (consegnati o in coda a chi li voleva)."""
+        with self.connect() as c:
+            return {r["listing_key"] for r in c.execute("SELECT DISTINCT listing_key FROM found")}
 
     def list_found(self, limit: int = 2000) -> list[dict]:
         with self.connect() as c:

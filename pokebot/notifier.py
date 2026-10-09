@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import html
 import logging
+import time
 
 import requests
 
 from . import config
+from .db import masked
 from .matcher import MatchResult
 from .scrapers.base import Listing
 
@@ -39,18 +41,24 @@ class TelegramNotifier:
         ok_any = False
         for cid in self.chat_ids:
             body = dict(payload, chat_id=cid)
-            try:
-                if files:
-                    resp = requests.post(url, data=body, files=files, timeout=config.HTTP_TIMEOUT * timeout_mult)
+            for attempt in range(2):
+                try:
+                    if files:
+                        resp = requests.post(url, data=body, files=files, timeout=config.HTTP_TIMEOUT * timeout_mult)
+                    else:
+                        resp = requests.post(url, json=body, timeout=config.HTTP_TIMEOUT * timeout_mult)
+                except requests.RequestException as exc:
+                    log.log(log_level, "Telegram %s (chat %s): errore di rete: %s", method, masked(cid), type(exc).__name__)
+                    break
+                wait = _retry_after(resp)
+                if resp.status_code == 429 and attempt == 0 and wait <= 30:  # troppi messaggi di fila: aspetta e riprova
+                    time.sleep(wait)
+                    continue
+                if resp.status_code != 200:
+                    log.log(log_level, "Telegram %s (chat %s): HTTP %s %s", method, masked(cid), resp.status_code, resp.text[:200])
                 else:
-                    resp = requests.post(url, json=body, timeout=config.HTTP_TIMEOUT * timeout_mult)
-            except requests.RequestException as exc:
-                log.log(log_level, "Telegram %s (chat %s): errore di rete: %s", method, cid, exc)
-                continue
-            if resp.status_code != 200:
-                log.log(log_level, "Telegram %s (chat %s): HTTP %s %s", method, cid, resp.status_code, resp.text[:200])
-                continue
-            ok_any = True
+                    ok_any = True
+                break
         return ok_any
 
     def send(self, text: str, disable_preview: bool = False) -> bool:
@@ -125,7 +133,7 @@ class TelegramNotifier:
     def notify_many(self, items: list[tuple[Listing, MatchResult]], max_per_card: int = 5, images: bool = True) -> list[bool]:
         """Un messaggio per carta con i `max_per_card` annunci più economici del ciclo; i lotti a parte.
 
-        Restituisce, per ogni elemento di `items`, True se è stato inviato.
+        Restituisce, per ogni elemento di `items`, True se il suo messaggio è partito.
         """
         groups = group_matches(items)
         sent_keys: set[str] = set()
@@ -146,8 +154,8 @@ class TelegramNotifier:
             ok = (self.send_group_with_photos(text, listing_photos, image, images) if any(listing_photos)
                   else self.send_with_image(text, image, images))
             self._collage_rows = None
-            if ok:
-                sent_keys.update(lst.key for lst, _ in chosen)
+            if ok:  # anche gli annunci oltre il tetto per carta: il messaggio dice quanti altri ce ne sono
+                sent_keys.update(lst.key for lst, _ in members)
         return [lst.key in sent_keys for lst, _ in items]
 
     def notify_deal(self, listing: Listing, result: MatchResult, median: float, images: bool = True,
@@ -165,6 +173,13 @@ class TelegramNotifier:
 
     def test_message(self) -> bool:
         return self.send("✅ PokéBot collegato: riceverai qui gli annunci delle carte mancanti.", True)
+
+
+def _retry_after(resp) -> float:
+    try:
+        return float(resp.json().get("parameters", {}).get("retry_after", 5))
+    except Exception:  # noqa: BLE001
+        return 5.0
 
 
 def _price_key(listing: Listing) -> float:

@@ -23,6 +23,13 @@ def _key(token: str | None = None) -> bytes:
     return hashlib.sha256(("pokebot-state-v1:" + token).encode()).digest()
 
 
+def file_id(chat_id: str, token: str | None = None) -> str:
+    """Nome del file di stato di una persona: un'impronta del chat id, così nel branch pubblico non compare
+    chi usa il bot (il ponte la calcola allo stesso modo)."""
+    token = token if token is not None else config.TELEGRAM_BOT_TOKEN
+    return hashlib.sha256(f"pokebot-file:{token}:{chat_id}".encode()).hexdigest()[:32]
+
+
 def seal(data: bytes, token: str | None = None) -> bytes:
     nonce = os.urandom(12)
     return MAGIC + nonce + AESGCM(_key(token)).encrypt(nonce, data, None)

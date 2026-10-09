@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
@@ -160,8 +161,9 @@ def card_map(db: Database, tcg_set: str, get=_http_get) -> list[dict]:
     return cards
 
 
-def match_card(card, tcg_cards: list[dict]) -> str | None:
-    """Stesso nome e numero; se i numeri non coincidono (ristampe come la Classic Collection), il nome se è unico.
+def match_card(card, tcg_cards: list[dict], name_unique: bool = True) -> str | None:
+    """Stesso nome e numero; se i numeri non coincidono (ristampe come la Classic Collection), il nome se è unico
+    sia da TCGdex sia nella nostra collezione (`name_unique`: due Lapras diversi non prendono lo stesso prezzo).
     Prima il nome identico, poi quello simile ("Palkia LV.X" ↔ "Palkia"); senza nome, solo il numero."""
     name, num = _norm(card.name), _num(card.number)
     exact = [c for c in tcg_cards if c["name"] and c["name"] == name]
@@ -171,7 +173,7 @@ def match_card(card, tcg_cards: list[dict]) -> str | None:
         for c in group:
             if c["num"] == num:
                 return c["id"]
-        if len(group) == 1:
+        if len(group) == 1 and name_unique:
             return group[0]["id"]
         if group:
             return None  # più carte con quel nome e nessuna con quel numero: meglio nessun prezzo che uno sbagliato
@@ -209,6 +211,7 @@ def refresh(db: Database, index, budget: int = 250, wanted_first: set[str] | Non
     if not todo:
         return ""
     cmaps: dict[str, list[dict]] = {}
+    names = Counter((s.id, _norm(c.name)) for s in sets for c in s.cards)
     jobs = []
     for card in todo:
         tset = smap[card.set_id]
@@ -219,7 +222,7 @@ def refresh(db: Database, index, budget: int = 250, wanted_first: set[str] | Non
                 log.warning("TCGdex collezione %s: %s", tset, exc)
                 cmaps[tset] = None
         if cmaps[tset] is not None:
-            jobs.append((card, match_card(card, cmaps[tset])))
+            jobs.append((card, match_card(card, cmaps[tset], names[(card.set_id, _norm(card.name))] == 1)))
 
     def one(job):
         card, tid = job

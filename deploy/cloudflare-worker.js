@@ -15,6 +15,7 @@ const ALLOWED_UPDATES = ["message", "callback_query", "pre_checkout_query"];
 const NOT_MEMBER = "non sei ancora tra le persone collegate al bot: scrivi /start al bot per metterti in lista d'attesa";
 
 const repoOf = (env) => env.GITHUB_REPO || DEFAULT_REPO;
+const tok = (env) => String(env.TELEGRAM_BOT_TOKEN || "").trim(); // come config.py: un a-capo nel secret non cambia le chiavi
 const enc = new TextEncoder();
 
 async function sha256Hex(text) {
@@ -23,8 +24,10 @@ async function sha256Hex(text) {
 }
 
 // segreti ricavati dal token: niente da configurare a mano
-const webhookSecret = async (env) => (await sha256Hex("pokebot-webhook:" + env.TELEGRAM_BOT_TOKEN)).slice(0, 40);
-const adminKey = async (env) => (await sha256Hex("pokebot-admin:" + env.TELEGRAM_BOT_TOKEN)).slice(0, 40);
+const webhookSecret = async (env) => (await sha256Hex("pokebot-webhook:" + tok(env))).slice(0, 40);
+const adminKey = async (env) => (await sha256Hex("pokebot-admin:" + tok(env))).slice(0, 40);
+// nome del file di stato di una persona (come vault.file_id): nel branch pubblico non compare il chat id
+const fileId = async (env, chatId) => (await sha256Hex(`pokebot-file:${tok(env)}:${chatId}`)).slice(0, 32);
 
 function sameText(a, b) { // confronto a tempo costante
   a = String(a || ""); b = String(b || "");
@@ -37,7 +40,7 @@ function sameText(a, b) { // confronto a tempo costante
 const MAGIC = [0x50, 0x4b, 0x42, 0x31];
 
 async function stateKey(env) {
-  const raw = await crypto.subtle.digest("SHA-256", enc.encode("pokebot-state-v1:" + env.TELEGRAM_BOT_TOKEN));
+  const raw = await crypto.subtle.digest("SHA-256", enc.encode("pokebot-state-v1:" + tok(env)));
   return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
 }
 
@@ -63,25 +66,25 @@ function base64(bytes) {
   return btoa(s);
 }
 
-// Un file di stato dal branch bot-state (state.json = riepilogo, state-<chat>.json = una persona), decifrato.
+// Un file di stato dal branch bot-state (state.json = riepilogo, state-<impronta>.json = una persona), decifrato.
+// Dall'API di GitHub con il token del ponte: sempre aggiornato (niente cache del CDN) e senza i limiti delle letture anonime.
 async function readState(env, name = "state.json") {
   try {
-    const url = `https://raw.githubusercontent.com/${repoOf(env)}/bot-state/${name}.enc?t=${Date.now()}`;
-    const r = await fetch(url, { cf: { cacheTtl: 0 } });
+    const r = await gh(env, "GET", `/repos/${repoOf(env)}/contents/${name}.enc?ref=bot-state`, undefined, "application/vnd.github.raw");
     if (r.ok) return JSON.parse(new TextDecoder().decode(await unseal(env, await r.arrayBuffer())));
   } catch {}
   return null;
 }
 
-// Chat autorizzate: il proprietario e le persone accettate (dal riepilogo del bot).
-async function allowedChatIds(env, st) {
+// Chat autorizzate: il proprietario e le persone accettate (dal riepilogo del bot). null se il riepilogo non si legge:
+// allora nessuno viene respinto (decide il bot, che conosce le persone collegate).
+async function allowedChatIds(env) {
+  const st = await readState(env);
+  if (!st) return null;
   const ids = new Set();
-  if (env.TELEGRAM_CHAT_ID) ids.add(String(env.TELEGRAM_CHAT_ID));
-  st = st || (await readState(env));
-  if (st) {
-    if (st.owner_chat_id) ids.add(String(st.owner_chat_id));
-    for (const c of st.chat_ids || []) ids.add(String(c));
-  }
+  if (env.TELEGRAM_CHAT_ID) ids.add(String(env.TELEGRAM_CHAT_ID).trim());
+  if (st.owner_chat_id) ids.add(String(st.owner_chat_id));
+  for (const c of st.chat_ids || []) ids.add(String(c));
   return ids;
 }
 
@@ -102,7 +105,7 @@ function timerReason(st, nowSec) {
 }
 
 async function telegram(env, method, body) {
-  const r = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
+  const r = await fetch(`https://api.telegram.org/bot${tok(env)}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body || {}),
@@ -120,12 +123,12 @@ async function ensureWebhook(env) {
   await telegram(env, "setWebhook", { url: w.url, secret_token: await webhookSecret(env), allowed_updates: ALLOWED_UPDATES, drop_pending_updates: false });
 }
 
-async function gh(env, method, path, body) {
+async function gh(env, method, path, body, accept = "application/vnd.github+json") {
   return fetch(`https://api.github.com${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${env.GITHUB_TOKEN}`,
-      Accept: "application/vnd.github+json",
+      Accept: accept,
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": "pokebot-bridge",
       "Content-Type": "application/json",
@@ -166,13 +169,15 @@ async function sendCommand(env, chatId, text, name, extra) {
   return true;
 }
 
-// Chi non è collegato può solo chiedere l'accesso, e non più di una volta ogni 30 minuti (per istanza del worker):
-// così nessuno può far partire GitHub a raffica.
+// Chi non è collegato può solo chiedere l'accesso: lo stesso messaggio una volta ogni 30 minuti, e non più di 50
+// richieste di sconosciuti ogni 30 minuti (per istanza del worker), così nessuno può far partire GitHub a raffica.
+// Un "/start CODICE" d'invito è un messaggio diverso dal "/start" di prima: passa.
 const strangerSeen = new Map();
-function strangerAllowed(chatId, nowMs) {
+function strangerAllowed(chatId, text, nowMs) {
   for (const [k, t] of strangerSeen) if (nowMs - t > 30 * 60 * 1000) strangerSeen.delete(k);
-  if (strangerSeen.has(chatId) || strangerSeen.size >= 50) return false;
-  strangerSeen.set(chatId, nowMs);
+  const key = chatId + " " + text.trim().toLowerCase();
+  if (strangerSeen.has(key) || strangerSeen.size >= 50) return false;
+  strangerSeen.set(key, nowMs);
   return true;
 }
 
@@ -191,6 +196,7 @@ async function memberFrom(env, request) {
   const user = await verifyInitData(env, body.initData);
   if (!user) return { error: Response.json({ ok: false, error: "non autenticato: riapri l'app da Telegram" }, { status: 401 }) };
   const ids = await allowedChatIds(env);
+  if (!ids) return { error: Response.json({ ok: false, error: "il bot si sta aggiornando: riprova tra un minuto" }, { status: 503 }) };
   if (!ids.has(String(user.id))) return { error: Response.json({ ok: false, error: NOT_MEMBER }, { status: 403 }) };
   return { user, body };
 }
@@ -208,7 +214,7 @@ async function verifyInitData(env, initData) {
   if (!hash) return null;
   params.delete("hash");
   const dataCheck = [...params.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("\n");
-  const secret = await hmac(enc.encode("WebAppData"), env.TELEGRAM_BOT_TOKEN);
+  const secret = await hmac(enc.encode("WebAppData"), tok(env));
   const expected = [...(await hmac(secret, dataCheck))].map((b) => b.toString(16).padStart(2, "0")).join("");
   if (!sameText(expected, hash)) return null;
   const authDate = Number(params.get("auth_date") || 0);
@@ -239,7 +245,7 @@ export default {
       if (request.method !== "POST") return Response.json({ per_user: true });
       const m = await memberFrom(env, request);
       if (m.error) return m.error;
-      const st = await readState(env, `state-${m.user.id}.json`);
+      const st = await readState(env, `state-${await fileId(env, m.user.id)}.json`);
       if (!st) return Response.json({ ok: false, error: "il bot sta preparando i tuoi dati: riprova tra un minuto" }, { status: 404 });
       return Response.json(st, { headers: { "Cache-Control": "no-store" } });
     }
@@ -250,11 +256,11 @@ export default {
       const text = String(m.body.text || "").trim().slice(0, 4000);
       if (!text.startsWith("/")) return Response.json({ ok: false, error: "comando non valido" }, { status: 400 });
       const ok = await sendCommand(env, m.user.id, text, m.user.first_name || m.user.username || "");
-      return Response.json({ ok }, { status: ok ? 200 : 502 });
+      return Response.json(ok ? { ok } : { ok, error: "il bot non risponde adesso: riprova tra un minuto" }, { status: ok ? 200 : 502 });
     }
 
     if (request.method === "GET") {
-      if (!env.TELEGRAM_BOT_TOKEN || !env.GITHUB_TOKEN) return page("⚠️ Ponte non configurato", "<p>Esegui il workflow «Ponte Telegram».</p>");
+      if (!tok(env) || !env.GITHUB_TOKEN) return page("⚠️ Ponte non configurato", "<p>Esegui il workflow «Ponte Telegram».</p>");
       // /setup e /reset solo con la chiave (la manda ponte.yml): nessun altro può spostare il webhook
       if (url.pathname === "/setup" || url.pathname === "/reset") {
         if (!sameText(request.headers.get("X-Pokebot-Key"), await adminKey(env))) return new Response("forbidden", { status: 403 });
@@ -317,10 +323,11 @@ export default {
     if (!msg || !text || (msg.chat && msg.chat.type !== "private")) return new Response("ok");
     const chatId = String(msg.chat.id);
     const frm = (update.callback_query ? update.callback_query.from : msg.from) || {};
-    const known = (await allowedChatIds(env)).has(chatId);
+    const ids = await allowedChatIds(env);
+    const known = !ids || ids.has(chatId);
     if (!known) { // sconosciuto: solo /start va al bot (lista d'attesa), il resto si ferma qui
       const isStart = /^\/start(@\w+)?(\s|$)/i.test(text.trim());
-      if (!isStart || !strangerAllowed(chatId, Date.now())) {
+      if (!isStart || !strangerAllowed(chatId, text, Date.now())) {
         await telegram(env, "sendMessage", { chat_id: chatId, text: isStart
           ? "👋 Richiesta ricevuta: ti avviso io appena l'accesso viene attivato."
           : "👋 Pokébot è su invito. Scrivi /start per metterti in lista d'attesa: ti avviso io appena l'accesso viene attivato." });

@@ -80,7 +80,7 @@ def format_post(deals: list[dict], bot_username: str, day: dt.date | None = None
         low = f", minimo {d['low']:.2f} €" if d.get("low") else ""
         lines.append(f"{cardmarket.VERDICT_LABEL[d['verdict']]} · <b>{esc(d['card'])}</b>\n"
                      f"<b>{d['price']:.2f} €</b> su {esc(SOURCE_LABELS.get(d['source'], d['source']))} · "
-                     f"{pct}% del valore Cardmarket (trend {d['trend']:.2f} €{low})\n"
+                     f"{pct}% del valore Cardmarket ({d['trend']:.2f} €{low})\n"
                      f'<a href="{esc(d["url"], quote=True)}">{esc(d["title"][:70])}</a>\n')
     lines.append("Prezzi confrontati con Cardmarket. Trovati da Pokébot, che cerca su Wallapop, Vinted ed eBay le carte "
                  "che mancano alla tua collezione e ti avvisa appena spuntano. 5 giorni di prova con tutto, poi gratis in versione Light.")

@@ -1,0 +1,181 @@
+"""Regressioni del secondo audit: inseguimenti, consegne, riepilogo Light, limiti, permessi, privacy dello stato."""
+import datetime as dt
+import time
+from zoneinfo import ZoneInfo
+
+from pokebot import cardmarket, plans, search, watch
+from pokebot.scrapers.base import Listing
+from pokebot.telegram_bot import CommandHandler, TelegramCommands
+from tests.test_audit_search import _two_people
+from tests.test_search import FakeNotifier, FakeScraper, make_db
+from tests.test_telegram import FakeClient
+
+ROME = ZoneInfo("Europe/Rome")
+
+
+class FailingNotifier(FakeNotifier):
+    def notify_many(self, items, max_per_card=5, images=True):
+        return [False] * len(items)
+
+
+def test_chase_skips_listings_the_search_already_found(index):
+    db = make_db()
+    db.save_settings({"sources": ["fake"], "quiet_hours": None})
+    watch.add_watch(db, "me55-131", 3600, 300)
+    db.add_found("fake:X", "fake", "Lapras 131/128", "https://f/x", "10 €", "", "single",
+                 [{"id": "me55-131", "label": "Lapras", "sure": True}], None, True)  # consegnato dalla ricerca completa
+    n = FakeNotifier()
+    scr = FakeScraper([Listing("fake", "X", "Lapras 131/128 30th", "https://f/x", price=10.0, price_text="10 €")])
+    watch.run_watches(index, db, n, {"fake": scr})
+    assert n.sent == []
+
+
+def test_chase_retries_listings_whose_send_failed(index):
+    db = make_db()
+    db.save_settings({"sources": ["fake"], "quiet_hours": None})
+    watch.add_watch(db, "me55-131", 3600, 300)
+    scr = FakeScraper([Listing("fake", "Y", "Lapras 131/128 30th", "https://f/y", price=10.0, price_text="10 €")])
+    watch.run_watches(index, db, FailingNotifier(), {"fake": scr})
+    assert watch.list_watches(db)["me55-131"]["sent"] == [] and watch.found_log(db) == []
+    w = watch.list_watches(db)
+    w["me55-131"]["last"] -= 600
+    db.set_kv("watches:me", w)
+    n = FakeNotifier()
+    watch.run_watches(index, db, n, {"fake": scr})
+    assert [l.key for l, _ in n.sent] == ["fake:Y"]
+
+
+def test_paused_chases_do_not_wake_the_bridge_and_still_expire(index):
+    from pokebot.webapp_export import build_summary
+    db = make_db()
+    db.save_user_prefs("me", {"paused": True})
+    watch.add_watch(db, "me55-131", 3600, 300)
+    assert build_summary(index, db)["next_watch"] is None
+    w = watch.list_watches(db)
+    w["me55-131"]["until"] = time.time() - 1
+    db.set_kv("watches:me", w)
+    watch.run_watches(index, db, FakeNotifier(), {"fake": FakeScraper([])})
+    assert watch.list_watches(db) == {}
+
+
+def test_light_digest_goes_back_to_19_after_a_missed_evening():
+    db = make_db()
+    day = dt.datetime(2026, 10, 5, tzinfo=ROME)
+    at = lambda d, h, m=0: day.replace(day=d, hour=h, minute=m).timestamp()  # noqa: E731
+    queued_at = at(5, 15)
+    assert not plans.digest_due(db, "2", at(5, 18, 30), oldest=queued_at)
+    assert plans.digest_due(db, "2", at(6, 0, 10), oldest=queued_at)  # nessun giro tra le 19 e mezzanotte: recupero
+    plans.mark_digest(db, "2", at(6, 0, 10))
+    assert not plans.digest_due(db, "2", at(6, 9), oldest=at(6, 8))
+    assert plans.digest_due(db, "2", at(6, 19, 5), oldest=at(6, 8))  # la sera dopo di nuovo alle 19
+    plans.mark_digest(db, "2", at(6, 19, 5))
+    assert not plans.digest_due(db, "2", at(7, 0, 10), oldest=at(6, 20))
+
+
+def test_failed_queue_sends_stay_queued_for_a_day(index):
+    db = _two_people(index)
+    fid = db.add_found("k1", "vinted", "Lapras 131", "https://v/1", "10 €", "", "single",
+                       [{"id": "me55-131", "label": "Lapras", "sure": True}], None, False)
+    db.enqueue("2", [fid])
+    assert search.flush_queued(db, FailingNotifier(), {}, index.by_id, "2") == 0
+    assert db.queued_count("2") == 1  # Telegram non ha risposto: si riprova
+    with db.connect() as c:
+        c.execute("UPDATE found SET created_at = ?", (time.time() - 2 * 86400,))
+    search.flush_queued(db, FailingNotifier(), {}, index.by_id, "2")
+    assert db.queued_count("2") == 0  # dopo un giorno si lascia perdere
+
+
+def test_queued_lot_without_missing_cards_is_dropped(index):
+    db = _two_people(index)
+    fid = db.add_found("lot", "vinted", "Lotto 30th", "https://v/l", "30 €", "", "lot",
+                       [{"id": "me55-131", "label": "Lapras", "sure": True}], 0.5, False)
+    db.enqueue("2", [fid])
+    db.set_kv("active_sets:2", [])  # collezione spenta
+    n = FakeNotifier()
+    assert search.flush_queued(db, n, {}, index.by_id, "2") == 0 and n.sent == [] and db.queued_count("2") == 0
+
+
+def test_light_cannot_chase_two_cards(index, monkeypatch):
+    monkeypatch.setattr("pokebot.config.TELEGRAM_CHAT_ID", "")
+    db = make_db()
+    db.set_kv("telegram_chat_id", "1")
+    db.add_chat_id("2")
+    plans.set_light(db, "2")
+    h = CommandHandler(index, db)
+    h.handle("/insegui 152", "2")
+    h.handle("/insegui 151 152", "2")
+    assert list(watch.list_watches(db, "2")) == ["me55-152"]
+
+
+def test_non_owner_search_limits(index, monkeypatch):
+    monkeypatch.setattr("pokebot.config.TELEGRAM_CHAT_ID", "")
+    monkeypatch.setattr(search, "search_card", lambda *a, **k: ([], {}))
+    db = make_db()
+    db.set_kv("telegram_chat_id", "1")
+    db.add_chat_id("2")
+    h = CommandHandler(index, db)
+    first = h.handle("/cerca 145", "2").text
+    assert "prossima tra" not in first and "prossima tra" in h.handle("/cerca 146", "2").text
+    assert "prossima tra" not in h.handle("/cerca 145", "1").text  # il proprietario no
+
+
+def test_kicked_user_cannot_rejoin_with_an_old_invite(index, monkeypatch):
+    monkeypatch.setattr("pokebot.config.TELEGRAM_CHAT_ID", "")
+    db = make_db()
+    client = FakeClient([])
+    tc = TelegramCommands(index, db, client=client)
+    tc.handle_payload({"chat_id": 1, "text": "/start"})
+    code = db.get_kv("invite_code") or {}
+    if not code:
+        tc.handler.handle("/invita", "1")
+        code = db.get_kv("invite_code")
+    db.add_chat_id("5")
+    tc.handler.handle("/espelli 5", "1")
+    tc.handle_payload({"chat_id": 5, "text": f"/start {code['code']}"})
+    assert "5" not in db.chat_ids() and db.is_banned("5")
+
+
+def test_huge_numbers_do_not_crash(index, monkeypatch):
+    monkeypatch.setattr("pokebot.config.TELEGRAM_CHAT_ID", "")
+    db = make_db()
+    db.set_kv("telegram_chat_id", "1")
+    db.add_chat_id("2")
+    h = CommandHandler(index, db)
+    assert "✅" in h.handle("/piano 2 pro 99999999999999", "1").text
+    assert h.handle("/utenti", "1").text
+    assert plans._date(8.6e18) == "?"
+    assert watch.parse_duration("9" * 400 + "h") == 1000 * 3600
+    assert "Inseguo" in h.handle("/insegui 151 " + "9" * 400 + "h", "2").text
+
+
+def test_paying_stranger_starts_with_the_intro(index, monkeypatch):
+    monkeypatch.setattr("pokebot.config.TELEGRAM_CHAT_ID", "")
+    db = make_db()
+    db.set_kv("telegram_chat_id", "1")
+    client = FakeClient([])
+    tc = TelegramCommands(index, db, client=client)
+    tc.handle_payload({"chat_id": 9, "text": "/pagamento", "payment": {
+        "currency": "XTR", "total_amount": 250, "invoice_payload": "pro:3", "telegram_payment_charge_id": "c9",
+        "subscription_expiration_date": time.time() + 30 * 86400}})
+    assert "9" in db.chat_ids() and plans.onboarding(db, "9") and plans.tier(db, "9") == "pro"
+
+
+def test_cardmarket_name_fallback_needs_a_unique_name():
+    class C:
+        def __init__(self, name, number):
+            self.name, self.number = name, number
+    tcg = [{"id": "30th-017", "name": cardmarket._norm("Lapras"), "num": "17"}]
+    assert cardmarket.match_card(C("Lapras", "17"), tcg, name_unique=False) == "30th-017"
+    assert cardmarket.match_card(C("Lapras", "131"), tcg, name_unique=False) is None
+    assert cardmarket.match_card(C("Lapras", "4"), tcg) == "30th-017"  # ristampa con nome unico
+
+
+def test_state_shows_only_own_cards_of_each_listing(index, monkeypatch):
+    from pokebot.webapp_export import build_state
+    db = _two_people(index)
+    db.set_wanted_bulk(["me55-130"], False, db.albums_of("2")["me55"])
+    db.add_found("lot", "vinted", "Lotto", "https://v/l", "30 €", "", "lot",
+                 [{"id": "me55-131", "label": "Lapras", "sure": True}, {"id": "me55-130", "label": "Moltres", "sure": True}],
+                 1.0, True)
+    st = build_state(index, db, chat_id="2")
+    assert [r["cards"] for r in st["found"]] == [["me55-131"]]

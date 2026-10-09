@@ -272,8 +272,11 @@ def _row_to_pair(row: dict, index_by_id: dict | None = None, mine: set[str] | No
         if card is None or (mine is not None and card.id not in mine):
             continue
         (wanted if m.get("sure", True) else possible).append(card)
+    total = len(wanted) + len(possible)
+    if row["kind"] == "lot" and row.get("ratio"):  # carte del lotto: quelle riconosciute come mancanti / quota
+        total = max(total, round(len(row["matched"]) / float(row["ratio"])))
     res = MatchResult(row["kind"], True, "dalla coda", wanted=wanted, possible_wanted=possible,
-                      total_cards=len(wanted) + len(possible), wanted_count=len(wanted), ratio=row.get("ratio"))
+                      total_cards=total, wanted_count=len(wanted), ratio=row.get("ratio"))
     return lst, res
 
 
@@ -283,32 +286,39 @@ def _mine(db: Database, chat: str) -> set[str]:
     return {cid for cid in db.wanted_for(chat) if cid.rsplit("-", 1)[0] in on}
 
 
+QUEUE_RETRY_S = 24 * 3600  # un annuncio che non si riesce a consegnare si riprova per un giorno, poi si lascia
+
+
 def flush_queued(db: Database, notifier: TelegramNotifier, settings: dict, index_by_id: dict,
                  chat_id: str = "", header: str = "🌅 <b>Accumulati durante la pausa: {n} annunci</b>") -> int:
-    """Invia gli annunci accumulati da una persona (pausa, ore notturne o riepilogo della Light), raggruppati per carta.
-    Quelli di carte che nel frattempo ha trovato, o di collezioni spente, si scartano."""
+    """Invia gli annunci accumulati da una persona (pausa, ore notturne, invii falliti o riepilogo della Light),
+    raggruppati per carta. Quelli di carte che nel frattempo ha trovato, o di collezioni spente, si scartano.
+    Restituisce quanti ne sono partiti; quelli non partiti restano in coda (al massimo un giorno)."""
     rows = db.queued_found(chat_id)
     if not rows:
         return 0
     mine = _mine(db, chat_id) if chat_id else None
     pairs = []
-    ids = []
+    queued = []
     for r in rows:
         lst, res = _row_to_pair(r, index_by_id, mine)
-        if not (res.wanted or res.possible_wanted) and r["kind"] != "lot":
+        if not (res.wanted or res.possible_wanted):
             db.mark_sent([r["id"]], False, chat_id)
             continue
         pairs.append((lst, res))
-        ids.append(r["id"])
+        queued.append(r)
     if not pairs:
         return 0
     notifier.send(header.format(n=len(pairs)), disable_preview=True)
     outcomes = notifier.notify_many(pairs, max_per_card=int(settings.get("max_per_card", 5) or 5),
                                     images=bool(settings.get("images", True)))
-    for row_id, sent in zip(ids, outcomes):
-        db.mark_sent([row_id], sent, chat_id)
-    log.info("Coda inviata a %s: %d annunci", masked(chat_id) if chat_id else "tutti", len(pairs))
-    return len(pairs)
+    old = time.time() - QUEUE_RETRY_S
+    for r, sent in zip(queued, outcomes):
+        if sent or float(r["created_at"]) < old:
+            db.mark_sent([r["id"]], sent, chat_id)
+    n = sum(outcomes)
+    log.info("Coda inviata a %s: %d annunci su %d", masked(chat_id) if chat_id else "tutti", n, len(pairs))
+    return n
 
 
 def flush_all_queues(db: Database, index_by_id: dict | None = None) -> int:
@@ -330,7 +340,8 @@ def flush_all_queues(db: Database, index_by_id: dict | None = None) -> int:
             n = flush_queued(db, TelegramNotifier(chat_ids=[chat]), settings, index_by_id, chat,
                              header="📬 <b>Il tuo riepilogo di oggi: {n} annunci</b>\n"
                                     "Con /abbonati li ricevi nel momento in cui escono, prima degli altri.")
-            plans.mark_digest(db, chat)
+            if n or not db.queued_count(chat):  # se Telegram non ha risposto, si riprova al prossimo giro
+                plans.mark_digest(db, chat)
             total += n
             continue
         total += flush_queued(db, TelegramNotifier(chat_ids=[chat]), settings, index_by_id, chat)
@@ -378,8 +389,10 @@ def _notify_pending(pending: list, db: Database, report: RunReport, dry_run: boo
             report.queued += len(pending)
             log.info("In coda per %s (%s): %d annunci", masked(chat), "Light" if light else "pausa/notte", len(pending))
             continue
-        delivered, deals = _deliver(pending, ntf, st, history, dry_run, report, pending_keys, cm)
+        delivered, deals, failed = _deliver(pending, ntf, st, history, dry_run, report, pending_keys, cm)
         log.info("Consegna a %s: %d annunci, %d inviati", masked(chat), len(pending), len(delivered))
+        if chat and failed:  # Telegram non ha risposto: si riprova al prossimo giro
+            db.enqueue(chat, [found_ids[k] for k in failed])
         sent_any |= delivered
         deal_keys |= deals
     db.mark_notified([found_ids[k] for k in sent_any])
@@ -412,9 +425,10 @@ def _for_person(pending: list, mine: set[str], st: dict, already: set[str]) -> l
 
 
 def _deliver(pending: list, notifier: TelegramNotifier, settings: dict, history: list[dict], dry_run: bool,
-             report: RunReport | None, pending_keys: set[str] | None = None, cm: dict | None = None) -> tuple[set[str], set[str]]:
+             report: RunReport | None, pending_keys: set[str] | None = None, cm: dict | None = None
+             ) -> tuple[set[str], set[str], set[str]]:
     """Consegna a una persona: affari 🔥, poi i gruppi per carta con il tetto per giro.
-    Restituisce (chiavi inviate, chiavi segnalate come affare)."""
+    Restituisce (chiavi inviate, chiavi segnalate come affare, chiavi il cui invio è fallito)."""
     images = bool(settings.get("images", True))
     deal_pct = float(settings.get("deal_pct", 70) or 0)
     max_per_card = int(settings.get("max_per_card", 5) or 5)
@@ -448,7 +462,7 @@ def _deliver(pending: list, notifier: TelegramNotifier, settings: dict, history:
             if report:
                 report.deals += int(ok)
                 report.notified += int(ok)
-            log.info("AFFARE [%s] %s %.2f € (mediana %.2f)", lst.source, lst.title[:60], lst.price, median)
+            log.info("AFFARE [%s] %s %.2f € (riferimento %.2f)", lst.source, lst.title[:60], lst.price, median)
     rest = [(lst, res) for lst, res in pending if lst.key not in deals]
     # tetto ai messaggi per giro: oltre il limite restano solo nello storico (anti-valanga)
     max_msgs = int(settings.get("max_messages_per_run", 10) or 0)
@@ -471,12 +485,15 @@ def _deliver(pending: list, notifier: TelegramNotifier, settings: dict, history:
         outcomes = notifier.notify_many(rest, max_per_card=max_per_card, images=images)
     if overflow_note and not dry_run:
         notifier.send(overflow_note, disable_preview=True)
+    failed = set()
     for (lst, _), ok in zip(rest, outcomes):
         if ok:
             sent.add(lst.key)
+        elif not dry_run:
+            failed.add(lst.key)
         if report:
             report.notified += int(ok)
-    return sent, deals
+    return sent, deals, failed
 
 
 _BARE_NUM_RE = re.compile(r"(?<![\d/])0*(\d{1,3})(?![\d/])")
@@ -508,11 +525,13 @@ def card_queries(card, index: CardIndex | None = None) -> list[str]:
 
 
 def search_card(index: CardIndex, db: Database, card, settings: dict | None = None, scrapers: dict | None = None,
-                limit: int = 10, exclude: set[str] | None = None) -> tuple[list[tuple[Listing, "MatchResult"]], dict[str, str]]:
+                limit: int = 10, exclude: set[str] | None = None, store: bool = True
+                ) -> tuple[list[tuple[Listing, "MatchResult"]], dict[str, str]]:
     """Ricerca mirata di una carta su tutte le fonti: gli annunci in vendita adesso, dal più economico.
 
-    `exclude`: chiavi da saltare (per un inseguimento, quelle che ha già mandato). Gli annunci nuovi finiscono nello
-    storico, ma NON vengono segnati come visti: la ricerca completa li consegna comunque a chi altro li cerca.
+    `exclude`: chiavi da saltare (per un inseguimento, quelle già mandate o già trovate dalla ricerca completa).
+    Con `store` gli annunci nuovi finiscono nello storico (/cerca); in ogni caso NON vengono segnati come visti:
+    la ricerca completa li consegna comunque a chi altro li cerca.
     """
     settings = settings or db.get_settings()
     matcher = Matcher(index, settings.get("set_keywords"))
@@ -538,8 +557,8 @@ def search_card(index: CardIndex, db: Database, card, settings: dict | None = No
     items = sorted(found.values(), key=lambda pair: (pair[0].price if pair[0].price is not None else float("inf")))
     if exclude:
         items = [pair for pair in items if pair[0].key not in exclude]
-    existing = {r["listing_key"] for r in db.list_found()}
-    for lst, res in items[:limit]:
+    existing = db.found_keys() if store else set()
+    for lst, res in (items[:limit] if store else []):
         if lst.key not in existing:
             db.add_found(lst.key, lst.source, lst.title, lst.url, lst.price_text or (f"{lst.price:.2f} €" if lst.price else None),
                          lst.location, res.kind, res.matched_payload or [{"id": card.id, "label": card.label, "sure": True}],

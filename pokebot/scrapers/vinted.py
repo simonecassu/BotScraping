@@ -107,7 +107,10 @@ class VintedScraper(BaseScraper):
             title = (raw_title[: meta.start()] if meta else raw_title).strip(" ,")
             title = cls._ANY_PRICE.split(title)[0].strip(" ,-") or title
             price_text = ""
-            pm = cls._PRICE_IN_TITLE.search(raw_title) or cls._ANY_PRICE.search(raw_title)
+            # il prezzo vero sta nei metadati dopo il titolo: un "5 € l'una" scritto dal venditore non conta
+            tail = raw_title[meta.start():] if meta else ""
+            pm = (cls._PRICE_IN_TITLE.search(tail) or cls._ANY_PRICE.search(tail)
+                  or cls._PRICE_IN_TITLE.search(raw_title) or cls._ANY_PRICE.search(raw_title))
             if pm:
                 price_text = (pm.group(1) if pm.lastindex else pm.group(0)).strip()
             else:

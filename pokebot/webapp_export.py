@@ -1,11 +1,13 @@
 """Stato per la Mini App e per il ponte, pubblicato (cifrato, vedi vault.py) nel branch bot-state a ogni giro.
 
 - `state.json.enc`: il riepilogo che serve al ponte (chi è collegato, quando svegliare il bot);
-- `state-<chat>.json.enc`: lo stato di una persona per la sua Mini App (solo i suoi dati).
+- `state-<impronta>.json.enc`: lo stato di una persona per la sua Mini App (solo i suoi dati); il nome del file è
+  un'impronta del chat id (`vault.file_id`), così nel branch pubblico non si vede chi usa il bot.
 """
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 
@@ -13,8 +15,10 @@ from . import cardmarket, channel, config, plans, shopping, vault, watch
 from . import collections as coll
 from . import stats as pstats
 from .cards import CardIndex
-from .db import Database
+from .db import Database, masked
 from .scrapers.base import parse_price
+
+log = logging.getLogger(__name__)
 
 SETTING_KEYS = ["interval_minutes", "lot_min_ratio", "max_price", "max_per_card", "sources", "language",
                 "deal_pct", "images", "paused", "quiet_hours", "home_active"]
@@ -59,7 +63,9 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300, chat_id: s
     settings = dict(db.settings_for(chat_id), home_active=any(s.id in active for s in home_index.sets))
     comp = pstats.completion(home_index, wanted, shared.rows, shared.cm)
     prices = {cid: p for cid in my_ids if (p := shared.price(index.by_id[cid])) is not None}
-    mine = [r for r in shared.rows if any(m["id"] in my_ids for m in r["matched"])]
+    # annunci delle carte che le mancano, e di ogni annuncio solo le sue carte (non quelle cercate da altri)
+    mine = [dict(r, matched=[m for m in r["matched"] if m["id"] in wanted]) for r in shared.rows
+            if any(m["id"] in wanted for m in r["matched"])]
     last = shared.last_run
     watches = []
     for cid, w in watch.list_watches(db, chat_id).items():
@@ -142,10 +148,12 @@ def _shopping(groups: dict[str, list], wanted: set[str], shared: Shared) -> dict
 
 
 def _plan_info(db: Database, chat_id: str) -> dict:
+    full = plans.is_full(db, chat_id)
     return {"tier": plans.tier(db, chat_id), "label": plans.describe(db, chat_id), "price": plans.PRICE_STARS,
-            "onboarding": plans.onboarding(db, chat_id),
-            "max_active": None if plans.is_full(db, chat_id) else plans.LIGHT_MAX_ACTIVE,
-            "invoice": plans.cached_invoice(db, chat_id)}
+            "onboarding": plans.onboarding(db, chat_id), "invoice": plans.cached_invoice(db, chat_id),
+            # limiti della versione Light (None = nessun limite)
+            "max_active": None if full else plans.LIGHT_MAX_ACTIVE,
+            "max_collections": None if full else plans.LIGHT_MAX_COLLECTIONS}
 
 
 def build_summary(index: CardIndex, db: Database) -> dict:
@@ -153,9 +161,12 @@ def build_summary(index: CardIndex, db: Database) -> dict:
     from .search import notifications_suppressed
     now = time.time()
     members = db.chat_ids()
-    # inseguimenti: il prossimo controllo dovuto (per la Light ogni 2 ore, non ogni 5 minuti)
+    # inseguimenti: il prossimo controllo dovuto (per la Light ogni 2 ore, non ogni 5 minuti); chi è in pausa o di
+    # notte non conta: i suoi inseguimenti ripartono con la ricerca normale
     next_watch = None
     for chat, ws in watch.all_watches(db):
+        if notifications_suppressed(db.settings_for(chat)):
+            continue
         every_min = 0 if plans.is_full(db, chat) else plans.LIGHT_WATCH_EVERY_S
         for w in ws.values():
             due = float(w.get("last") or 0) + max(float(w.get("every") or 0), every_min)
@@ -178,17 +189,22 @@ def build_summary(index: CardIndex, db: Database) -> dict:
 
 
 def write_state(index: CardIndex, db: Database, folder: str, seal: bool = True) -> list[str]:
-    """Scrive il riepilogo e lo stato di ogni persona collegata in `folder` (cifrati, se `seal`). Restituisce i file."""
+    """Scrive il riepilogo e lo stato di ogni persona collegata in `folder` (cifrati e con i nomi a impronta, se
+    `seal`). Il riepilogo per primo: senza, il ponte non riconosce nessuno. Restituisce i file scritti."""
     os.makedirs(folder, exist_ok=True)
-    shared = Shared(index, db)
-    files = {"state.json": build_summary(index, db)}
-    for chat in (db.chat_ids() or [db.owner_chat_id() or "me"]):
-        files[f"state-{chat}.json"] = build_state(index, db, chat_id=chat, shared=shared)
-    out = []
-    for name, data in files.items():
+
+    def write(name: str, data: dict) -> str:
         raw = json.dumps(data, ensure_ascii=False).encode()
         path = os.path.join(folder, name + (".enc" if seal else ""))
         with open(path, "wb") as f:
             f.write(vault.seal(raw) if seal else raw)
-        out.append(path)
+        return path
+
+    out = [write("state.json", build_summary(index, db))]
+    shared = Shared(index, db)
+    for chat in (db.chat_ids() or [db.owner_chat_id() or "me"]):
+        try:  # lo stato di una persona che non si riesce a costruire non blocca quello degli altri
+            out.append(write(f"state-{vault.file_id(chat) if seal else chat}.json", build_state(index, db, chat_id=chat, shared=shared)))
+        except Exception:  # noqa: BLE001
+            log.exception("Stato della Mini App non scritto per %s", masked(chat))
     return out

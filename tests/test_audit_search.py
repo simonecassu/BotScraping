@@ -49,7 +49,7 @@ def _deliveries(monkeypatch):
 
     def fake_deliver(pending, ntf, st, *a, **k):
         got.setdefault(ntf.chat_ids[0], []).extend(lst.listing_id for lst, _ in pending)
-        return {lst.key for lst, _ in pending}, set()
+        return {lst.key for lst, _ in pending}, set(), set()
     monkeypatch.setattr(search, "_deliver", fake_deliver)
     return got
 

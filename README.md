@@ -15,7 +15,7 @@ Gira gratis su **GitHub Actions** e risponde subito grazie a un piccolo **ponte 
 | | Completo (prova e abbonamento) | Light (gratis) |
 |---|---|---|
 | Notifiche | appena esce un annuncio | un riepilogo al giorno, alle 19 |
-| Inseguimenti (`/insegui`) | più carte, controllo ogni 5 minuti | una carta, controllo ogni 2 ore |
+| Inseguimenti (`/insegui`) | fino a 10 carte, controllo ogni 5 minuti | una carta, controllo ogni 2 ore |
 | Collezioni | senza limiti | 5, di cui 3 con la ricerca accesa |
 
 Abbonamento: 250 Stars ogni 30 giorni (`/abbonati`). Rimborso intero entro 3 giorni dal pagamento
@@ -40,7 +40,7 @@ un annuncio già pubblicato non torna il giorno dopo.
 
 ## Prezzi: Cardmarket come riferimento
 
-Il valore di ogni carta è il **trend Cardmarket**, letto una volta al giorno dall'API gratuita di
+Il valore di ogni carta è il **trend Cardmarket** (se manca, la media degli ultimi giorni), letto una volta al giorno dall'API gratuita di
 [TCGdex](https://tcgdex.dev) (Cardmarket blocca la lettura diretta). Avviso 🔥 *affare* quando un annuncio costa
 meno del 70% del trend e meno del minimo Cardmarket (`/affari 70`, modificabile). Le carte senza prezzo Cardmarket
 (es. appena uscite) usano i prezzi degli annunci visti dal bot.
@@ -86,14 +86,17 @@ GitHub sospende i workflow pianificati dopo 60 giorni senza attività sul reposi
   Il cron di GitHub in `bot.yml` è una riserva oraria.
 - Il **bot** (`python cli.py actions`) esegue i comandi in coda, gli inseguimenti, la ricerca e le consegne, poi
   salva lo stato nel branch `bot-state`.
-- Chi non è collegato può solo chiedere l'accesso (`/start`, al massimo una volta ogni 30 minuti).
+- Chi non è collegato può solo chiedere l'accesso (`/start`; lo stesso messaggio al massimo una volta ogni 30 minuti).
+- I comandi escono dalla coda solo dopo che lo stato è stato salvato: se un giro si interrompe, il successivo li ritrova
+  (un pagamento ripetuto si riconosce e non conta due volte).
 
 ### Privacy e cifratura
 
 Il repository è pubblico, quindi tutto ciò che il bot salva nei branch (`bot-state`: database e stato della Mini App;
 `bot-queue`: comandi in arrivo) è **cifrato con AES-GCM**, con una chiave ricavata da `TELEGRAM_BOT_TOKEN`
-(`pokebot/vault.py`, lo stesso formato nel ponte). La Mini App riceve dal ponte solo i dati di chi la apre,
-dopo aver verificato la firma di Telegram. Nei log di GitHub Actions i chat id compaiono accorciati.
+(`pokebot/vault.py`, lo stesso formato nel ponte); anche i nomi dei file sono impronte, non chat id. La Mini App
+riceve dal ponte solo i dati di chi la apre, dopo aver verificato la firma di Telegram, e di ogni annuncio solo le
+carte che mancano a lei. Nei log di GitHub Actions i chat id compaiono accorciati.
 
 **Attenzione**: se cambi il token del bot, lo stato salvato non si legge più e il workflow si ferma al ripristino
 (senza sovrascrivere nulla). Prima di cambiarlo scarica il database in chiaro da un PC

@@ -26,6 +26,8 @@ _TRADE_RE = re.compile(r"\b(scambio|scambi|scambiare|trade|swap)\b")
 _SELL_RE = re.compile(r"\b(vendo|vendita|vendesi|in vendita|prezzo|euro|eur)\b")
 _EURO_AMOUNT_RE = re.compile(r"\d\s*€|€\s*\d")  # sul testo originale: normalize toglie il simbolo
 
+# "carta da collezione" è la descrizione di una carta, non un lotto
+_COLLECTIBLE_RE = re.compile(r"\b(?:cart[ae] )?da collezione\b")
 # parole che indicano un lotto vero e proprio
 _LOT_WORDS_RE = re.compile(r"\b(lotto|lotti|lot|bundle|collezione|stock|blocco)\b")
 # quantità ("x2", "2 carte"): da sole, con una sola carta riconosciuta, indicano più copie della stessa carta
@@ -125,7 +127,10 @@ class Matcher:
             other = self.detect_other_language(title_n, text)
             if other:
                 return MatchResult("excluded", False, f"lingua diversa ({other})")
+        numbered = any(rx.search(title_n) for _, rx in self._number_res)
         for rx, why in _EXCLUDE_RE:
+            if why == "accessorio" and numbered:
+                continue  # "Lapras 131/128 in toploader": la carta c'è, la bustina è solo la protezione
             if rx.search(title_n) or (rx.search(text) and why in ("carta non originale", "codice / digitale")):
                 return MatchResult("excluded", False, why)
         if _TRADE_RE.search(title_n) and not (_SELL_RE.search(text) or _EURO_AMOUNT_RE.search(f"{title} {description}")):
@@ -150,7 +155,7 @@ class Matcher:
         # come "carta da collezione" o "spedizione con protezione completa"
         distinct = len(refs) if refs else len(ambiguous)
         is_lot = (
-            bool(_LOT_WORDS_RE.search(title_n))
+            bool(_LOT_WORDS_RE.search(_COLLECTIBLE_RE.sub(" ", title_n)))
             or bool(_FULL_SET_RE.search(title_n))
             or distinct >= 2
         )

@@ -48,7 +48,8 @@ def test_stranger_start_goes_to_waitlist_and_owner_approves(index, monkeypatch):
     assert db.albums_of("2")  # album di casa creati
     assert any(c == "2" and "attivo" in t for c, t in client.sent)
     # ora Anna può usare il bot
-    assert tc.handle_payload({"chat_id": 2, "text": "/cerca"}) is True
+    tc.handle_payload({"chat_id": 2, "text": "/stato"})
+    assert any(c == "2" and "Mancanti" in t for c, t in client.sent)  # ora Anna è collegata
     # rifiuto e approva tutti
     tc.handle_payload({"chat_id": 4, "text": "/start"})
     assert "tolto" in tc.handler.handle("/rifiuta 3", "1").text

@@ -173,7 +173,7 @@ def test_onboarding_welcome_and_no_notifications_until_ready(index, monkeypatch)
     assert "Prima riempi" in tc.handler.handle("/start", "2").text
 
     delivered = []
-    monkeypatch.setattr(search, "_deliver", lambda pending, ntf, st, *a, **k: (delivered.append(len(pending)) or (set(), set())))
+    monkeypatch.setattr(search, "_deliver", lambda pending, ntf, st, *a, **k: (delivered.append(len(pending)) or (set(), set(), set())))
 
     from pokebot.matcher import MatchResult
     from pokebot.scrapers.base import Listing

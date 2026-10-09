@@ -9,10 +9,12 @@
                                  Telegram arrivati, esegue la ricerca, compatta il database
   python cli.py export-json DIR  scrive lo stato per la Mini App e il ponte (cifrato; --chiaro per guardarlo)
   python cli.py seal SRC DST     cifra un file per il branch pubblico bot-state (unseal: il contrario)
+  python cli.py queue-ack        cancella dalla coda i comandi eseguiti (dopo aver salvato lo stato)
 """
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
@@ -23,6 +25,9 @@ from pokebot.matcher import Matcher
 from pokebot.notifier import TelegramNotifier
 from pokebot.search import run_search
 from pokebot.telegram_bot import TelegramCommands
+
+
+QUEUE_DONE = config.DATA_DIR / "queue-done.json"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -45,6 +50,7 @@ def main(argv: list[str] | None = None) -> int:
         sp.add_argument("src")
         sp.add_argument("dst")
     sub.add_parser("db-hash", help="impronta del contenuto del database (per salvare lo stato solo se cambiato)")
+    sub.add_parser("queue-ack", help="cancella dalla coda i comandi eseguiti nell'ultimo giro")
     ac = sub.add_parser("actions", help="comandi Telegram + ricerca + pulizia (per GitHub Actions / cron)")
     ac.add_argument("--force", action="store_true", help="cerca anche se l'intervallo non è ancora passato")
     args = p.parse_args(argv)
@@ -57,6 +63,12 @@ def main(argv: list[str] | None = None) -> int:
             data = f.read()
         with open(args.dst, "wb") as f:
             f.write(vault.seal(data) if args.cmd == "seal" else vault.unseal(data))
+        return 0
+    if args.cmd == "queue-ack":
+        from pokebot.queue import GitHubQueue
+        if QUEUE_DONE.exists():
+            GitHubQueue().ack(json.loads(QUEUE_DONE.read_text(encoding="utf-8")))
+            QUEUE_DONE.unlink()
         return 0
     if args.cmd == "db-hash":
         import hashlib
@@ -93,7 +105,8 @@ def main(argv: list[str] | None = None) -> int:
                 coll.album_for(db, chat, sid)
         want_search = False
         from pokebot.queue import GitHubQueue
-        n_queue, want_search = GitHubQueue().drain(commands.handle_payload)  # comandi salvati dal ponte
+        # comandi salvati dal ponte: si cancellano dalla coda (queue-ack) solo dopo aver salvato lo stato
+        n_queue, want_search = GitHubQueue().drain(commands.handle_payload, done_file=str(QUEUE_DONE))
         if n_queue:
             print(f"Comandi dalla coda: {n_queue}")
         if not commands.enabled:

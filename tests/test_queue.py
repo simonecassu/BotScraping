@@ -71,3 +71,17 @@ def test_vault_roundtrip_and_plaintext_passthrough():
     blob = vault.seal(b"ciao", TOKEN)
     assert vault.is_sealed(blob) and vault.unseal(blob, TOKEN) == b"ciao"
     assert vault.unseal(b"{}", TOKEN) == b"{}"
+
+
+def test_deferred_ack_and_unreadable_files(monkeypatch, tmp_path):
+    import time
+    other = vault.seal(b'{"chat_id": 7, "text": "/stato"}', "999:altro")  # cifrato con un altro token, appena arrivato
+    files = {f"queue/{int(time.time() * 1000)}-a.json": other, "queue/9999999999999-b.json": vault.seal(b'{"chat_id": 7, "text": "/stato"}', TOKEN)}
+    calls = _fake(monkeypatch, files)
+    q = GitHubQueue(token="t", repo="o/r")
+    done = tmp_path / "done.json"
+    handled = []
+    assert q.drain(lambda p: handled.append(p["text"]), done_file=str(done)) == (1, False)
+    assert handled == ["/stato"] and not [c for c in calls if c[0] == "DELETE"]  # niente cancellato prima del salvataggio
+    q.ack(json.loads(done.read_text()))
+    assert [c for c in calls if c[0] == "DELETE"] == [("DELETE", "9999999999999-b.json")]  # quello illeggibile resta (per ora)

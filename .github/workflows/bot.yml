@@ -69,6 +69,7 @@ jobs:
           FORCE: ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }}
         run: python cli.py actions $FORCE
 
+      # I comandi eseguiti escono dalla coda solo dopo il salvataggio: se il giro si interrompe, il prossimo li ritrova.
       - name: Salva lo stato
         if: always() && steps.restore.outcome == 'success'
         env:
@@ -77,7 +78,7 @@ jobs:
         run: |
           test -f data/pokebot.db || exit 0
           if [ "$(python cli.py db-hash)" = "$(cat /tmp/db-hash-before)" ]; then
-            echo "nulla è cambiato: stato non risalvato"; exit 0
+            echo "nulla è cambiato: stato non risalvato"; python cli.py queue-ack; exit 0
           fi
           rm -rf /tmp/state && mkdir -p /tmp/state
           python cli.py export-json /tmp/state || echo "::warning::stato per la Mini App non scritto"
@@ -88,3 +89,4 @@ jobs:
           git -c user.name=pokebot -c user.email=pokebot@users.noreply.github.com add .
           git -c user.name=pokebot -c user.email=pokebot@users.noreply.github.com commit -q -m "stato"
           git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" bot-state
+          cd "$GITHUB_WORKSPACE" && python cli.py queue-ack

@@ -143,30 +143,32 @@ def describe(db: Database, chat: str, now: float | None = None) -> str:
 def _date(ts) -> str:
     try:
         return dt.datetime.fromtimestamp(float(ts), ZoneInfo(config.TIMEZONE)).strftime("%d/%m")
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError, OSError):
         return "?"
 
 
-def _today(now: float) -> str:
-    return dt.datetime.fromtimestamp(now, ZoneInfo(config.TIMEZONE)).date().isoformat()
-
-
 # ---- riepilogo giornaliero della Light ---------------------------------------------
-def digest_due(db: Database, chat: str, now: float | None = None, oldest: float | None = None) -> bool:
-    """Dalle 19, una volta al giorno. Se il riepilogo di ieri è saltato (ore silenziose sulle 19), parte al primo
-    momento utile: lo si capisce dall'annuncio più vecchio in coda (`oldest`), che sarebbe dovuto uscire ieri sera."""
-    now = now or time.time()
+def _digest_slot(now: float) -> float:
+    """Le 19 più recenti (oggi se sono già passate, altrimenti ieri): ogni riepilogo copre uno di questi appuntamenti."""
     local = dt.datetime.fromtimestamp(now, ZoneInfo(config.TIMEZONE))
-    if db.get_kv(f"digest_last:{chat}") == local.date().isoformat():
+    slot = local.replace(hour=DIGEST_HOUR, minute=0, second=0, microsecond=0)
+    return (slot if local >= slot else slot - dt.timedelta(days=1)).timestamp()
+
+
+def digest_due(db: Database, chat: str, now: float | None = None, oldest: float | None = None) -> bool:
+    """Dalle 19, una volta al giorno. Se l'appuntamento delle 19 è saltato (pausa, ore silenziose, nessun giro), parte
+    al primo momento utile, ma solo per gli annunci che avrebbero dovuto esserci (`oldest`, il più vecchio in coda):
+    quella sera conta come servita e la sera dopo si torna alle 19."""
+    now = now or time.time()
+    slot = _digest_slot(now)
+    if float(db.get_kv(f"digest_slot:{chat}", 0) or 0) >= slot:
         return False
-    if local.hour >= DIGEST_HOUR:
-        return True
-    yesterday_digest = (local - dt.timedelta(days=1)).replace(hour=DIGEST_HOUR, minute=0, second=0, microsecond=0)
-    return oldest is not None and oldest < yesterday_digest.timestamp()
+    local = dt.datetime.fromtimestamp(now, ZoneInfo(config.TIMEZONE))
+    return local.hour >= DIGEST_HOUR or (oldest is not None and oldest < slot)
 
 
 def mark_digest(db: Database, chat: str, now: float | None = None) -> None:
-    db.set_kv(f"digest_last:{chat}", _today(now or time.time()))
+    db.set_kv(f"digest_slot:{chat}", _digest_slot(now or time.time()))
 
 
 # ---- limiti della Light ------------------------------------------------------------

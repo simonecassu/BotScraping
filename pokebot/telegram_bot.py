@@ -5,6 +5,7 @@ o con un codice d'invito. Ogni messaggio può contenere più comandi, uno per ri
 """
 from __future__ import annotations
 
+import datetime as dt
 import html
 import json
 import logging
@@ -12,6 +13,7 @@ import math
 import re
 import time
 from dataclasses import dataclass, field
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -41,8 +43,8 @@ HELP = """<b>Comandi</b>
 /aggiungi 131 132 149-152 c4 – segna come mancanti (anche ir, sir, pr, un nome o tutte) · /ho 131 – l'hai trovata
 /collezione – le tue collezioni · /collezione sv8 – passa a quella (o la segue, partendo da "mi mancano tutte")
 /collezione sv8 attiva | disattiva – accende o spegne la ricerca e le notifiche di quella collezione · sv8:7 – una sua carta in qualsiasi comando
-/cerca 145 – cosa c'è in vendita adesso per quella carta, dal più economico
-/insegui 151 – per 6 ore la cerca ogni 5 minuti e ti avvisa appena spunta un annuncio nuovo · /insegui 151 2h ogni 10m · /insegui stop
+/cerca 145 – cosa c'è in vendita adesso per quella carta, dal più economico (una ricerca ogni 15 minuti)
+/insegui 151 – per 6 ore la cerca ogni 5 minuti (Light: ogni 2 ore) e ti avvisa appena spunta un annuncio nuovo · /insegui 151 2h ogni 10m · /insegui stop
 /storico – gli annunci trovati, divisi per carta e marketplace
 /prezzi 145 – valore Cardmarket e annunci visti · /prezzi – quanto costa finire la collezione
 /valore – quanto vale ciò che hai · /progresso – avanzamento per rarità
@@ -67,6 +69,8 @@ OWNER_HELP = """
 /cerca – ricerca completa adesso · /storico svuota · /resetvisti – rinotifica gli annunci già visti"""
 
 
+CERCA_EVERY_S = 15 * 60  # ricerche mirate dal vivo (/cerca 145) per chi non è il proprietario
+
 # Presentazione del bot: la descrizione compare nella chat vuota prima di "Avvia", la breve nel profilo e nei link
 BOT_DESCRIPTION = ("🃏 Pokébot trova le carte Pokémon che mancano alla tua collezione.\n\n"
                    "✅ Segni nell'app le carte che hai: le altre le cerco io su Vinted, Wallapop ed eBay\n"
@@ -78,7 +82,7 @@ BOT_SHORT_DESCRIPTION = "Cerca su Vinted, Wallapop ed eBay le carte Pokémon che
 PROFILE_VERSION = 3
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot); il proprietario ne ha uno suo
-MENU_VERSION = 18
+MENU_VERSION = 19
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -86,7 +90,7 @@ MENU_COMMANDS = [
     ("collezione", "Le tue collezioni; /collezione sv8 passa a quella"),
     ("lista", "Tutte le carte della collezione con i numeri"),
     ("cerca", "Cosa c'e' in vendita adesso per una carta: /cerca 145"),
-    ("insegui", "Cerca una carta ogni 5 minuti per 6 ore: /insegui 151"),
+    ("insegui", "Cerca una carta per 6 ore e avvisa sui nuovi annunci: /insegui 151"),
     ("storico", "Annunci trovati, divisi per carta e marketplace"),
     ("prezzi", "Valore Cardmarket di una carta (/prezzi 145) o costo per finire (/prezzi)"),
     ("valore", "Valore delle carte che hai e costo per finire"),
@@ -319,12 +323,20 @@ class CommandHandler:
         self.chat = str(chat_id or "") or self.db.owner_chat_id() or "me"
         lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
         if len(lines) <= 1:
-            return self._handle_one(lines[0] if lines else "", chat_id)
-        replies = [self._handle_one(ln, chat_id) for ln in lines]
+            return self._safe_one(lines[0] if lines else "", chat_id)
+        replies = [self._safe_one(ln, chat_id) for ln in lines]
         return Reply("\n\n".join(r.text for r in replies), run_search=any(r.run_search for r in replies),
                      buttons=next((r.buttons for r in reversed(replies) if r.buttons), None),
                      document=next((r.document for r in reversed(replies) if r.document), None),
                      sends=[x for r in replies for x in (r.sends or [])] or None)
+
+    def _safe_one(self, text: str, chat_id: str = "") -> Reply:
+        """Un comando che va in errore risponde con un messaggio, senza fermare gli altri né il giro del bot."""
+        try:
+            return self._handle_one(text, chat_id)
+        except Exception:  # noqa: BLE001
+            log.exception("Comando fallito: %s", text.split(" ", 1)[0][:30])
+            return Reply("⚠️ Non sono riuscito a eseguire " + html.escape(text.split(" ", 1)[0][:30]) + ": riprova o scrivi /aiuto.")
 
     def _help(self, chat_id: str = "") -> str:
         return HELP + (OWNER_HELP.format(refund_days=plans.REFUND_DAYS) if self._is_owner(chat_id or self.chat) else "")
@@ -424,15 +436,19 @@ class CommandHandler:
                 return Reply("⚙️ Accetto annunci in qualsiasi lingua.")
             return Reply("Usa <code>/lingua ita</code> oppure <code>/lingua tutte</code>.")
         if cmd == "/cerca":
-            if args.strip():
-                return self._search_cards(args)
-            if not self._is_owner(chat_id or self.chat):  # la ricerca completa vale per tutti: una richiesta ogni 15 minuti
+            owner = self._is_owner(chat_id or self.chat)
+            if not args.strip():
+                if owner:
+                    return Reply("🔎 Ok, cerco adesso.", run_search=True)
+                return Reply("🔎 La ricerca completa gira da sola per tutti, più volte all'ora. "
+                             "Per vedere subito cosa c'è in vendita per una carta: <code>/cerca 145</code>.")
+            if not owner:  # le ricerche mirate interrogano i marketplace dal vivo: una ogni 15 minuti
                 last = float(self.db.get_kv(f"last_cerca:{self.chat}", 0) or 0)
-                if time.time() - last < 15 * 60:
-                    return Reply("🔎 Ho appena cercato: la ricerca completa si può chiedere una volta ogni 15 minuti. "
-                                 "Per una carta sola usa <code>/cerca 145</code>.")
+                if time.time() - last < CERCA_EVERY_S:
+                    wait = int(CERCA_EVERY_S - (time.time() - last)) // 60 + 1
+                    return Reply(f"🔎 Hai appena fatto una ricerca: la prossima tra {wait} min.")
                 self.db.set_kv(f"last_cerca:{self.chat}", time.time())
-            return Reply("🔎 Ok, cerco adesso.", run_search=True)
+            return self._search_cards(args)
         if cmd == "/insegui":
             return self._chase(args)
         if cmd in ("/amico", "/amica"):
@@ -641,7 +657,7 @@ class CommandHandler:
 
     # ------------------------------------------------------------------
     def _prices(self, args: str) -> Reply:
-        rows = self.db.list_found()
+        rows = pstats.PriceRows(self.db.list_found())
         arg = args.strip().lower()
         if arg:
             card = self._one_card(arg)
@@ -860,7 +876,7 @@ class CommandHandler:
         if len(a) == 1:
             return Reply(f"{who}: {plans.describe(self.db, target)}")
         what = a[1].lower()
-        n = int(a[2]) if len(a) > 2 and a[2].isdigit() else 0
+        n = min(int(a[2]), 3650) if len(a) > 2 and a[2].isdigit() and len(a[2]) < 6 else 0
         if what in ("sempre", "gratis", "regala"):
             plans.set_pro(self.db, target, lifetime=True)
         elif what == "light":
@@ -1233,10 +1249,10 @@ class CommandHandler:
             every = max(every, plans.LIGHT_WATCH_EVERY_S)
             duration = max(duration, every)
         active = watch.list_watches(self.db, self.chat)
-        asked = {c.id for c in cards}
-        room = max_w - len({cid for cid in active if cid not in asked})
-        left_out = cards[max(0, room):]
-        cards = cards[:max(0, room)]
+        renew = [c for c in cards if c.id in active]  # già inseguite: si rinnovano senza occupare posti nuovi
+        new = [c for c in cards if c.id not in active]
+        room = max(0, max_w - len(active))
+        cards, left_out = renew + new[:room], new[room:]
         if not cards:
             if light:
                 return Reply(f"🌱 Con la versione Light puoi inseguire una carta alla volta, controllata ogni "
@@ -1291,7 +1307,7 @@ class CommandHandler:
         """Annunci trovati più i punti prezzo, senza contare due volte lo stesso annuncio."""
         found = self.db.list_found()
         keys = {r["listing_key"] for r in found}
-        return found + [r for r in self.db.price_rows() if r["listing_key"] not in keys]
+        return pstats.PriceRows(found + [r for r in self.db.price_rows() if r["listing_key"] not in keys])
 
     def _value(self) -> Reply:
         cur = self.current()
@@ -1399,7 +1415,7 @@ class CommandHandler:
         return Reply("Copia e incolla dove vuoi:\n\n" + "\n".join(f"<code>{html.escape(ln)}</code>" for ln in lines))
 
     def _progress(self) -> Reply:
-        comp = pstats.completion(self.scope_index(), self._wanted(), self.db.list_found(), cardmarket.all_prices(self.db))
+        comp = pstats.completion(self.scope_index(), self._wanted(), pstats.PriceRows(self.db.list_found()), cardmarket.all_prices(self.db))
         filled = round(comp.percent / 10)
         bar = "🟩" * filled + "⬜" * (10 - filled)
         lines = [f"📊 <b>{html.escape(self.current().name)}</b>: {comp.owned}/{comp.total} carte ({comp.percent:.0f}%)", bar]
@@ -1454,7 +1470,7 @@ class CommandHandler:
     def _export(self) -> Reply:
         from .export import build_workbook
         content = build_workbook(self.index, self.db, self._wanted(), self._my_sets(), self._my_rows())
-        name = time.strftime("pokebot_%Y%m%d_%H%M.xlsx")
+        name = dt.datetime.now(ZoneInfo(config.TIMEZONE)).strftime("pokebot_%Y%m%d_%H%M.xlsx")
         return Reply("📎 Ecco il file Excel: checklist, storico annunci e prezzi.", document=(name, content))
 
     # ------------------------------------------------------------------
@@ -1525,14 +1541,13 @@ class CommandHandler:
             items.sort(key=lambda r: (parse_price(r.get("price")) or float("inf"), -r["created_at"]))
             lines.append(f"\n<b>{html.escape(pstats.SOURCE_LABELS.get(src, src))}</b> ({len(items)})")
             for r in items[:per_source]:
-                when = time.strftime("%d/%m", time.localtime(r["created_at"]))
+                when = dt.datetime.fromtimestamp(r["created_at"], ZoneInfo(config.TIMEZONE)).strftime("%d/%m")
                 price = html.escape(r.get("price") or "n.d.")
-                sent = "" if r.get("notified") else " · non inviato"
                 extra = ""
                 if show_cards:
                     labels = [m["label"] for m in r["matched"][:3]]
                     extra = " · " + html.escape(", ".join(labels)) + (" …" if len(r["matched"]) > 3 else "")
-                lines.append(f'• {price} · {when}{sent} · <a href="{html.escape(r["url"], quote=True)}">{html.escape(r["title"][:60])}</a>{extra}')
+                lines.append(f'• {price} · {when} · <a href="{html.escape(r["url"], quote=True)}">{html.escape(r["title"][:60])}</a>{extra}')
             if len(items) > per_source:
                 lines.append(f"  … e altri {len(items) - per_source}")
         return Reply("\n".join(lines), buttons=[[("⬅️ Cartelle", "/storico")]])
@@ -1604,23 +1619,28 @@ class CommandHandler:
         wanted = self._wanted()
         act_cards = [c for s_ in self._my_sets() if s_.id in active for c in s_.cards]
         flags.insert(0, f"📚 {html.escape(self.current().name)} corrente")
+        owner = self._is_owner(self.chat)
         lines = [f"🃏 Mancanti nelle collezioni cercate: <b>{sum(1 for c in act_cards if c.id in wanted)}</b>/{len(act_cards)} · " + " · ".join(flags),
-                 f"⚙️ Ricerca ogni {int(s['interval_minutes'])} min · max {int(s.get('max_per_card', 5))} annunci per carta · "
-                 f"soglia lotti {s['lot_min_ratio'] * 100:.0f}% · prezzo max {price_txt} · lingua: {s.get('language', 'ita')} · "
-                 f"fonti: {', '.join(s['sources'])}"]
+                 f"⚙️ Max {int(s.get('max_per_card', 5))} annunci per carta · soglia lotti {s['lot_min_ratio'] * 100:.0f}% · "
+                 f"prezzo max {price_txt} · lingua: {s.get('language', 'ita')}"
+                 + (f" · ricerca ogni {int(s['interval_minutes'])} min · fonti: {', '.join(s['sources'])}" if owner else "")]
         if runs:
             r = runs[0]
-            when = time.strftime("%d/%m %H:%M", time.localtime(r["started_at"]))
+            when = dt.datetime.fromtimestamp(r["started_at"], ZoneInfo(config.TIMEZONE)).strftime("%d/%m %H:%M")
             lines.append(f"🕒 Ultimo ciclo {when}: {r['listings_seen']} annunci letti, {r['matches']} segnalati")
             per_source = r.get("per_source") or {}
             if per_source:
                 lines.append("📊 Letti per fonte: " + " · ".join(
                     f"{pstats.SOURCE_LABELS.get(k, k)} {v}" for k, v in per_source.items()))
-            for k, v in (r["errors"] or {}).items():
-                lines.append(f"⚠️ {html.escape(k)}: {html.escape(str(v)[:200])}")
+            errors = r["errors"] or {}
+            if owner:  # i dettagli degli errori (e le ricerche fatte per tutti) solo al proprietario
+                for k, v in errors.items():
+                    lines.append(f"⚠️ {html.escape(k)}: {html.escape(str(v)[:200])}")
+            elif errors:
+                lines.append("⚠️ Qualche marketplace non ha risposto all'ultimo giro: riprovo al prossimo.")
         else:
             lines.append("🕒 Nessun ciclo ancora eseguito.")
-        qs = self.db.get_kv("query_stats", {}) or {}
+        qs = (self.db.get_kv("query_stats", {}) or {}) if owner else {}
         if qs:
             lines.append("🔤 Query generiche (giri · nuovi · segnalati): " + " · ".join(
                 f"<i>{html.escape(q)}</i> {v['runs']}/{v['new']}/{v['matches']}" for q, v in sorted(qs.items(), key=lambda kv: -kv[1]["matches"])))
@@ -1763,13 +1783,16 @@ class TelegramCommands:
             return
         if name:
             self.db.set_user_name(chat_id, name[:40])
-        if chat_id not in self.db.chat_ids():  # ha pagato prima di essere approvato: entra subito
-            self.db.remove_from_waitlist(chat_id)
-            self.db.add_chat_id(chat_id)
         p = plans.record_payment(self.db, chat_id, pay)
         if p is None:
             log.info("Pagamento già registrato: ignorato")
             return
+        if chat_id not in self.db.chat_ids():  # ha pagato prima di essere approvato (link girato da altri): entra subito
+            self.db.remove_from_waitlist(chat_id)
+            self.db.add_chat_id(chat_id)
+            plans.set_onboarding(self.db, chat_id, True)  # come chi viene approvato: prima l'album, poi le notifiche
+            text, buttons = plans.welcome_message()
+            self._deliver(chat_id, Reply(text, buttons=buttons))
         renewal = bool(pay.get("is_recurring")) and not pay.get("is_first_recurring")
         log.info("Pagamento Stars registrato (%s stelle, rinnovo: %s)", pay.get("total_amount"), renewal)
         self._deliver(chat_id, Reply(
@@ -1801,13 +1824,12 @@ class TelegramCommands:
             self.db.set_kv("telegram_chat_id", chat_id)  # il primo che scrive /start diventa il proprietario
             log.info("Proprietario collegato: %s", masked(chat_id))
             return True
-        if len(parts) < 2:
+        if len(parts) < 2 or self.db.is_banned(chat_id):  # chi è stato espulso rientra solo con /approva
             return False
         inv = self.db.get_kv("invite_code") or {}
         if (isinstance(inv, dict) and inv.get("code") and parts[1].upper() == str(inv["code"]).upper()
                 and float(inv.get("expires") or 0) > time.time()):
             self.db.remove_from_waitlist(chat_id)
-            self.db.unban(chat_id)
             self.db.add_chat_id(chat_id)
             plans.start_trial(self.db, chat_id)
             plans.set_onboarding(self.db, chat_id, True)

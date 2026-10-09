@@ -185,15 +185,15 @@ def test_notify_many_one_message_per_card_cheapest_first(index, monkeypatch):
     assert "&lt;b&gt;" in zorua and "a=1&amp;b=2" in zorua
     assert any("Lapras 131/128" in t and "prezzo n.d." in t for t in sent)
     assert any("Lotti" in t and "(2/2)" in t for t in sent)
-    # inviati: i 5 Zorua più economici (indici 7..11), Lapras, lotto
-    assert outcomes == [False] * 7 + [True] * 5 + [True, True]
+    # partiti tutti: anche i 7 Zorua oltre il tetto per carta, citati nel messaggio ("5 più economici su 12")
+    assert outcomes == [True] * 14
 
 
 def test_max_command(index):
     db, h = make(index)
     h.handle("/max 3")
     assert db.settings_for("me")["max_per_card"] == 3
-    assert "max 3 annunci" in h.handle("/stato").text
+    assert "Max 3 annunci" in h.handle("/stato").text
 
 
 def test_history_folders(index):
@@ -215,7 +215,7 @@ def test_history_folders(index):
     assert det.text.index("eBay.it") < det.text.index("Vinted")
     assert det.buttons == [[("⬅️ Cartelle", "/storico")]]
     lots = h.handle("/storico lotti")
-    assert "Lapras 131/128" in lots.text and "non inviato" in lots.text
+    assert "Lapras 131/128" in lots.text
     assert "Nessun annuncio" in h.handle("/storico 1").text
     h.handle("/storico svuota")
     assert "Nessun annuncio trovato" in h.handle("/storico").text
@@ -373,7 +373,8 @@ def test_invite_adds_second_person_and_notifier_sends_to_all(index, monkeypatch)
     assert tc.handle_payload({"chat_id": 8, "text": "/start SBAGLIATO"}) is False and db.chat_ids() == ["7"]
     tc.handle_payload({"chat_id": 8, "text": f"/start {code.lower()}"})
     assert db.chat_ids() == ["7", "8"] and db.get_kv("invite_code") is None  # monouso
-    assert tc.handle_payload({"chat_id": 8, "text": "/aggiungi 131\n/cerca"}) is True  # ora è collegata
+    tc.handle_payload({"chat_id": 8, "text": "/aggiungi 131\n/mancanti"})  # ora è collegata: i comandi passano
+    assert "me55-131" in db.wanted_for("8")
     tc.handle_payload({"chat_id": 9, "text": f"/start {code}"})
     assert db.chat_ids() == ["7", "8"]
 

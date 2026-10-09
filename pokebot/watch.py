@@ -29,7 +29,7 @@ def parse_duration(token: str) -> int | None:
     m = _DURATION_RE.match(token.strip().lower())
     if not m:
         return None
-    n = float(m.group(1).replace(",", "."))
+    n = min(float(m.group(1).replace(",", ".")), 1000.0)  # niente numeri infiniti: il tetto vero lo mette chi chiama
     unit = m.group(2)
     if unit.startswith("m"):
         return int(n * 60)
@@ -174,7 +174,7 @@ def found_log(db: Database, chat_id: str = "") -> list[dict]:
 def describe(index: CardIndex, db: Database, chat_id: str = "") -> str:
     watches = list_watches(db, chat_id)
     if not watches:
-        return ("Nessun inseguimento attivo. Es. <code>/insegui 151</code>: per 6 ore cerco la 151 ogni 5 minuti. "
+        return ("Nessun inseguimento attivo. Es. <code>/insegui 151</code>: per 6 ore cerco la 151 ogni 5 minuti (Light: ogni 2 ore). "
                 "Varianti: <code>/insegui 151 2h</code>, <code>/insegui 151 2h ogni 10m</code>.")
     lines = [f"🏃 <b>Inseguimenti attivi</b> ({len(watches)})"]
     now = time.time()
@@ -208,45 +208,50 @@ def _run_for(index: CardIndex, db: Database, chat: str, watches: dict, notifier,
     from .search import notifications_suppressed, search_card
 
     settings = db.settings_for(chat)
-    if notifications_suppressed(settings):
-        log.info("Inseguimenti di %s rimandati: notifiche in pausa / ore notturne", masked(chat))
-        return ["rimandate (pausa/notte)"]
+    suppressed = notifications_suppressed(settings)
     now = time.time()
     log_lines: list[str] = []
     changed = False
-    first_seen = {}
-    for r in db.list_found():
-        first_seen[r["listing_key"]] = min(float(r["created_at"]), first_seen.get(r["listing_key"], float("inf")))
+    found = None  # annunci già trovati dalla ricerca completa: consegnati o in coda, l'inseguimento non li rimanda
     for cid, w in list(watches.items()):
         card, idx = resolve_card(index, db, cid)
         if not card:
             del watches[cid]
             changed = True
             continue
-        if now >= float(w["until"]):
+        if now >= float(w["until"]):  # scaduto: si chiude anche in pausa (il riepilogo arriva con le altre notifiche)
             del watches[cid]
             changed = True
-            notifier.send(f"🏁 Inseguimento di <b>{html.escape(card.label)}</b> finito: "
-                          f"{w.get('checks', 0)} controlli, {w.get('found', 0)} annunci nuovi in {fmt_duration(int(w['until'] - w['started']))}.",
-                          True)
+            text = (f"🏁 Inseguimento di <b>{html.escape(card.label)}</b> finito: {w.get('checks', 0)} controlli, "
+                    f"{w.get('found', 0)} annunci nuovi in {fmt_duration(int(w['until'] - w['started']))}.")
+            if not suppressed:
+                notifier.send(text, True)
             log_lines.append(f"{card.label}: terminata")
+            continue
+        if suppressed:
             continue
         every = float(w["every"]) if plans.is_full(db, chat) else max(float(w["every"]), plans.LIGHT_WATCH_EVERY_S)
         if now - float(w.get("last", 0)) < every - 30:
             continue
-        # nuovi per questa persona: mai mandati da questo inseguimento e non già visti dal bot prima che partisse
-        older = {k for k, ts in first_seen.items() if ts < float(w["started"])}
-        items, errors = search_card(idx, db, card, settings, scrapers, limit=20, exclude=older | set(w.get("sent") or []))
+        # nuovi per questa persona: mai mandati da questo inseguimento e mai trovati dalla ricerca completa
+        if found is None:
+            found = db.found_keys()
+        items, errors = search_card(idx, db, card, settings, scrapers, limit=20, exclude=found | set(w.get("sent") or []),
+                                    store=False)  # nello storico ci vanno quando li trova la ricerca completa
         w["last"] = now
         w["checks"] = int(w.get("checks", 0)) + 1
-        w["sent"] = (list(w.get("sent") or []) + [lst.key for lst, _ in items])[-300:]
         changed = True
         if items:
-            sent = notifier.notify_many(items, max_per_card=int(settings.get("max_per_card", 5) or 5),
-                                        images=bool(settings.get("images", True)))
-            w["found"] = int(w.get("found", 0)) + sum(1 for ok in sent if ok)
-            record_found(db, cid, [lst for lst, _ in items], chat)
+            ok = notifier.notify_many(items, max_per_card=int(settings.get("max_per_card", 5) or 5),
+                                      images=bool(settings.get("images", True)))
+            delivered = [lst for (lst, _), sent in zip(items, ok) if sent]  # quelli non partiti si riprovano al giro dopo
+            w["sent"] = (list(w.get("sent") or []) + [lst.key for lst in delivered])[-300:]
+            w["found"] = int(w.get("found", 0)) + len(delivered)
+            record_found(db, cid, delivered, chat)
         log_lines.append(f"{card.label}: {len(items)} nuovi" + (f" (errori: {', '.join(errors)})" if errors else ""))
+    if suppressed and not log_lines:
+        log.info("Inseguimenti di %s rimandati: notifiche in pausa / ore notturne", masked(chat))
+        log_lines.append("rimandate (pausa/notte)")
     if changed:
         db.set_kv(f"watches:{chat}", watches)
     return log_lines

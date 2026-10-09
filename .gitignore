@@ -6,3 +6,4 @@ __pycache__/
 data/pokebot.db
 data/pokebot.db-journal
 pokebot-demo.mp4
+data/queue-done.json

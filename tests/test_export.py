@@ -30,7 +30,7 @@ def test_each_person_sees_only_own_listings(index, monkeypatch):
     # nessun dato degli altri: né chi è collegato, né i loro annunci, né il dettaglio del piano
     for st in (one, two):
         assert not {"owner_chat_id", "chat_ids", "me", "queued", "query_stats"} & set(st)
-        assert set(st["plan"]) == {"tier", "label", "price", "onboarding", "max_active", "invoice"}
+        assert set(st["plan"]) == {"tier", "label", "price", "onboarding", "invoice", "max_active", "max_collections"}
     assert "me55-131" in one["wanted"] and "me55-131" not in two["wanted"]
     assert [r["key"] for r in one["found"]] == ["k1"] and "sv8-7" not in one["prices"]
 
@@ -50,7 +50,9 @@ def test_write_state_is_sealed(index, monkeypatch):
     db = _two_people(monkeypatch)
     folder = tempfile.mkdtemp()
     files = write_state(index, db, folder)
-    assert sorted(os.path.basename(f) for f in files) == ["state-1.json.enc", "state-2.json.enc", "state.json.enc"]
+    names = sorted(os.path.basename(f) for f in files)
+    assert names == sorted(["state.json.enc", f"state-{vault.file_id('1')}.json.enc", f"state-{vault.file_id('2')}.json.enc"])
+    assert not any("-1." in n or "-2." in n for n in names) and vault.file_id("1") != vault.file_id("1", "altro:token")
     for f in files:
         blob = open(f, "rb").read()
         assert vault.is_sealed(blob) and b"chat_ids" not in blob

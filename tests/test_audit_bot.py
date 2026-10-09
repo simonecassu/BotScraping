@@ -29,8 +29,8 @@ def test_global_commands_are_owner_only(index, monkeypatch):
     assert db.get_settings()["sources"] == ["wallapop", "vinted", "ebay"]
     assert "Fonti attive" in h.handle("/fonti vinted", "1").text
     assert "Solo per te" in h.handle("/aiuto", "1").text and "Solo per te" not in h.handle("/aiuto", "2").text
-    assert h.handle("/cerca", "2").run_search
-    assert not h.handle("/cerca", "2").run_search  # una ricerca completa ogni 15 minuti per chi non è proprietario
+    r = h.handle("/cerca", "2")  # la ricerca completa la lancia solo il proprietario
+    assert not r.run_search and "/cerca 145" in r.text
     assert h.handle("/cerca", "1").run_search and h.handle("/cerca", "1").run_search
 
 

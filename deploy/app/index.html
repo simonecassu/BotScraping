@@ -201,14 +201,14 @@ function applyOverrides() {
 }
 
 function toast(msg, ms = 2200) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), ms); }
-function openLink(u) { if (tg && tg.openLink) tg.openLink(u); else window.open(u, "_blank"); }
+function openLink(u) { if (!/^https?:\/\//i.test(u || "")) return; if (tg && tg.openLink) tg.openLink(u); else window.open(u, "_blank", "noopener"); }
 
 async function sendCmd(text) {
   if (!tg || !tg.initData) { toast("Apri la pagina da Telegram per inviare comandi"); return false; }
   try {
     const r = await fetch("/api/cmd", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: tg.initData, text }) });
     const d = await r.json();
-    if (!d.ok) { toast("Errore: " + (d.error || d.status)); return false; }
+    if (!d.ok) { toast("⚠️ " + (d.error || "il bot non risponde adesso: riprova tra un minuto")); return false; }
     setTimeout(() => awaitRefresh(), 0);
     return true;
   } catch (e) { toast("Rete non disponibile"); return false; }
@@ -240,6 +240,7 @@ async function load() {
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.error || "il bot non risponde adesso: riprova tra un minuto");
     if (d.per_user) throw new Error("apri la Mini App da Telegram (pulsante App) per vedere la tua collezione");
+    if (state && d.generated_at === state.generated_at) return;  // niente di nuovo: le scelte appena fatte restano come sono
     state = d;
   } catch (e) {
     $("#upd").textContent = "stato non disponibile";
@@ -269,7 +270,7 @@ function renderPlan() {
   bar.classList.toggle("hidden", !p.tier || p.tier === "owner");
   $("#plan-lbl").textContent = p.label || "";
   $("#plan-go").classList.toggle("hidden", p.tier === "pro");
-  $("#plan-go").textContent = p.tier === "light" ? `⭐ Completo · ${p.price || 250} Stars` : "⭐ Abbonati";
+  $("#plan-go").textContent = p.tier === "light" ? `⭐ Completo · ${p.price || 250} Stars/mese` : "⭐ Abbonati";
 }
 $("#on-go").onclick = async () => {
   if (await sendCmd("/riprendi")) { state.plan.onboarding = false; renderPlan(); toast("🔔 Notifiche accese: ti scrivo appena spunta una tua carta"); }
@@ -298,18 +299,18 @@ function renderFriends() {
   $("#friend-list").innerHTML = fr.length ? fr.map((f) => {
     const shared = (f.shared || []).filter((sid) => sid !== "me55c").map(setName);
     const opts = mySets.filter(([id]) => !(f.shared || []).includes(id)).map(([id, n]) => `<option value="${esc(id)}">${esc(n)}</option>`).join("");
-    return `<div class="friend" data-name="${esc(f.name)}"><div class="top"><span class="av">${esc((f.name || "?").slice(0, 1).toUpperCase())}</span>
+    return `<div class="friend" data-id="${esc(f.id)}" data-name="${esc(f.name)}"><div class="top"><span class="av">${esc((f.name || "?").slice(0, 1).toUpperCase())}</span>
       <div><b>${esc(f.name)}</b><small>${shared.length ? "👥 Album in comune: " + esc(shared.join(", ")) : "Nessun album in comune"}</small></div>
-      <button class="btn sec" data-rm="${esc(f.name)}" title="Togli">✕</button></div>
+      <button class="btn sec" data-rm title="Togli">✕</button></div>
       ${opts ? `<div class="act"><select>${opts}</select><button class="btn" data-share>👥 Condividi album</button></div>` : ""}</div>`;
   }).join("") : '<p class="hint">Nessun amico ancora. Manda il tuo codice: appena qualcuno lo usa, compare qui.</p>';
   $("#friend-list").querySelectorAll("[data-share]").forEach((b) => b.onclick = async () => {
-    const box = b.closest(".friend"), sid = box.querySelector("select").value, name = box.dataset.name;
-    if (await sendCmd(`/condividi ${sid} ${name}`)) toast(`Proposta inviata a ${name}: quando accetta, l'album diventa unico`);
+    const box = b.closest(".friend"), sid = box.querySelector("select").value, { id, name } = box.dataset;
+    if (await sendCmd(`/condividi ${sid} ${id}`)) toast(`Proposta inviata a ${name}: quando accetta, l'album diventa unico`);
   });
   $("#friend-list").querySelectorAll("[data-rm]").forEach((b) => b.onclick = async () => {
-    const name = b.dataset.rm;
-    if (confirm(`Togliere ${name} dagli amici? Gli album condivisi restano come sono.`) && await sendCmd(`/amico togli ${name}`)) { toast(`${name} tolto dagli amici`); b.closest(".friend").style.opacity = .4; }
+    const { id, name } = b.closest(".friend").dataset;
+    if (confirm(`Togliere ${name} dagli amici? Gli album condivisi restano come sono.`) && await sendCmd(`/amico togli ${id}`)) { toast(`${name} tolto dagli amici`); b.closest(".friend").style.opacity = .4; }
   });
 }
 $("#fc-copy").onclick = async () => {
@@ -390,6 +391,7 @@ $("#qc").oninput = renderCollections;
 
 async function openSet(id) {
   curSet = id;
+  $("#q").value = ""; $("#rar").value = ""; filterSet = "";
   if (id !== "home" && !extra[id]) {
     const meta = (catalog || []).find((s) => s.id === id);
     extra[id] = { meta: meta || { id, name: id }, cards: [], owned: new Set(), active: false, loaded: false };
@@ -418,6 +420,13 @@ function chaseCode(c) { return HOME_SETS.includes(c.set) ? c.code : `${c.set}:${
 
 /* ---------- Checklist ---------- */
 function isOwner() { return ((state || {}).plan || {}).tier === "owner"; }
+function atFollowLimit() {  // versione Light: al massimo N collezioni seguite (la 30th conta come una)
+  const max = ((state || {}).plan || {}).max_collections;
+  if (!max || curSet === "home" || (extra[curSet] || {}).mine) return false;
+  if (1 + Object.values(extra).filter((e) => e.mine).length < max) return false;
+  toast(`Versione Light: segui al massimo ${max} collezioni. Togline una o passa al completo.`, 3500);
+  return true;
+}
 function atActiveLimit() {  // versione Light: al massimo N collezioni con la ricerca accesa
   const max = ((state || {}).plan || {}).max_active;
   const n = (state.settings.home_active !== false ? 1 : 0) + Object.values(extra).filter((e) => e.mine && e.active).length;
@@ -457,7 +466,7 @@ function renderChecklist() {
       (e.loaded && e.cards.length && !e.owned.size ? '<p class="hint">Si parte da <b>mi mancano tutte</b>: tocca le carte che hai e si accendono.</p>' : "");
     $("#coll-sw").onclick = async () => {
       const on = !e.active;
-      if (on && atActiveLimit()) return;
+      if (on && (atFollowLimit() || atActiveLimit())) return;
       if (on && !confirm(`Attivare la ricerca per ${e.meta.name}? Il bot cercherà anche le sue carte mancanti a ogni giro.`)) return;
       if (await sendCmd(`/collezione ${curSet} ${on ? "attiva" : "disattiva"}`)) { e.active = on; toast(on ? "Ricerca attivata" : "Ricerca spenta"); renderChecklist(); renderCollections(); renderHome(); }
     };
@@ -489,7 +498,7 @@ async function toggle(id) {
     pending.delete(id);
     if (ok) { willWant ? wanted.add(id) : wanted.delete(id); overrides["home:" + id] = { ts: Date.now(), set: "home", id, want: willWant }; toast((willWant ? "Segnata mancante: " : "Segnata presa: ") + c.name); }
   } else {
-    const e = extra[curSet]; const c = e.cards.find((k) => k.id === id); if (!c) return;
+    const e = extra[curSet]; const c = e.cards.find((k) => k.id === id); if (!c || atFollowLimit()) return;
     const willOwn = !e.owned.has(c.number);
     pending.add(id); renderChecklist();
     const ok = await sendCmd(`/collezione ${curSet} ${willOwn ? "ho" : "manca"} ${c.number}`);
@@ -515,7 +524,7 @@ $("#sharebtn").onclick = async () => {
   if (!friends.length) { toast("Prima aggiungi un amico dalla sezione Amici"); return; }
   const pick = friends.length === 1 ? friends[0] : friends.find((f) => f.name.toLowerCase() === (prompt("Con chi? " + friends.map((f) => f.name).join(", ")) || "").trim().toLowerCase());
   if (!pick) { toast("Amico non trovato"); return; }
-  if (await sendCmd(`/condividi ${curSetId()} ${pick.name}`)) toast(`Proposta inviata a ${pick.name}: quando accetta, l'album diventa unico`);
+  if (await sendCmd(`/condividi ${curSetId()} ${pick.id}`)) toast(`Proposta inviata a ${pick.name}: quando accetta, l'album diventa unico`);
 };
 $("#swapmsg").onclick = async () => {
   const want = curCards().filter(isMissing).map(cardTitle);
@@ -524,7 +533,7 @@ $("#swapmsg").onclick = async () => {
   const name = curSet === "home" ? "30th Celebration" : ((extra[curSet] || {}).meta || {}).name || curSet;
   const text = [`🔁 Scambio carte Pokémon · ${name}`, want.length ? "CERCO: " + want.slice(0, 40).join(", ") + (want.length > 40 ? ` (+${want.length - 40})` : "") : "", offer.length ? "OFFRO (doppioni): " + offer.join(", ") : "", "Scrivetemi in privato, scambio anche più carte insieme."].filter(Boolean).join("\n");
   try { await navigator.clipboard.writeText(text); toast("Messaggio copiato: incollalo dove vuoi"); }
-  catch (e) { if (tg && tg.switchInlineQuery) tg.switchInlineQuery(text.slice(0, 250)); else prompt("Copia il messaggio:", text); }
+  catch (e) { prompt("Copia il messaggio:", text); }
 };
 
 /* ---------- Trovati ---------- */
@@ -534,8 +543,8 @@ function renderFound() {
   let lots = [];
   let nSet = 0;
   for (const f of state.found) {
-    if (f.kind === "lot") { if (curSet === "home") { lots.push(f); nSet++; } continue; }
     const ids = (f.sure.length ? f.sure : f.cards).filter(inCurSet);
+    if (f.kind === "lot") { if (ids.length) { lots.push(f); nSet++; } continue; }
     if (ids.length) nSet++;
     for (const id of ids) (groups[id] ||= []).push(f);
   }
@@ -551,7 +560,7 @@ function renderFound() {
         <div class="lst" data-url="${esc(f.url)}">
           ${f.image ? `<img loading="lazy" src="${esc(f.image)}" alt="">` : '<div class="ph">foto n.d.</div>'}
           <div class="t"><div class="ti">${f.deal ? "🔥 " : ""}${esc(f.title)}</div>
-            <div class="mt">${new Date(f.ts * 1000).toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit" })}${f.location ? " · " + esc(f.location) : ""}${f.kind === "lot" ? " · 📦 lotto" : ""}${f.notified ? "" : " · non inviato"}</div></div>
+            <div class="mt">${new Date(f.ts * 1000).toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit" })}${f.location ? " · " + esc(f.location) : ""}${f.kind === "lot" ? " · 📦 lotto" : ""}</div></div>
           <div class="pr ${f.deal ? "deal" : ""}">${esc(f.price || "n.d.")}</div>
         </div>`).join("")).join("");
     return `<div class="folder" data-key="${key}"><div class="hd">${img ? `<img src="${esc(img)}" alt="">` : ""}<b>${esc(title)}</b><span class="cnt">${items.length} ›</span></div><div class="bd hidden">${body}</div></div>`;
@@ -594,7 +603,7 @@ function renderChase() {
   $("#chase-list").innerHTML = ws.length ? ws.sort((a, b) => a.until - b.until).map((w) => { const c = cardInfo(w.card); return `
     <div class="folder" data-open="${esc(w.card)}"><div class="hd">${c && c.image ? `<img src="${esc(c.image)}" alt="">` : ""}
       <b>${esc(w.label)}<small class="hint" style="display:block">ogni ${Math.round(w.every / 60)} min · fino alle ${hhmm(w.until)} (ancora ${left(Math.max(0, w.until - now))})<br>${w.checks} controlli · <b>${w.found}</b> annunci nuovi</small></b>
-      <button class="btn sec" data-stop="${esc(w.code)}">⏹</button></div></div>`; }).join("")
+      <button class="btn sec" data-stop="${esc(c ? `${c.set}:${c.number}` : w.code)}">⏹</button></div></div>`; }).join("")
     : '<p class="hint">Nessun inseguimento attivo in questa collezione. Scrivi un numero qui sopra e tocca Insegui.</p>';
   $("#chase-list").querySelectorAll("[data-stop]").forEach((b) => b.onclick = async (ev) => { ev.stopPropagation(); if (await sendCmd("/insegui stop " + b.dataset.stop)) { toast("Fermato: guarda la chat"); b.closest(".folder").style.opacity = .4; } });
   $("#chase-list").querySelectorAll("[data-open]").forEach((el) => el.onclick = () => {
@@ -611,7 +620,7 @@ function renderChase() {
         <div class="lst" data-url="${esc(f.url)}">
           ${f.image ? `<img loading="lazy" src="${esc(f.image)}" alt="">` : '<div class="ph">foto n.d.</div>'}
           <div class="t"><div class="ti">${esc(f.title)}</div>
-            <div class="mt">${new Date(f.ts * 1000).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} · ${SRC[f.source] || f.source}${f.location ? " · " + esc(f.location) : ""}</div></div>
+            <div class="mt">${new Date(f.ts * 1000).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} · ${esc(SRC[f.source] || f.source)}${f.location ? " · " + esc(f.location) : ""}</div></div>
           <div class="pr">${esc(f.price || "n.d.")}</div>
         </div>`).join("")}</div></div>`; }).join("")
     : '<p class="hint">Qui compaiono gli annunci scovati dagli inseguimenti.</p>';
@@ -682,10 +691,10 @@ function renderSettings() {
   const row = (label, hint, control) => `<div class="set"><label>${label}<small>${hint}</small></label>${control}</div>`;
   const num = (val, cmd, step = 1, min = 0) => `<input type="number" step="${step}" min="${min}" value="${val ?? ""}" data-cmd="${cmd}" style="width:90px">`;
   const sw = (on, cmdOn, cmdOff) => `<button class="sw ${on ? "on" : ""}" data-on="${cmdOn}" data-off="${cmdOff}" aria-pressed="${on}"></button>`;
-  const srcs = ["wallapop", "vinted", "ebay"], owner = isOwner();
+  const srcs = ["wallapop", "vinted", "ebay"], owner = isOwner(), light = !!((state.plan || {}).max_active);
   $("#settings").innerHTML = `
     ${row("Pausa notifiche", "il bot cerca e accumula, invia tutto alla ripresa", sw(s.paused, "/pausa", "/riprendi"))}
-    ${row("Avviso affare 🔥", "sotto questa % del valore Cardmarket (0 = spento)", num(s.deal_pct, "/affari {v}"))}
+    ${light ? "" : row("Avviso affare 🔥", "sotto questa % del valore Cardmarket (0 = spento)", num(s.deal_pct, "/affari {v}"))}
     ${row("Annunci per carta", "i più economici inviati per ogni giro", num(s.max_per_card, "/max {v}", 1, 1))}
     ${row("Prezzo massimo €", "0 = nessun limite", num(s.max_price, "/prezzo {v}", 0.5))}
     ${row("Soglia lotti %", "quota minima di carte mancanti in un lotto", num(Math.round((s.lot_min_ratio || 0) * 100), "/soglia {v}"))}
@@ -697,6 +706,10 @@ function renderSettings() {
     ${owner ? `<h2>Fonti</h2>${srcs.map((k) => row(SRC[k], "per tutti", `<button class="sw ${(s.sources || []).includes(k) ? "on" : ""}" data-src="${k}"></button>`)).join("")}` : ""}`;
   $("#settings").querySelectorAll("input[type=number][data-cmd]").forEach((inp) => inp.onchange = async () => {
     const cmd = inp.dataset.cmd.replace("{v}", inp.value); if (await sendCmd(cmd)) toast("Inviato: " + cmd);
+  });
+  ["#qh1", "#qh2"].forEach((q) => $(q).onchange = async () => {
+    if (!state.settings.quiet_hours) return;  // spente: valgono quando le accendi
+    const cmd = `/notte ${$("#qh1").value} ${$("#qh2").value}`; if (await sendCmd(cmd)) toast("Inviato: " + cmd);
   });
   $("#settings").querySelectorAll(".sw[data-src]").forEach((b) => b.onclick = async () => {
     // le fonti si leggono dagli interruttori al momento del tocco (non da quando la pagina è stata disegnata)
@@ -713,7 +726,7 @@ function renderSettings() {
   });
   const lr = state.last_run;
   $("#lastrun").innerHTML = lr ? `Ultimo giro ${new Date(lr.started_at * 1000).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}: ${lr.listings_seen} annunci letti, ${lr.matches} segnalati` +
-    (lr.per_source && Object.keys(lr.per_source).length ? " · " + Object.entries(lr.per_source).map(([k, v]) => `${SRC[k] || k} ${v}`).join(", ") : "") +
+    (lr.per_source && Object.keys(lr.per_source).length ? " · " + Object.entries(lr.per_source).map(([k, v]) => esc(`${SRC[k] || k} ${v}`)).join(", ") : "") +
     (lr.errors && Object.keys(lr.errors).length ? `<br><span class="err">⚠️ ${Object.entries(lr.errors).map(([k, v]) => esc(k + ": " + String(v).slice(0, 80))).join("<br>")}</span>` : "") : "";
   document.querySelectorAll("[data-cmd].btn").forEach((b) => b.onclick = async () => { if (await sendCmd(b.dataset.cmd)) toast("Inviato " + b.dataset.cmd + ": guarda la chat"); });
 }
@@ -734,7 +747,7 @@ function showTab(name, push = true) {
   ["home", "coll", "check", "settings", "friends"].forEach((t) => $("#tab-" + t).classList.toggle("hidden", t !== name));
   $("#ttl").textContent = name === "check" ? (curSet === "home" ? "30th Celebration" : ((extra[curSet] || {}).meta || {}).name || curSet) : TITLES[name];
   $("#back").classList.toggle("hidden", name === "home");
-  if (name === "check") { showCseg("check"); renderChecklist(); renderShared(); }
+  if (name === "check") { showCseg("check"); setSeg("ann"); renderChecklist(); renderShared(); }
   window.scrollTo(0, 0);
 }
 $("#back").onclick = () => { let prev = stack.pop() || "home"; if (prev === "check") prev = "coll"; showTab(prev, false); if (prev === "home") stack.length = 0; };

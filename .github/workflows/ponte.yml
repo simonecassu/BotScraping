@@ -42,7 +42,9 @@ jobs:
           if [ -n "$manca" ]; then echo "::error::Secret mancanti:$manca"; exit 1; fi
 
       - name: Pubblica il worker
-        run: npx --yes wrangler@4.137.0 deploy 2>&1 | tee deploy.log
+        run: |
+          set -o pipefail  # se il deploy fallisce, il passo fallisce (e le chiavi non vanno al worker vecchio)
+          npx --yes wrangler@4.137.0 deploy 2>&1 | tee deploy.log
 
       - name: Imposta le chiavi del worker
         env:
@@ -61,7 +63,8 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
           # /setup risponde solo con la chiave ricavata dal token (come nel worker): nessun altro può spostare il webhook
-          key=$(printf 'pokebot-admin:%s' "$TELEGRAM_BOT_TOKEN" | sha256sum | cut -c1-40)
+          token=$(printf '%s' "$TELEGRAM_BOT_TOKEN" | tr -d '[:space:]')  # come il worker e config.py
+          key=$(printf 'pokebot-admin:%s' "$token" | sha256sum | cut -c1-40)
           echo "::add-mask::$key"
           url=$(grep -o 'https://[A-Za-z0-9.-]*workers\.dev' deploy.log | head -1)
           if [ -z "$url" ]; then echo "::error::Indirizzo del worker non trovato nel log"; exit 1; fi
