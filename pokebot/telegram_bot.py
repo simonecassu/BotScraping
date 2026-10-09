@@ -285,6 +285,10 @@ class CommandHandler:
         cmd = cmd.split("@", 1)[0].lower()
         args = args.strip()
         if cmd == "/start":
+            from . import plans
+            if plans.onboarding(self.db, self.chat):
+                text, buttons = plans.welcome_message()
+                return Reply(text, buttons=buttons)
             return Reply("✅ Collegato! Da adesso ti mando qui gli annunci delle carte mancanti.\n\n" + HELP)
         if cmd in ("/aiuto", "/help"):
             return Reply(HELP)
@@ -309,8 +313,15 @@ class CommandHandler:
         if cmd in ("/pausa", "/stop"):
             self._save({"paused": True})
             return Reply("⏸ Notifiche in pausa. Continuo a cercare e accumulo: con /riprendi ti mando tutto in un colpo.")
-        if cmd in ("/riprendi", "/play", "/riparti"):
+        if cmd in ("/riprendi", "/play", "/riparti", "/notifiche"):
+            from . import plans
+            first = plans.onboarding(self.db, self.chat)
+            plans.set_onboarding(self.db, self.chat, False)
             self._save({"paused": False})
+            if first:
+                n = len(self._wanted())
+                return Reply(f"🔔 <b>Notifiche accese!</b> Cerco le tue {n} carte mancanti e ti scrivo appena ne spunta una. "
+                             "Al primo giro potrebbero arrivare diversi annunci insieme, poi solo le novità.", run_search=True)
             return Reply("▶️ Notifiche riattivate. Se c'è qualcosa in coda, arriva tra pochi secondi.")
         if cmd in ("/notte", "/silenzio"):
             return self._quiet(args)
@@ -694,13 +705,9 @@ class CommandHandler:
             for sid in config.HOME_SET_IDS:
                 coll.album_for(self.db, cid, sid)
             done.append(f"{html.escape(str(entry.get('name') or cid))} (<code>{cid}</code>)")
-            sends.append((cid, "🎉 <b>Il tuo Pokébot è attivo!</b>\n"
-                               f"Hai {plans.TRIAL_DAYS} giorni di prova con tutte le funzioni.\n\n"
-                               "Parti così:\n"
-                               "1. Apri la Mini App dal pulsante <b>App</b> qui sotto e segna le carte che hai: il resto lo cerco io.\n"
-                               "2. Oppure da qui: /aggiungi 131 132 per le mancanti, /mancanti per vederle, /cerca per cercare subito.\n"
-                               "3. /collezione per seguire altre espansioni, /insegui 151 per inseguire una carta, /amico per gli amici.\n\n"
-                               "Con /aiuto hai tutti i comandi. Buona caccia! 🃏", None))
+            plans.set_onboarding(self.db, cid, True)
+            text, buttons = plans.welcome_message()
+            sends.append((cid, text, buttons))
         if not done:
             return Reply("Nessuno con quell'ID in lista d'attesa (vedi /attesa). Usa <code>/approva ID</code> o <code>/approva tutti</code>.")
         return Reply("✅ Accesso attivato per: " + ", ".join(done) + f"\nIn attesa: {len(self.db.waitlist())}", sends=sends)
@@ -891,6 +898,11 @@ class CommandHandler:
                          + f"\n\n/mancanti · /aggiungi 4 7 · /ho 4 · /progresso · /prezzi · "
                          f"<code>/collezione {cs.id} {'disattiva' if on else 'attiva'}</code> · <code>/condividi {cs.id}</code>")
         if verb in ("attiva", "on", "cerca"):
+            from . import plans
+            if (cs.id not in self.db.active_sets(self.chat) and not plans.is_full(self.db, self.chat)
+                    and plans.active_count(self.db, self.chat) >= plans.LIGHT_MAX_ACTIVE):
+                return Reply(f"🌱 Con la versione Light puoi tenere le notifiche accese su {plans.LIGHT_MAX_ACTIVE} collezioni. "
+                             "Spegnine una con <code>/collezione ID disattiva</code>, oppure /abbonati per accenderle tutte.")
             self.db.set_active(cs.id, True, self.chat)
             return Reply(f"🔎 Ricerca attiva per <b>{html.escape(cs.name)}</b> ({len([c for c in cs.cards if c.id in wanted_album])} mancanti). "
                          f"⚠️ Ogni collezione attiva aggiunge ricerche e notifiche a ogni giro: tienine poche accese. "
@@ -1617,6 +1629,7 @@ class TelegramCommands:
             self.db.add_chat_id(chat_id)
             from . import plans
             plans.start_trial(self.db, chat_id)
+            plans.set_onboarding(self.db, chat_id, True)
             self.db.set_kv("invite_code", None)  # monouso
             log.info("Nuova persona collegata con invito: %s", chat_id)
             return True

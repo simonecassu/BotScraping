@@ -142,6 +142,7 @@ def _plan_info(db: Database, chat_id: str) -> dict:
     return {"tier": plans.tier(db, chat_id), "label": plans.describe(db, chat_id),
             "trial_until": float(p.get("trial_until") or 0), "pro_until": float(p.get("pro_until") or 0),
             "lifetime": bool(p.get("lifetime")), "price": plans.PRICE_STARS,
+            "onboarding": plans.onboarding(db, chat_id), "max_active": None if plans.is_full(db, chat_id) else plans.LIGHT_MAX_ACTIVE,
             "invoice": str(db.get_kv(f"invoice:{chat_id}") or "")}
 
 

@@ -159,3 +159,56 @@ def test_light_gets_daily_digest(index, monkeypatch):
     assert search.flush_all_queues(db, index.by_id) == 0  # già mandato oggi
     monkeypatch.setattr(plans.time, "time", lambda: at(19, days=1))
     assert search.flush_all_queues(db, index.by_id) == 1
+
+
+def test_onboarding_welcome_and_no_notifications_until_ready(index, monkeypatch):
+    from pokebot import search
+    db, client, tc = setup(index, monkeypatch)
+    plans.migrate(db)
+    tc.handle_payload({"chat_id": 2, "text": "/start", "name": "Anna"})
+    r = tc.handler.handle("/approva 2", "1")
+    welcome = r.sends[0]
+    assert welcome[0] == "2" and "Prima riempi l'album" in welcome[1] and welcome[2] == [[("🔔 Album pronto, attiva le notifiche", "/riprendi")]]
+    assert plans.onboarding(db, "2")
+    assert "Prima riempi" in tc.handler.handle("/start", "2").text
+
+    delivered = []
+    monkeypatch.setattr(search, "_deliver", lambda pending, ntf, st, *a, **k: (delivered.append(len(pending)) or (set(), set())))
+
+    class Res:
+        kind = "single"
+        wanted = [index.by_id["me55-131"]]
+        possible_wanted = []
+        matched_payload = [{"id": "me55-131", "sure": True}]
+        ratio = None
+
+    class Lst:
+        key, source, title, url, price, price_text, location, image, seller = "k", "vinted", "Lapras", "u", 5.0, "5 €", "", "", ""
+
+    monkeypatch.setattr(search, "TelegramNotifier", lambda chat_ids=None: None)
+    rep = search.RunReport(started_at=0)
+    search._notify_pending([(Lst, Res)], db, rep, False)
+    # il proprietario non ha la 131 tra le mancanti, Anna sì ma sta ancora segnando: nessuna consegna né coda
+    assert delivered == [] and db.queued_found("2") == []
+    r = tc.handler.handle("/riprendi", "2")
+    assert "Notifiche accese" in r.text and r.run_search and not plans.onboarding(db, "2")
+    Lst.key = "k2"
+    search._notify_pending([(Lst, Res)], db, rep, False)
+    assert delivered == [1]
+
+
+def test_light_max_three_active_collections(index, monkeypatch):
+    db, client, tc = setup(index, monkeypatch)
+    db.add_chat_id("2")
+    db.set_kv("active_sets:2", ["me55", "me55c", "sv1", "sv2", "sv3"])
+    plans.set_light(db, "2")  # al passaggio restano accese le prime 3 (la 30th conta una volta)
+    assert db.active_sets("2") == ["me55", "me55c", "sv1", "sv2"] and plans.active_count(db, "2") == 3
+    from pokebot.cards import Card, CardSet
+    cs = CardSet(id="sv3", name="Test 3", name_it="", total=1, release="", printed_total=1, cards=[Card(id="sv3-1", set_id="sv3", number="1", name="X", rarity="",
+                                                                       set_name="Test 3", supertype="", image="", image_large="",
+                                                                       printed_total=1)])
+    monkeypatch.setattr("pokebot.collections.follow", lambda db_, chat, sid: (cs, db_.ensure_album(chat, sid)[0], False))
+    r = tc.handler.handle("/collezione sv3 attiva", "2")
+    assert "3 collezioni" in r.text and "sv3" not in db.active_sets("2")
+    tc.handler.handle("/collezione sv3 attiva", "1")  # il proprietario non ha limiti
+    assert "sv3" in db.active_sets("1")

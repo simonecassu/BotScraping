@@ -323,8 +323,11 @@ def _notify_pending(pending: list, db: Database, report: RunReport, dry_run: boo
     deal_keys: set[str] = set()
     for i, (chat, ntf, st) in enumerate(recipients):
         first = i == 0  # i contatori del giro si riferiscono alla prima persona (il proprietario)
-        if chat:  # solo gli annunci che riguardano le carte mancanti nei SUOI album
-            mine = db.wanted_for(chat)
+        if chat:  # solo gli annunci che riguardano le carte mancanti nei SUOI album con la ricerca accesa
+            if plans.onboarding(db, chat):
+                continue  # sta ancora segnando le carte che ha: nessuna notifica, niente in coda
+            on = {plans._home_key(sid) for sid in db.active_sets(chat)}
+            mine = {cid for cid in db.wanted_for(chat) if plans._home_key(cid.rsplit("-", 1)[0]) in on}
             pending = [(lst, res) for lst, res in all_pending
                        if any(c.id in mine for c in (res.wanted + res.possible_wanted))]
         else:

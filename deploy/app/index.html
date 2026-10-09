@@ -94,6 +94,7 @@ a{color:var(--link);text-decoration:none}
       <div class="tile yel" id="tile-ai"><span class="ic">🧠</span><div><b>Analisi IA</b><small>in arrivo</small></div></div>
       <div class="tile" data-go="friends"><span class="ic">👥</span><div><b>Amici</b><small id="t-fr">…</small></div></div>
     </div>
+    <div class="planbar hidden" id="onbar"><span>🔕 Prima segna in <b>Collezioni</b> le carte che hai, poi accendi le notifiche.</span><button class="btn" id="on-go">🔔 Attiva</button></div>
     <div class="planbar hidden" id="planbar"><span id="plan-lbl"></span><button class="btn" id="plan-go">⭐ Abbonati</button></div>
     <p class="hint" id="home-hint" style="margin-top:14px"></p>
   </section>
@@ -273,11 +274,15 @@ function renderAll() { renderHome(); renderCollections(); renderChecklist(); ren
 /* ---------- Piano ---------- */
 function renderPlan() {
   const p = state.plan || {}, bar = $("#planbar");
+  $("#onbar").classList.toggle("hidden", !p.onboarding);
   bar.classList.toggle("hidden", !p.tier || p.tier === "owner");
   $("#plan-lbl").textContent = p.label || "";
   $("#plan-go").classList.toggle("hidden", p.tier === "pro");
   $("#plan-go").textContent = p.tier === "light" ? `⭐ Completo · ${p.price || 250} Stars` : "⭐ Abbonati";
 }
+$("#on-go").onclick = async () => {
+  if (await sendCmd("/riprendi")) { state.plan.onboarding = false; renderPlan(); toast("🔔 Notifiche accese: ti scrivo appena spunta una tua carta"); }
+};
 $("#plan-go").onclick = async () => {
   const p = (state || {}).plan || {};
   if (p.invoice && tg && tg.openInvoice) {

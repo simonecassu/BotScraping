@@ -4,6 +4,7 @@
   pro    – abbonato (fino alla scadenza pagata) o regalato dal proprietario ("sempre")
   trial  – i primi TRIAL_DAYS giorni dopo l'approvazione
   light  – gratis: un riepilogo al giorno, 1 inseguimento con controlli ogni 2 ore, massimo 5 collezioni
+           di cui 3 con le notifiche accese
 
 Stato per persona nel kv `plan:<chat>`: {trial_until, pro_until, lifetime, reminded, ended, rating, review, payments}.
 """
@@ -27,6 +28,7 @@ DIGEST_HOUR = 19
 LIGHT_MAX_WATCHES = 1
 LIGHT_WATCH_EVERY_S = 2 * 3600
 LIGHT_MAX_COLLECTIONS = 5
+LIGHT_MAX_ACTIVE = 3  # di cui con la ricerca (e le notifiche) accesa
 
 FULL = ("owner", "pro", "trial")
 
@@ -126,7 +128,7 @@ def describe(db: Database, chat: str, now: float | None = None) -> str:
         left = float(p.get("trial_until") or 0) - now
         days = max(1, int(left // 86400) + (1 if left % 86400 else 0))
         return f"🎁 Prova gratuita: ancora {days} giorn{'o' if days == 1 else 'i'} con tutto"
-    return "🌱 Light gratis: un riepilogo al giorno, 1 inseguimento, 5 collezioni"
+    return "🌱 Light gratis: un riepilogo al giorno, 1 inseguimento, 3 collezioni con notifiche"
 
 
 def _date(ts) -> str:
@@ -157,8 +159,25 @@ def collections_count(db: Database, chat: str) -> int:
     return len({sid for sid in db.albums_of(chat) if sid not in config.HOME_SET_IDS[1:]})
 
 
+def _home_key(sid: str) -> str:
+    return config.HOME_SET_IDS[0] if sid in config.HOME_SET_IDS else sid
+
+
+def active_count(db: Database, chat: str) -> int:
+    """Collezioni con la ricerca accesa (la 30th con la Classic conta una volta)."""
+    return len({_home_key(s) for s in db.active_sets(chat)})
+
+
 def apply_light_limits(db: Database, chat: str) -> None:
-    """Al passaggio a Light: resta un solo inseguimento (il primo avviato), controllato ogni 2 ore."""
+    """Al passaggio a Light: restano accese le prime 3 collezioni e un solo inseguimento (il primo), ogni 2 ore."""
+    keep_sets, seen = [], set()
+    for sid in db.active_sets(chat):
+        k = _home_key(sid)
+        if k in seen or len(seen) < LIGHT_MAX_ACTIVE:
+            seen.add(k)
+            keep_sets.append(sid)
+    if keep_sets != db.active_sets(chat):
+        db.set_kv(f"active_sets:{chat}", keep_sets)
     w = db.get_kv(f"watches:{chat}", {}) or {}
     if not isinstance(w, dict) or not w:
         return
@@ -166,6 +185,29 @@ def apply_light_limits(db: Database, chat: str) -> None:
     for _, v in keep:
         v["every"] = max(float(v.get("every") or 0), LIGHT_WATCH_EVERY_S)
     db.set_kv(f"watches:{chat}", dict(keep))
+
+
+# ---- primi passi: notifiche spente finché l'album non è pronto ----------------------
+def welcome_message() -> tuple[str, list]:
+    text = ("🎉 <b>Il tuo Pokébot è attivo!</b>\n"
+            f"Hai {TRIAL_DAYS} giorni di prova con tutte le funzioni.\n\n"
+            "Pokébot cerca per te su Vinted, Wallapop ed eBay le carte che mancano alla tua collezione "
+            "e ti scrive appena ne spunta una, con foto e prezzo.\n\n"
+            "<b>Due consigli per partire bene:</b>\n"
+            "1️⃣ <b>Prima riempi l'album.</b> Apri l'app dal pulsante <b>App</b>, scegli la collezione e tocca "
+            "le carte che hai già: all'inizio risultano tutte mancanti.\n"
+            "2️⃣ <b>Poi accendi le notifiche</b> con il pulsante qui sotto. Fino ad allora non ti scrivo, "
+            "così non ricevi annunci di carte che hai già.\n\n"
+            "Con /aiuto trovi tutti i comandi. Buona caccia! 🃏")
+    return text, [[("🔔 Album pronto, attiva le notifiche", "/riprendi")]]
+
+
+def onboarding(db: Database, chat: str) -> bool:
+    return bool(db.user_prefs(chat).get("onboarding"))
+
+
+def set_onboarding(db: Database, chat: str, on: bool) -> None:
+    db.save_user_prefs(chat, {"onboarding": bool(on)})
 
 
 # ---- messaggi di fine prova ---------------------------------------------------------
@@ -202,7 +244,7 @@ def end_of_trial_message(db: Database, client, chat: str) -> tuple[str, list]:
             "Da adesso sei sulla versione <b>Light</b>, gratis per sempre:\n"
             "• un riepilogo al giorno, alle 19, con gli annunci delle tue carte\n"
             "• 1 inseguimento alla volta, controllato ogni 2 ore\n"
-            "• fino a 5 collezioni\n\n"
+            "• fino a 5 collezioni, di cui 3 con le notifiche accese\n\n"
             f"Con l'abbonamento (<b>{PRICE_STARS} ⭐ al mese</b>) torni ad avere tutto: avvisi nel momento in cui "
             "esce l'annuncio, prima degli altri, affari 🔥, inseguimenti ogni 5 minuti e collezioni illimitate. "
             "Sostieni anche lo sviluppo delle prossime funzioni.\n\n"
@@ -218,7 +260,7 @@ def end_of_trial_message(db: Database, client, chat: str) -> tuple[str, list]:
 
 def reminder_message(db: Database, client, chat: str) -> tuple[str, list]:
     text = ("⏳ <b>Domani finisce la tua prova gratuita.</b>\n"
-            "Poi passi alla versione Light (un riepilogo al giorno, 1 inseguimento, 5 collezioni). "
+            "Poi passi alla versione Light (un riepilogo al giorno, 1 inseguimento, 3 collezioni con notifiche). "
             f"Se vuoi continuare ad avere gli avvisi subito, l'abbonamento costa {PRICE_STARS} ⭐ al mese.")
     link = invoice_link(db, client, chat)
     return text, [[(f"⭐ Abbonati · {PRICE_STARS} Stars/mese", link or "/abbonati")]]
