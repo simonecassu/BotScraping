@@ -77,7 +77,12 @@ a{color:var(--link);text-decoration:none}
 .coll b{display:block;font-weight:900;font-size:14px}.coll small{color:var(--hint);font-weight:700;font-size:12px}
 .coll .st{flex:none;font-size:11px;font-weight:900;padding:4px 9px;border-radius:999px;background:#0a1328;color:var(--hint);border:1px solid var(--line)}
 .coll .st.on{background:var(--yel);color:#1a1a1a;border-color:#fff3b0}
-.hits{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 12px}.hit{background:var(--sec);border:2px solid var(--line);border-radius:999px;padding:6px 11px;font-size:13px;font-weight:800;cursor:pointer}.hit small{color:var(--hint);font-weight:700;margin-left:4px}
+.hits{display:flex;gap:8px;margin:4px 0 12px;overflow-x:auto;padding-bottom:4px;scroll-snap-type:x proximity}
+.hit{flex:none;width:84px;background:var(--sec);border:2px solid var(--line);border-radius:10px;padding:5px;cursor:pointer;scroll-snap-align:start;position:relative}
+.hit img{width:100%;aspect-ratio:245/342;object-fit:cover;border-radius:5px;background:#0008;display:block}
+.hit .num{position:absolute;top:8px;left:8px;background:#0a1328;color:var(--yel);font-size:10px;font-weight:900;padding:1px 6px;border-radius:6px}
+.hit b{display:block;font-size:11px;font-weight:800;line-height:1.2;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hit.more{display:flex;align-items:center;justify-content:center;text-align:center;font-size:12px;font-weight:800;color:var(--hint)}
 .seg{display:flex;background:#0a1328;border-radius:999px;padding:3px;margin-bottom:10px;border:2px solid var(--line)}.seg button{flex:1;border:0;border-radius:999px;padding:8px;background:transparent;color:var(--hint);font:800 13px "Nunito",sans-serif}.seg button.on{background:var(--yel);color:#1a1a1a}
 .tile.wide{grid-column:1/-1;min-height:0;flex-direction:row;align-items:center;justify-content:flex-start;gap:14px;padding:14px}.tile.wide b{margin-top:0}
 .tile .new{margin-left:auto;background:var(--red);color:#fff;font-weight:900;font-size:12px;padding:3px 9px;border-radius:999px}
@@ -442,10 +447,11 @@ function cardHits(q) {
   const hit = (number, name) => isNum ? number === fq : fold(name).includes(fq);
   const groups = [];
   const home = cards.filter((c) => hit(c.number, c.name));
-  if (home.length) groups.push({ id: "home", name: setName("me55"), cards: home.map((c) => ({ number: c.number, name: c.name, rarity: c.rarity || "" })) });
+  if (home.length) groups.push({ id: "home", name: setName("me55"), cards: home.map((c) => ({ number: c.number, name: c.name, rarity: c.rarity || "", image: c.image })) });
   for (const s of (catalog || [])) {
     if (HOME_SETS.includes(s.id)) continue;
-    const found = ((cardIndex || {})[s.id] || []).filter(([n, nm]) => hit(n, nm)).map(([number, name, r]) => ({ number, name, rarity: rarityNames[r] || "" }));
+    const found = ((cardIndex || {})[s.id] || []).filter(([n, nm]) => hit(n, nm)).map(([number, name, r]) =>
+      ({ number, name, rarity: rarityNames[r] || "", image: `https://images.pokemontcg.io/${s.id}/${number}.png` }));
     if (found.length) groups.push({ id: s.id, name: setName(s.id, s.name), cards: found });
   }
   return groups;
@@ -463,8 +469,9 @@ function renderCardHits(q) {
   if (hitRarity) groups = groups.map((g) => ({ ...g, cards: g.cards.filter((c) => (c.rarity || "?") === hitRarity) })).filter((g) => g.cards.length);
   const total = groups.reduce((a, g) => a + g.cards.length, 0);
   return `<h2>Carte (${total})</h2><div class="card-row" id="hitpills">${pills}</div>` + groups.slice(0, 40).map((g) => `<h3>${esc(g.name)}</h3><div class="hits">` +
-    g.cards.slice(0, 24).map((c) => `<span class="hit" data-set="${esc(g.id)}" data-num="${esc(c.number)}">${esc(c.name)}<small>#${esc(c.number)}</small></span>`).join("") +
-    (g.cards.length > 24 ? `<span class="hit" data-set="${esc(g.id)}">… e altre ${g.cards.length - 24}</span>` : "") + "</div>").join("") +
+    g.cards.slice(0, 24).map((c) => `<div class="hit" data-set="${esc(g.id)}" data-num="${esc(c.number)}" title="${esc(c.name)} #${esc(c.number)}">
+      <img loading="lazy" src="${esc(c.image || "")}" alt="" onerror="this.style.visibility='hidden'"><span class="num">#${esc(c.number)}</span><b>${esc(c.name)}</b></div>`).join("") +
+    (g.cards.length > 24 ? `<div class="hit more" data-set="${esc(g.id)}">… e altre ${g.cards.length - 24}</div>` : "") + "</div>").join("") +
     (groups.length > 40 ? `<p class="hint">… e altre ${groups.length - 40} espansioni: scrivi qualche lettera in più.</p>` : "");
 }
 async function openCard(sid, q) {  // apre la checklist di quella espansione già filtrata sulla ricerca
