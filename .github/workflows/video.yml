@@ -9,6 +9,9 @@ on:
         default: "346053777"
         required: false
 
+permissions:
+  contents: write
+
 jobs:
   video:
     runs-on: ubuntu-latest
@@ -40,6 +43,13 @@ jobs:
         with:
           name: pokebot-demo
           path: /tmp/video/pokebot-demo.mp4
+      - name: Salva il video sul ramo "video"
+        run: |
+          mkdir -p /tmp/vb && cd /tmp/vb && git init -q -b video
+          cp /tmp/video/pokebot-demo.mp4 .
+          git -c user.name=pokebot -c user.email=pokebot@users.noreply.github.com add . 
+          git -c user.name=pokebot -c user.email=pokebot@users.noreply.github.com commit -qm "Video demo"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" video
       - name: Manda su Telegram
         if: ${{ inputs.chat_id != '' }}
         env:

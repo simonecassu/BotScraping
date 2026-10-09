@@ -66,6 +66,16 @@ HELP = """<b>Comandi</b>
 Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
 
+# Presentazione del bot: la descrizione compare nella chat vuota prima di "Avvia", la breve nel profilo e nei link
+BOT_DESCRIPTION = ("🃏 Pokébot trova le carte Pokémon che mancano alla tua collezione.\n\n"
+                   "✅ Segni nell'app le carte che hai: le altre le cerco io su Vinted, Wallapop ed eBay\n"
+                   "🔔 Ti avviso appena spunta un annuncio, con prezzo e foto\n"
+                   "🔥 Affari sotto il prezzo medio, lista della spesa, doppioni da scambiare\n"
+                   "👥 Album condivisi con gli amici\n\n"
+                   "Accesso su invito: premi Avvia per metterti in lista d'attesa.")
+BOT_SHORT_DESCRIPTION = "Cerca su Vinted, Wallapop ed eBay le carte Pokémon che ti mancano e ti avvisa appena spuntano."
+PROFILE_VERSION = 1
+
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
 MENU_VERSION = 16
 MENU_COMMANDS = [
@@ -150,6 +160,15 @@ class TelegramClient:
                              json={"commands": [{"command": c, "description": d[:256]} for c, d in commands]},
                              timeout=config.HTTP_TIMEOUT)
         return resp.status_code == 200 and bool(resp.json().get("ok"))
+
+    def set_profile(self, description: str, short_description: str) -> bool:
+        """Testi che vede chi apre il bot prima di premere Avvia (descrizione) e nel profilo (about)."""
+        ok = True
+        for method, key, text in (("setMyDescription", "description", description[:512]),
+                                  ("setMyShortDescription", "short_description", short_description[:120])):
+            resp = requests.post(f"{self.base}/{method}", json={key: text}, timeout=config.HTTP_TIMEOUT)
+            ok = ok and resp.status_code == 200 and bool(resp.json().get("ok"))
+        return ok
 
     def send(self, chat_id: str | int, text: str, buttons: list[list[tuple[str, str]]] | None = None) -> None:
         chunks = _chunks(text)
@@ -1311,7 +1330,16 @@ class TelegramCommands:
 
     def ensure_menu(self) -> None:
         """Registra il menu comandi su Telegram (una volta sola per versione del menu)."""
-        if not self.enabled or self.db.get_kv("telegram_menu_version") == MENU_VERSION:
+        if not self.enabled:
+            return
+        if self.db.get_kv("telegram_profile_version") != PROFILE_VERSION and hasattr(self.client, "set_profile"):
+            try:
+                if self.client.set_profile(BOT_DESCRIPTION, BOT_SHORT_DESCRIPTION):
+                    self.db.set_kv("telegram_profile_version", PROFILE_VERSION)
+                    log.info("Presentazione del bot registrata")
+            except requests.RequestException as exc:
+                log.warning("Telegram setMyDescription: %s", exc)
+        if self.db.get_kv("telegram_menu_version") == MENU_VERSION:
             return
         try:
             if self.client.set_my_commands(MENU_COMMANDS):

@@ -72,6 +72,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "actions":
         commands = TelegramCommands(index, db)
+        commands.ensure_menu()  # menu comandi e presentazione del bot, solo quando cambiano
         # ogni persona collegata ha i suoi album di casa (nati "tutte mancanti"): devono esistere nel database salvato
         for chat in db.chat_ids():
             for sid in config.HOME_SET_IDS:
