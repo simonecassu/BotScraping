@@ -83,6 +83,11 @@ def main() -> None:
             self.url, self.price_text, self.location = f"https://www.{src}.it/items/{abs(hash(key)) % 9999}", f"{price:.2f} €", "Milano"
     watch.record_found(db, chase.id, [L(*f) for f in found_for_chase] or
                        [L(f"vinted:{chase.id}:x{k}", f"{chase.name} {chase.number} 30th", 19.9 + 3 * k, "vinted", chase.image) for k in range(3)], "1")
+    # un'amica con l'album della 30th condiviso
+    db.add_chat_id("2")
+    db.set_user_name("2", "Giulia")
+    db.add_friend("1", "2")
+    db.join_album("2", coll.album_for(db, "1", "me55"))
     db.set_kv("last_search_ts", now - 240)
     run = db.start_run()
     db.finish_run(run, 412, 23, {}, {"vinted": 180, "wallapop": 120, "ebay": 112})
