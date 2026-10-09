@@ -173,12 +173,14 @@ textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
   </section>
 
   <section id="tab-reports" class="hidden">
+    <h2 style="margin-top:4px">Segnala qualcosa</h2>
     <div id="rep-form">
-      <p class="hint">Hai trovato un problema o vorresti qualcosa di diverso? Scrivilo qui: lo legge direttamente chi ha creato Pokébot. Una segnalazione al giorno.</p>
+      <p class="hint" id="rep-intro">Hai trovato un problema o vorresti qualcosa di diverso? Scrivilo qui: lo legge direttamente chi ha creato Pokébot. Una segnalazione al giorno.</p>
       <textarea id="rep-text" maxlength="1000" placeholder="Es. oggi non mi è arrivato l'avviso della 151; vorrei poter filtrare per condizione della carta…"></textarea>
       <div class="card-row" style="margin-top:8px"><button class="btn" id="rep-send">📨 Invia</button><span class="hint" id="rep-count">0/1000</span></div>
     </div>
     <p class="hint hidden" id="rep-done">✅ Oggi hai già mandato la tua segnalazione, grazie! Domani puoi scriverne un'altra.</p>
+    <p class="hint">Oppure in chat: scrivi <b>/segnala</b> seguito dal messaggio e invia. <a href="#" id="rep-chat">Apri la chat</a></p>
     <div id="rep-list"></div>
   </section>
 
@@ -359,8 +361,9 @@ function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 function renderReports() {
   if (!state) return;
   const r = state.reports || {}, all = r.all;
-  $("#rep-form").classList.toggle("hidden", !!r.sent_today || isOwner());
+  $("#rep-form").classList.toggle("hidden", !!r.sent_today && !isOwner());
   $("#rep-done").classList.toggle("hidden", !r.sent_today || isOwner());
+  if (isOwner()) $("#rep-intro").textContent = "Un appunto per te stesso (un bug visto, un'idea): finisce nell'elenco qui sotto insieme a quelle degli utenti.";
   const item = (x, who) => `<div class="rep"><small>${who ? esc(who) + " · " : ""}${fmtWhen(x.ts)}</small><p>${esc(x.text)}</p></div>`;
   if (all) {  // il proprietario: tutto quello che scrivono gli utenti, dalle più recenti
     const seen = Number(lsGet("reportsSeen") || 0), fresh = all.filter((x) => x.ts > seen).length;
@@ -375,14 +378,20 @@ function renderReports() {
   $("#t-rep").textContent = r.sent_today ? "inviata oggi ✓" : "un problema o un'idea";
   $("#rep-list").innerHTML = mine.length ? "<h2>Le tue ultime</h2>" + mine.map((x) => item(x)).join("") : "";
 }
+$("#rep-chat").onclick = async (ev) => {  // per chi preferisce scrivere in chat: /segnala già copiato, poi si torna a Telegram
+  ev.preventDefault();
+  try { await navigator.clipboard.writeText("/segnala "); toast("Copiato «/segnala»: incollalo in chat e scrivi il messaggio"); } catch (e) {}
+  if (tg && tg.close) setTimeout(() => tg.close(), 900);
+};
 $("#rep-text").oninput = () => { $("#rep-count").textContent = `${$("#rep-text").value.length}/1000`; };
 $("#rep-send").onclick = async () => {
   const text = $("#rep-text").value.trim();
   if (text.length < 5) { toast("Scrivi qualche parola in più"); return; }
   if (await sendCmd("/segnala " + text)) {
-    const r = (state.reports ||= {});
+    const r = (state.reports ||= {}), mine = { text, ts: Date.now() / 1000 };
     r.sent_today = true;
-    r.mine = [{ text, ts: Date.now() / 1000 }, ...(r.mine || [])].slice(0, 5);
+    r.mine = [mine, ...(r.mine || [])].slice(0, 5);
+    if (r.all) r.all = [{ ...mine, name: "tu", tier: "owner" }, ...r.all];
     $("#rep-text").value = ""; $("#rep-count").textContent = "0/1000";
     renderReports(); toast("📨 Inviata, grazie!");
   }
