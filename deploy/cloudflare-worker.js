@@ -181,6 +181,14 @@ async function sendCommand(env, chatId, text, name, extra) {
   return true;
 }
 
+// Apertura della Mini App: una sveglia del bot (non più di una al minuto per istanza del worker, non serve di più).
+let lastAppWake = 0;
+async function wakeForApp(env) {
+  if (Date.now() - lastAppWake < 60e3) return;
+  lastAppWake = Date.now();
+  try { await dispatch(env, { event_type: "timer", client_payload: { reason: "apertura della Mini App" } }); } catch {}
+}
+
 // Chi non è collegato può solo chiedere l'accesso: lo stesso messaggio una volta ogni 30 minuti, e non più di 50
 // richieste di sconosciuti ogni 30 minuti (per istanza del worker), così nessuno può far partire GitHub a raffica.
 // Un "/start CODICE" d'invito è un messaggio diverso dal "/start" di prima: passa.
@@ -258,6 +266,7 @@ export default {
       const m = await memberFrom(env, request);
       if (m.error) return m.error;
       const st = await readState(env, `state-${await fileId(env, m.user.id)}.json`);
+      if (m.body.wake) await wakeForApp(env);  // all'apertura: il bot rifà il giro e ripubblica dati freschi
       if (!st) return Response.json({ ok: false, error: "il bot sta preparando i tuoi dati: riprova tra un minuto" }, { status: 404 });
       return Response.json(st, { headers: { "Cache-Control": "no-store" } });
     }

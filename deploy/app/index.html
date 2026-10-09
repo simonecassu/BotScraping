@@ -259,7 +259,7 @@ async function sendCmd(text) {
 }
 
 let refreshing = null, loadRetries = 0;
-async function awaitRefresh(what) {
+async function awaitRefresh(what, quiet = false) {
   // dopo un comando: il bot gira su GitHub (30-60 s); resta in ascolto e aggiorna da solo appena lo stato cambia
   if (refreshing) return;
   const before = state ? state.generated_at : 0;
@@ -269,17 +269,17 @@ async function awaitRefresh(what) {
       upd.textContent = "⏳ " + (what || "aggiornamento") + "…";
       await new Promise((r) => setTimeout(r, i < 4 ? 10000 : 7000));
       await load();
-      if (state && state.generated_at !== before) { toast("✅ Aggiornato"); break; }
+      if (state && state.generated_at !== before) { if (!quiet) toast("✅ Aggiornato"); break; }
     }
     refreshing = null;
     if (state) upd.textContent = "aggiornato " + new Date(state.generated_at * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
   })();
 }
 
-async function load() {
+async function load(wake = false) {
   try {
     const r = tg && tg.initData
-      ? await fetch("/api/state?t=" + Date.now(), { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: tg.initData }) })
+      ? await fetch("/api/state?t=" + Date.now(), { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: tg.initData, wake }) })
       : await fetch("/api/state?t=" + Date.now(), { cache: "no-store" });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.error || "il bot non risponde adesso: riprova tra un minuto");
@@ -973,7 +973,8 @@ function showTab(name, push = true) {
 }
 $("#back").onclick = () => { let prev = stack.pop() || "home"; if (prev === "check") prev = "coll"; showTab(prev, false); if (prev === "home") stack.length = 0; };
 if (tg && tg.BackButton) { tg.BackButton.onClick(() => $("#back").click()); new MutationObserver(() => $("#back").classList.contains("hidden") ? tg.BackButton.hide() : tg.BackButton.show()).observe($("#back"), { attributes: true }); }
-load().then(loadCatalog).then(() => { renderCollections(); if (itNames()) loadCardIndex(); });
+// all'apertura: si mostra subito quello che c'è, il bot viene svegliato e appena ripubblica l'App si aggiorna da sola
+load(true).then(loadCatalog).then(() => { renderCollections(); if (itNames()) loadCardIndex(); if (state) awaitRefresh("aggiorno", true); });
 setInterval(load, 90000);
 </script>
 </body>
