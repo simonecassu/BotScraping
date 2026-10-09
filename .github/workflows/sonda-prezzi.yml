@@ -1,0 +1,21 @@
+name: Sonda prezzi Cardmarket
+
+# Controlla se le fonti dei prezzi Cardmarket rispondono da GitHub Actions (nessun segreto usato).
+on:
+  workflow_dispatch:
+
+jobs:
+  sonda:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: pokemontcg.io (prezzi Cardmarket per carta)
+        run: |
+          curl -s --max-time 30 "https://api.pokemontcg.io/v2/cards?q=set.id:me55%20number:131&select=id,name,cardmarket" | head -c 1500; echo
+          curl -s --max-time 30 "https://api.pokemontcg.io/v2/cards?q=set.id:sv3pt5%20number:151&select=id,name,cardmarket" | head -c 1500; echo
+      - name: TCGdex
+        run: |
+          curl -s --max-time 30 "https://api.tcgdex.net/v2/en/cards/sv03.5-151" | python3 -c "import sys,json;d=json.load(sys.stdin);print(json.dumps(d.get('pricing'),indent=1)[:1500])" || true
+          curl -s --max-time 30 "https://api.tcgdex.net/v2/en/sets" | python3 -c "import sys,json;d=json.load(sys.stdin);print([s['id'] for s in d][-15:])" || true
+      - name: Cardmarket diretto
+        run: curl -s -o /dev/null -w "%{http_code}\n" --max-time 30 -A "Mozilla/5.0" "https://www.cardmarket.com/it/Pokemon/Products/Singles" || true
