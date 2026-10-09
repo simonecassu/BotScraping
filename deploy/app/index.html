@@ -68,7 +68,7 @@ a{color:var(--link);text-decoration:none}
 .fcode{background:var(--sec);border:3px solid var(--yel);box-shadow:0 4px 0 var(--yel2);border-radius:18px;padding:16px;text-align:center;margin:6px 0 10px}
 .fcode small{display:block;color:var(--hint);font-weight:800;font-size:12px}.fcode b{display:block;font-size:38px;font-weight:900;letter-spacing:6px;color:var(--yel);margin:4px 0 12px}
 .friend{background:var(--sec);border:2px solid var(--line);border-radius:14px;padding:12px;margin-bottom:9px}
-.friend .top{display:flex;align-items:center;gap:10px}.friend .av{width:42px;height:42px;border-radius:50%;background:var(--red);color:#fff;font-weight:900;font-size:19px;display:flex;align-items:center;justify-content:center;flex:none}
+.friend .top{display:flex;align-items:center;gap:10px}.friend .av,.usr .av{width:42px;height:42px;border-radius:50%;background:var(--red);color:#fff;font-weight:900;font-size:19px;display:flex;align-items:center;justify-content:center;flex:none}
 .friend .top div{flex:1;min-width:0}.friend small{display:block;color:var(--hint);font-weight:700;font-size:12px}
 .friend .act{display:flex;gap:8px;margin-top:10px;align-items:center}.friend select{flex:1;min-width:0}
 .tile.red{border-color:var(--red);box-shadow:0 4px 0 var(--red2)}.tile.yel{border-color:var(--yel);box-shadow:0 4px 0 var(--yel2)}
@@ -393,12 +393,11 @@ function renderAdmin() {
       <div class="act"><button class="btn" data-cmd="/approva ${esc(w.id)}" data-ok="Approvato: parte la prova di ${a.trial_days} giorni">✅ Approva</button>
       <button class="btn ghost" data-cmd="/rifiuta ${esc(w.id)}" data-confirm="Rifiutare ${esc(w.name || w.id)}?">✕ Rifiuta</button></div></div>`).join("")
     : '<p class="hint">Nessuno in attesa.</p>');
-  const tierIc = { owner: "👑", pro: "⭐", trial: "🎁", light: "🌱" };
   $("#adm-users").innerHTML = `<h2>Collegati (${us.length})</h2>` + us.map((u) => {
-    const me = u.tier === "owner", until = u.until && !u.lifetime ? ` · fino al ${day(u.until)}` : "";
+    const me = u.tier === "owner";
     const plan = (what, label) => `<button class="btn ${u.tier === what.split(" ")[0] ? "" : "ghost"}" data-cmd="/piano ${esc(u.id)} ${what}" data-ok="${esc(u.name)}: piano aggiornato">${label}</button>`;
     return `<div class="usr ${u.banned ? "banned" : ""}" data-id="${esc(u.id)}"><div class="top"><span class="av">${esc((u.name || "?").slice(0, 1).toUpperCase())}</span>
-      <div><b>${esc(u.name)}${me ? " (tu)" : ""}</b><small>${tierIc[u.tier] || ""} ${esc(u.label)}${until}${u.paid ? " · ha pagato" : ""}</small></div></div>
+      <div><b>${esc(u.name)}${me ? " (tu)" : ""}</b><small>${esc(u.label)}${u.paid ? " · ha pagato" : ""}${u.banned ? " · espulso" : ""}</small></div></div>
       ${me ? "" : `<div class="act">${plan("prova " + a.trial_days, "🎁 Prova " + a.trial_days + "g")}${plan("pro 30", "⭐ Pro 30g")}${plan("sempre", "💎 Pro per sempre")}${plan("light", "🌱 Light")}</div>
       <div class="act">${u.paid ? `<button class="btn ghost" data-cmd="/rimborsa ${esc(u.id)}" data-confirm="Rimborsare l'ultimo pagamento di ${esc(u.name)}? (intero, solo entro ${a.refund_days} giorni)">💸 Rimborsa</button>
       <button class="btn ghost" data-cmd="/rimborsa ${esc(u.id)} annulla" data-confirm="Fermare il rinnovo di ${esc(u.name)}?">⏹ Ferma rinnovo</button>` : ""}
