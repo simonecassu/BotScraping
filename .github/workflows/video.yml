@@ -1,0 +1,51 @@
+name: Video demo Mini App
+
+# Registra un giro nella Mini App con dati dimostrativi (immagini vere delle carte) e lo manda su Telegram.
+on:
+  workflow_dispatch:
+    inputs:
+      chat_id:
+        description: "Chat Telegram a cui mandare il video (vuoto = solo artefatto)"
+        default: "346053777"
+        required: false
+
+jobs:
+  video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Dipendenze
+        run: |
+          pip install -r requirements.txt
+          mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i playwright@1.56.1 >/dev/null
+          npx playwright install --with-deps chromium
+      - name: Pokébot dimostrativo
+        run: python scripts/demo_state.py /tmp/demo
+      - name: Registra
+        run: NODE_PATH=/tmp/pw/node_modules node scripts/record_demo.cjs /tmp/demo /tmp/video
+      - name: Converte in MP4 verticale
+        run: |
+          ffmpeg -v error -y -i /tmp/video/pokebot-demo.webm -vf "scale=1080:-2,fps=30" -c:v libx264 -preset slow -crf 20 \
+            -pix_fmt yuv420p -movflags +faststart -an /tmp/video/pokebot-demo.mp4
+          ls -la /tmp/video
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pokebot-demo
+          path: /tmp/video/pokebot-demo.mp4
+      - name: Manda su Telegram
+        if: ${{ inputs.chat_id != '' }}
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT: ${{ inputs.chat_id }}
+        run: |
+          curl -sS -o /tmp/tg.json -F chat_id="$CHAT" -F supports_streaming=true \
+            -F caption="🎬 Video demo della Mini App (dati dimostrativi)" \
+            -F video=@/tmp/video/pokebot-demo.mp4 "https://api.telegram.org/bot$TOKEN/sendVideo"
+          grep -q '"ok":true' /tmp/tg.json || { cat /tmp/tg.json; exit 1; }
