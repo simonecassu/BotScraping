@@ -488,10 +488,12 @@ let cardIndex = null, cardIndexLoading = null, rarityNames = [], hitRarity = "",
 const fold = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 function loadCardIndex() {
   if (cardIndex || cardIndexLoading) return cardIndexLoading;
-  cardIndexLoading = fetch("/app/cards.json").then((r) => r.ok ? r.json() : { sets: {} }).catch(() => ({ sets: {} }))
-    .then((d) => { cardIndex = d.sets || {}; rarityNames = d.rarities || []; imgPattern = d.img || {}; namesIt = d.names_it || {}; renderAll(); });
+  cardIndexLoading = fetch("/app/cards.json", { cache: "force-cache" }).then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then((d) => { cardIndex = d.sets || {}; rarityNames = d.rarities || []; imgPattern = d.img || {}; namesIt = d.names_it || {}; renderAll(); })
+    .catch((e) => { cardIndexError = e.message || String(e); cardIndexLoading = null; renderCollections(); });  // si riprova alla prossima ricerca
   return cardIndexLoading;
 }
+let cardIndexError = "";
 function cardHits(q) {
   // per espansione, nell'ordine del catalogo (le più recenti prima), quelle di casa per prime
   const fq = fold(q), isNum = /^\d+$/.test(fq);
@@ -513,7 +515,7 @@ function cardHits(q) {
   return groups;
 }
 function renderCardHits(q) {
-  if (!cardIndex) { loadCardIndex(); return '<h2>Carte</h2><p class="hint">Carico l\'elenco delle carte…</p>'; }
+  if (!cardIndex) { loadCardIndex(); return '<h2>Carte</h2><p class="hint">' + (cardIndexError ? "⚠️ Elenco delle carte non caricato (" + esc(cardIndexError) + "): riprovo…" : "Carico l'elenco delle carte…") + "</p>"; }
   let groups = cardHits(q);
   if (!groups.length) return "";
   // filtro per rarità: le rarità presenti nei risultati, con quante carte ciascuna

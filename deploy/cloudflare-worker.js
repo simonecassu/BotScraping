@@ -213,6 +213,10 @@ async function diag(env) {
     }
   } catch (e) { out.error = String(e && e.message || e); }
   out.lastGood = [...lastGood.keys()];
+  try {  // l'indice delle carte servito con la Mini App
+    const a = await env.ASSETS.fetch(new Request("https://x/cards.json"));
+    out.cards_json = { http: a.status, bytes: (await a.arrayBuffer()).byteLength, type: a.headers.get("content-type") };
+  } catch (e) { out.cards_json = String(e && e.message || e); }
   return out;
 }
 
