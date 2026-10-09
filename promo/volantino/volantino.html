@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8">
+
+<style>
+@font-face { font-family: "Nunito"; font-weight: 700 800; src: url(nunito800.ttf); }
+@font-face { font-family: "Nunito"; font-weight: 900; src: url(nunito900.ttf); }
+@page { size: A4; margin: 0; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 210mm; height: 297mm; }
+body { font-family: "Nunito", "DejaVu Sans", sans-serif; color: #14213d; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.page { position: relative; width: 210mm; height: 297mm; overflow: hidden; }
+.top { background: #e3350d; color: #fff; padding: 8mm 13mm 6.5mm; position: relative; border-bottom: 3mm solid #ffcb05; }
+.brand { display: flex; align-items: center; gap: 4mm; font-weight: 900; font-size: 10.5mm; letter-spacing: -.3mm; }
+.ball { width: 10.5mm; height: 10.5mm; border-radius: 50%; background: linear-gradient(#fff 0 0) bottom/100% 50% no-repeat, #e3350d; border: 1.6mm solid #111; position: relative; box-shadow: 0 0 0 .8mm #fff; }
+.ball::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1.4mm; margin-top: -.7mm; background: #111; }
+.ball::after { content: ""; position: absolute; left: 50%; top: 50%; width: 4mm; height: 4mm; margin: -2mm 0 0 -2mm; border-radius: 50%; background: #fff; border: 1.2mm solid #111; }
+h1 { font-size: 10.5mm; line-height: 1.05; font-weight: 900; margin-top: 3mm; }
+.sub { font-size: 4.6mm; font-weight: 800; margin-top: 2.5mm; line-height: 1.3; max-width: 165mm; }
+.mid { display: flex; gap: 7mm; padding: 7mm 13mm 0; }
+.left { flex: 1; }
+.steps { list-style: none; }
+.steps li { display: flex; gap: 3.5mm; align-items: flex-start; margin-bottom: 4.2mm; font-size: 4.4mm; font-weight: 800; line-height: 1.3; }
+.n { flex: none; width: 9mm; height: 9mm; border-radius: 50%; background: #ffcb05; color: #14213d; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 5mm; border: .7mm solid #14213d; }
+.steps small { display: block; font-weight: 700; color: #4a5672; font-size: 3.7mm; margin-top: .6mm; }
+.feat { display: flex; flex-wrap: wrap; gap: 2.2mm; margin-top: 1mm; }
+.feat span { background: #eef2fb; border: .5mm solid #c9d3ea; border-radius: 99px; padding: 1.6mm 3.2mm; font-size: 3.5mm; font-weight: 800; }
+.phone { flex: none; width: 54mm; height: 90mm; border-radius: 9mm; background: #111; padding: 2.6mm; box-shadow: 0 2mm 6mm rgba(0,0,0,.25); transform: rotate(2.5deg); margin-top: 1mm; }
+.phone img { width: 100%; height: 100%; object-fit: cover; object-position: top; border-radius: 6.5mm; display: block; }
+.cta { display: flex; align-items: center; gap: 6mm; margin: 6mm 13mm 0; padding: 4.5mm; border: 1.2mm solid #14213d; border-radius: 6mm; background: #fffbea; }
+.cta .qr { width: 46mm; height: 46mm; flex: none; background: #fff; padding: 2.5mm; border-radius: 2mm; }
+.cta .qr img { width: 100%; height: 100%; display: block; }
+.cta b.big { display: block; font-size: 7.6mm; line-height: 1.05; font-weight: 900; }
+.cta .free { display: inline-block; margin-top: 3mm; background: #e3350d; color: #fff; font-weight: 900; font-size: 4.6mm; border-radius: 2mm; padding: 1.5mm 3mm; }
+.cta p { font-size: 3.9mm; font-weight: 800; margin-top: 3mm; line-height: 1.35; color: #33405e; }
+.cta .url { font-size: 4.6mm; font-weight: 900; color: #14213d; margin-top: 2.2mm; }
+.chan { display: flex; align-items: center; gap: 3.5mm; margin: 3.5mm 13mm 0; font-size: 3.8mm; font-weight: 800; color: #33405e; }
+.chan img { width: 15mm; height: 15mm; }
+.chan b { color: #14213d; }
+.tabs { position: absolute; left: 0; right: 0; bottom: 0; height: 40mm; display: flex; border-top: .5mm dashed #777; }
+.tabs::before { content: "✂"; position: absolute; top: -3.4mm; left: 6mm; font-size: 5mm; background: #fff; padding: 0 1mm; color: #555; }
+.tab { flex: 1; border-left: .4mm dashed #999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.6mm; padding: 2mm 1mm; }
+.tab:first-child { border-left: 0; }
+.tab img { width: 16mm; height: 16mm; }
+.tab b { font-size: 3.1mm; font-weight: 900; text-align: center; line-height: 1.15; }
+.tab span { font-size: 2.25mm; font-weight: 800; color: #444; text-align: center; line-height: 1.2; }
+.note { position: absolute; left: 13mm; right: 13mm; text-align: center; bottom: 42mm; font-size: 2.6mm; color: #7a849a; font-weight: 700; }
+</style></head>
+<body><div class="page">
+  <div class="top">
+    <div class="brand"><span class="ball"></span>Pokébot</div>
+    <h1>Ti mancano delle carte Pokémon?</h1>
+    <div class="sub">Il bot di Telegram che le cerca per te su Vinted, Wallapop ed eBay e ti scrive appena qualcuno le mette in vendita.</div>
+  </div>
+  <div class="mid">
+    <div class="left">
+      <ul class="steps">
+        <li><span class="n">1</span><div>Inquadra il QR code<small>si apre il bot su Telegram: tocca Avvia</small></div></li>
+        <li><span class="n">2</span><div>Segna le carte che hai già<small>funziona con qualsiasi espansione, dalla prima all'ultima</small></div></li>
+        <li><span class="n">3</span><div>Ricevi l'annuncio appena esce<small>con foto, prezzo e link, prima degli altri</small></div></li>
+      </ul>
+      <div class="feat">
+        <span>🔥 Affari sotto il prezzo medio</span>
+        <span>🛒 Lista della spesa</span>
+        <span>🔁 Doppioni e scambi</span>
+        <span>👥 Album con gli amici</span>
+        <span>🏃 Insegui una carta</span>
+      </div>
+    </div>
+    <div class="phone"><img src="app.jpg" alt=""></div>
+  </div>
+  <div class="cta">
+    <div class="qr"><img src="qr_bot.svg" alt=""></div>
+    <div>
+      <b class="big">Inquadra e prova subito</b>
+      <span class="free">5 GIORNI GRATIS CON TUTTO</span>
+      <p>Poi resta gratis nella versione Light, oppure passi al completo quando vuoi.</p>
+      <div class="url">t.me/Scraperamemebot</div>
+    </div>
+  </div>
+  <div class="chan"><img src="qr_canale.svg" alt=""><div>Ogni sera i 3 migliori affari del giorno sul canale <b>@scraperofferta3</b></div></div>
+  <div class="note">Pokébot è un progetto indipendente, non affiliato a Pokémon, Nintendo o ai marketplace citati.</div>
+  <div class="tabs">
+    <div class="tab"><img src="qr_bot.svg" alt=""><b>Pokébot</b><span>carte mancanti<br>t.me/Scraperamemebot</span></div>
+    <div class="tab"><img src="qr_bot.svg" alt=""><b>Pokébot</b><span>carte mancanti<br>t.me/Scraperamemebot</span></div>
+    <div class="tab"><img src="qr_bot.svg" alt=""><b>Pokébot</b><span>carte mancanti<br>t.me/Scraperamemebot</span></div>
+    <div class="tab"><img src="qr_bot.svg" alt=""><b>Pokébot</b><span>carte mancanti<br>t.me/Scraperamemebot</span></div>
+    <div class="tab"><img src="qr_bot.svg" alt=""><b>Pokébot</b><span>carte mancanti<br>t.me/Scraperamemebot</span></div>
+    <div class="tab"><img src="qr_bot.svg" alt=""><b>Pokébot</b><span>carte mancanti<br>t.me/Scraperamemebot</span></div>
+    <div class="tab"><img src="qr_bot.svg" alt=""><b>Pokébot</b><span>carte mancanti<br>t.me/Scraperamemebot</span></div>
+  </div>
+</div></body></html>
