@@ -1,0 +1,15 @@
+name: Sonda prezzi Cardmarket
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sonda:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          for id in 30th-131 30th-158 30th-025; do curl -s --max-time 30 "https://api.tcgdex.net/v2/en/cards/$id" | python3 -c "import sys,json;d=json.load(sys.stdin);print('$id', d.get('name'), json.dumps(d.get('pricing'))[:400])" || true; done
+          curl -s --max-time 30 "https://api.tcgdex.net/v2/en/sets/30th-c" | python3 -c "import sys,json;d=json.load(sys.stdin);print([ (c['id'],c['localId'],c['name']) for c in d.get('cards',[])][:40])" || true
+          curl -s --max-time 30 "https://api.tcgdex.net/v2/en/sets/30th" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('releaseDate'), d.get('cardCount'), [c['localId'] for c in d.get('cards',[])][:5])" || true
+          curl -s --max-time 30 "https://api.tcgdex.net/v2/en/cards/sv06.5-001" | python3 -c "import sys,json;d=json.load(sys.stdin);print('sv06.5-001', json.dumps(d.get('pricing'))[:300])" || true
