@@ -43,7 +43,7 @@ HELP = """<b>Comandi</b>
 /aggiungi 131 132 149-152 c4 – segna come mancanti (anche ir, sir, pr, un nome o tutte) · /ho 131 – l'hai trovata
 /collezione – le tue collezioni · /collezione sv8 – passa a quella (o la segue, partendo da "mi mancano tutte")
 /collezione sv8 attiva | disattiva – accende o spegne la ricerca e le notifiche di quella collezione · sv8:7 – una sua carta in qualsiasi comando
-/cerca 145 – cosa c'è in vendita adesso per quella carta, dal più economico (una ricerca ogni 15 minuti)
+/cerca 145 – cosa c'è in vendita adesso per quella carta (fino a 3 insieme), dal più economico: una ricerca ogni 5 minuti (Light: ogni 15)
 /insegui 151 – per 6 ore la cerca ogni 5 minuti (Light: ogni 2 ore) e ti avvisa appena spunta un annuncio nuovo · /insegui 151 2h ogni 10m · /insegui stop
 /storico – gli annunci trovati, divisi per carta e marketplace
 /prezzi 145 – valore Cardmarket e annunci visti · /prezzi – quanto costa finire la collezione
@@ -69,7 +69,9 @@ OWNER_HELP = """
 /cerca – ricerca completa adesso · /storico svuota · /resetvisti – rinotifica gli annunci già visti"""
 
 
-CERCA_EVERY_S = 15 * 60  # ricerche mirate dal vivo (/cerca 145) per chi non è il proprietario
+# ricerche mirate dal vivo (/cerca 145) per chi non è il proprietario: completo (abbonati e prova) e Light
+CERCA_EVERY_FULL_S = 5 * 60
+CERCA_EVERY_LIGHT_S = 15 * 60
 
 # Presentazione del bot: la descrizione compare nella chat vuota prima di "Avvia", la breve nel profilo e nei link
 BOT_DESCRIPTION = ("🃏 Pokébot trova le carte Pokémon che mancano alla tua collezione.\n\n"
@@ -442,10 +444,11 @@ class CommandHandler:
                     return Reply("🔎 Ok, cerco adesso.", run_search=True)
                 return Reply("🔎 La ricerca completa gira da sola per tutti, più volte all'ora. "
                              "Per vedere subito cosa c'è in vendita per una carta: <code>/cerca 145</code>.")
-            if not owner:  # le ricerche mirate interrogano i marketplace dal vivo: una ogni 15 minuti
+            if not owner:  # le ricerche mirate interrogano i marketplace dal vivo: con un intervallo minimo
+                every = CERCA_EVERY_FULL_S if plans.is_full(self.db, self.chat) else CERCA_EVERY_LIGHT_S
                 last = float(self.db.get_kv(f"last_cerca:{self.chat}", 0) or 0)
-                if time.time() - last < CERCA_EVERY_S:
-                    wait = int(CERCA_EVERY_S - (time.time() - last)) // 60 + 1
+                if time.time() - last < every:
+                    wait = int(every - (time.time() - last)) // 60 + 1
                     return Reply(f"🔎 Hai appena fatto una ricerca: la prossima tra {wait} min.")
                 self.db.set_kv(f"last_cerca:{self.chat}", time.time())
             return self._search_cards(args)

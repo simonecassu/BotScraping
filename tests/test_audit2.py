@@ -108,15 +108,24 @@ def test_light_cannot_chase_two_cards(index, monkeypatch):
 
 
 def test_non_owner_search_limits(index, monkeypatch):
+    import pokebot.telegram_bot as tb
     monkeypatch.setattr("pokebot.config.TELEGRAM_CHAT_ID", "")
     monkeypatch.setattr(search, "search_card", lambda *a, **k: ([], {}))
     db = make_db()
     db.set_kv("telegram_chat_id", "1")
     db.add_chat_id("2")
+    db.add_chat_id("3")
+    plans.set_light(db, "2")
+    plans.set_pro(db, "3", lifetime=True)
     h = CommandHandler(index, db)
-    first = h.handle("/cerca 145", "2").text
-    assert "prossima tra" not in first and "prossima tra" in h.handle("/cerca 146", "2").text
-    assert "prossima tra" not in h.handle("/cerca 145", "1").text  # il proprietario no
+    for chat in ("2", "3"):
+        assert "prossima tra" not in h.handle("/cerca 145", chat).text
+        assert "prossima tra" in h.handle("/cerca 146", chat).text
+    six_min_later = time.time() + 6 * 60
+    monkeypatch.setattr(tb.time, "time", lambda: six_min_later)
+    assert "prossima tra" not in h.handle("/cerca 146", "3").text  # abbonato: ogni 5 minuti
+    assert "prossima tra 9 min" in h.handle("/cerca 146", "2").text  # Light: ogni 15
+    assert all("prossima tra" not in h.handle("/cerca 145", "1").text for _ in range(3))  # il proprietario mai
 
 
 def test_kicked_user_cannot_rejoin_with_an_old_invite(index, monkeypatch):
