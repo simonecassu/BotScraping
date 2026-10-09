@@ -71,6 +71,16 @@ CREATE TABLE IF NOT EXISTS prices (
     ts REAL NOT NULL,
     PRIMARY KEY (card_id, listing_key)
 );
+CREATE TABLE IF NOT EXISTS cm_prices (
+    card_id TEXT PRIMARY KEY,
+    tcgdex_id TEXT,
+    low REAL,
+    trend REAL,
+    avg7 REAL,
+    avg30 REAL,
+    updated TEXT,
+    fetched REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at REAL NOT NULL,

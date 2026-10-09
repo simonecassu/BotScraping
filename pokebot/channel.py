@@ -1,4 +1,4 @@
-"""Canale pubblico degli affari: ogni giorno il bot pubblica i 3 annunci migliori trovati nelle ultime 24 ore.
+"""Canale pubblico degli affari: ogni giorno il bot pubblica le 3 migliori occasioni (prezzi confrontati con Cardmarket).
 
 Il proprietario crea un canale Telegram, aggiunge il bot come amministratore e scrive `/canale @nomecanale`.
 Ogni post finisce con un pulsante che porta al bot (deep link `?start=canale`, così si sa chi arriva da lì).
@@ -12,7 +12,7 @@ import time
 from zoneinfo import ZoneInfo
 
 from . import config
-from . import stats as pstats
+from . import cardmarket
 from .cards import CardIndex
 from .db import Database
 from .notifier import SOURCE_LABELS
@@ -21,42 +21,44 @@ from .scrapers.base import parse_price
 log = logging.getLogger(__name__)
 
 DEFAULT_HOUR = 19  # ora locale del post giornaliero
-MAX_RATIO = 0.75   # un annuncio è "affare" se costa al più il 75% della mediana storica della carta
-MIN_RATIO = 0.25   # sotto il 25% è quasi sempre un errore di riconoscimento
 
 
 def pick_deals(db: Database, index: CardIndex, now: float | None = None, hours: int = 24, limit: int = 3) -> list[dict]:
-    """I `limit` annunci singoli delle ultime `hours` ore con il prezzo più basso rispetto alla mediana (una carta per voce)."""
+    """Le `limit` migliori occasioni, una per carta, giudicate solo sui prezzi Cardmarket.
+
+    Prima gli affari veri (🔥), poi gli ottimi prezzi (💰), poi quelli sotto il valore (👍): così il post del giorno
+    esce sempre, ma ogni voce dice onestamente di che tipo è. Se nelle ultime 24 ore non basta, si allarga a 72.
+    """
     now = now or time.time()
     rows = db.list_found()
-    out: list[dict] = []
-    seen_cards: set[str] = set()
+    cm = cardmarket.all_prices(db)
+    rank = {"deal": 0, "great": 1, "good": 2}
     cands = []
     for r in rows:
-        if r.get("kind") != "single" or float(r.get("created_at") or 0) < now - hours * 3600:
+        age = now - float(r.get("created_at") or 0)
+        if r.get("kind") != "single" or age > 72 * 3600:
             continue
         sure = [m for m in r.get("matched", []) if m.get("sure", True) and m.get("id")]
         if len(sure) != 1:
             continue
         cid = sure[0]["id"]
         price = parse_price(r.get("price"))
-        if price is None or price < 1:
+        p = cm.get(cid)
+        v, ratio = cardmarket.verdict(price, p)
+        if v:
+            cands.append((age > hours * 3600, rank[v], ratio, r, cid, price, p, v))
+    # prima le ultime 24 ore, migliori per categoria; i giorni prima servono solo a riempire i posti rimasti
+    cands.sort(key=lambda t: (t[0], t[1], t[2]))
+    out: list[dict] = []
+    seen: set[str] = set()
+    for _, _, ratio, r, cid, price, p, v in cands:
+        if cid in seen:
             continue
-        median = pstats.median_for_deal(rows, cid, exclude_keys={r.get("listing_key")})
-        if not median:
-            continue
-        ratio = price / median
-        if MIN_RATIO <= ratio <= MAX_RATIO:
-            cands.append((ratio, r, cid, price, median))
-    cands.sort(key=lambda t: t[0])
-    for ratio, r, cid, price, median in cands:
-        if cid in seen_cards:
-            continue
-        seen_cards.add(cid)
+        seen.add(cid)
         card = index.by_id.get(cid)
         out.append({"card": card.label if card else cid, "image": (card.image if card else "") or r.get("image") or "",
-                    "price": price, "median": median, "ratio": ratio, "source": r.get("source", ""),
-                    "url": r.get("url", ""), "title": r.get("title", "")})
+                    "price": price, "trend": p.ref, "low": p.low, "ratio": ratio, "verdict": v,
+                    "source": r.get("source", ""), "url": r.get("url", ""), "title": r.get("title", "")})
         if len(out) >= limit:
             break
     return out
@@ -66,15 +68,18 @@ def format_post(deals: list[dict], bot_username: str, day: dt.date | None = None
     """Testo HTML del post e pulsante che porta al bot."""
     day = day or dt.datetime.now(ZoneInfo(config.TIMEZONE)).date()
     esc = html.escape
-    lines = [f"🔥 <b>Affari Pokémon del {day.strftime('%d/%m')}</b>", ""]
-    for i, d in enumerate(deals, 1):
-        pct = 100.0 * d["price"] / d["median"] if d["median"] else 0
-        lines.append(f"{i}. <b>{esc(d['card'])}</b> · <b>{d['price']:.2f} €</b> "
-                     f"({pct:.0f}% del prezzo medio visto, {d['median']:.0f} €) · {esc(SOURCE_LABELS.get(d['source'], d['source']))}\n"
-                     f'   <a href="{esc(d["url"], quote=True)}">{esc(d["title"][:70])}</a>')
-    lines.append("")
-    lines.append("Trovati da Pokébot, che cerca su Wallapop, Vinted ed eBay le carte che mancano alla tua collezione "
-                 "e ti avvisa appena spuntano. 5 giorni di prova con tutto, poi gratis in versione Light.")
+    all_deals = all(d["verdict"] == "deal" for d in deals)
+    title = "Affari Pokémon del" if all_deals else "Le migliori occasioni Pokémon del"
+    lines = [f"🔥 <b>{title} {day.strftime('%d/%m')}</b>", ""]
+    for d in deals:
+        pct = round(100.0 * d["ratio"])
+        low = f", minimo {d['low']:.2f} €" if d.get("low") else ""
+        lines.append(f"{cardmarket.VERDICT_LABEL[d['verdict']]} · <b>{esc(d['card'])}</b>\n"
+                     f"<b>{d['price']:.2f} €</b> su {esc(SOURCE_LABELS.get(d['source'], d['source']))} · "
+                     f"{pct}% del valore Cardmarket (trend {d['trend']:.2f} €{low})\n"
+                     f'<a href="{esc(d["url"], quote=True)}">{esc(d["title"][:70])}</a>\n')
+    lines.append("Prezzi confrontati con Cardmarket. Trovati da Pokébot, che cerca su Wallapop, Vinted ed eBay le carte "
+                 "che mancano alla tua collezione e ti avvisa appena spuntano. 5 giorni di prova con tutto, poi gratis in versione Light.")
     url = f"https://t.me/{bot_username}?start=canale" if bot_username else ""
     buttons = [[("🤖 Attiva Pokébot", url)]] if url else []
     return "\n".join(lines), buttons
@@ -102,7 +107,7 @@ def post_daily(db: Database, index: CardIndex, client, now: float | None = None,
     if not deals:
         if not force:
             db.set_kv("deals_channel_last", today.isoformat())  # niente da dire oggi: non si riprova a ogni giro
-        return "nessun affare nelle ultime 24 ore: niente post"
+        return "nessuna occasione sotto il valore Cardmarket negli ultimi 3 giorni: niente post"
     username = db.get_kv("bot_username") or ""
     if not username:
         try:

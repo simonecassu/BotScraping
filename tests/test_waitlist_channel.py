@@ -8,6 +8,12 @@ from pokebot.telegram_bot import CommandHandler, TelegramCommands, _button
 from tests.test_telegram import FakeClient
 
 
+def _cm(db, cid, low, trend):
+    with db.connect() as c:
+        c.execute("INSERT INTO cm_prices(card_id, low, trend, avg7, avg30, updated, fetched) VALUES (?,?,?,?,?,?,?)",
+                  (cid, low, trend, None, None, "", time.time()))
+
+
 def _db():
     return Database(os.path.join(tempfile.mkdtemp(), "t.db"))
 
@@ -91,15 +97,22 @@ def test_url_button_and_channel_post(index, monkeypatch):
     db.add_found("old", "ebay", "Articuno ex 131 older", "https://e/old", "9 €", "", "single",
                  [{"id": "me55-131", "sure": True}], None, True)
     with db.connect() as c:
-        c.execute("UPDATE found SET created_at = ? WHERE listing_key = 'old'", (now - 3 * 86400,))
+        c.execute("UPDATE found SET created_at = ? WHERE listing_key = 'old'", (now - 4 * 86400,))
+    _cm(db, "me55-131", low=20, trend=30)
+    _cm(db, "me55-132", low=8, trend=10)
+    db.add_found("good", "vinted", "Articuno 132", "https://v/good", "9 €", "", "single",
+                 [{"id": "me55-132", "sure": True}], None, True)
     deals = channel.pick_deals(db, index, now)
-    assert len(deals) == 1 and deals[0]["url"] == "https://w/deal" and deals[0]["price"] == 12
+    assert [d["verdict"] for d in deals] == ["deal", "good"]
+    assert deals[0]["url"] == "https://w/deal" and deals[0]["price"] == 12 and deals[1]["url"] == "https://v/good"
     text, buttons = channel.format_post(deals, "fakebot")
-    assert "Affari Pokémon" in text and "12.00 €" in text and "Articuno" in text
+    assert "migliori occasioni" in text and "12.00 €" in text and "🔥 Affare" in text and "👍 Sotto il valore" in text
+    assert "40% del valore Cardmarket" in text
+    assert "Affari Pokémon" in channel.format_post(deals[:1], "fakebot")[0]
     assert buttons == [[("🤖 Attiva Pokébot", "https://t.me/fakebot?start=canale")]]
     # /canale ora pubblica subito
     r = h.handle("/canale ora", "1")
-    assert r.sends and r.sends[0][0] == "@affaripoke" and "Affari" in r.sends[0][1]
+    assert r.sends and r.sends[0][0] == "@affaripoke" and "Pokémon del" in r.sends[0][1]
     # post giornaliero: dovuto solo dopo l'ora e una volta al giorno
     import datetime as dt
     from zoneinfo import ZoneInfo
@@ -110,7 +123,7 @@ def test_url_button_and_channel_post(index, monkeypatch):
     assert channel.due(db, at_hour)
     assert "pubblicato" in channel.post_daily(db, index, client, at_hour)
     assert db.get_kv("bot_username") == "fakebot"
-    assert any(c == "@affaripoke" and "Affari Pokémon" in t for c, t in client.sent)
+    assert any(c == "@affaripoke" and "Pokémon del" in t for c, t in client.sent)
     assert client.last_buttons == [[("🤖 Attiva Pokébot", "https://t.me/fakebot?start=canale")]]
     assert not channel.due(db, at_hour + 600) and channel.post_daily(db, index, client, at_hour + 600) == ""
     assert "20:00" in h.handle("/canale 20", "1").text

@@ -91,6 +91,7 @@ class Completion:
     cost_min: float        # somma dei minimi visti
     cost_median: float     # somma delle mediane viste
     unpriced: list[Card] = field(default_factory=list)
+    cm_priced: int = 0     # di cui con prezzo Cardmarket (le altre: annunci visti)
     by_rarity: dict[str, tuple[int, int]] = field(default_factory=dict)  # rarità -> (mancanti, totale)
 
     @property
@@ -102,13 +103,29 @@ class Completion:
         return 100.0 * self.owned / self.total if self.total else 0.0
 
 
-def completion(index: CardIndex, wanted_ids: set[str], rows: list[dict]) -> Completion:
+def _cm_ref(cm: dict | None, card_id: str) -> tuple[float | None, float | None]:
+    """(minimo, trend) Cardmarket della carta, se noti."""
+    p = (cm or {}).get(card_id)
+    if not p or not p.ref:
+        return None, None
+    return (p.low or p.ref), p.ref
+
+
+def completion(index: CardIndex, wanted_ids: set[str], rows: list[dict], cm: dict | None = None) -> Completion:
+    """Quanto manca: prezzi Cardmarket (minimo e trend); per le carte senza, minimo e mediana degli annunci visti."""
     cards = list(index.by_id.values())
     missing = [c for c in cards if c.id in wanted_ids]
     cost_min = cost_med = 0.0
-    priced = 0
+    priced = cm_priced = 0
     unpriced: list[Card] = []
     for c in missing:
+        low, trend = _cm_ref(cm, c.id)
+        if trend:
+            priced += 1
+            cm_priced += 1
+            cost_min += low
+            cost_med += trend
+            continue
         st = card_prices(rows, c).overall
         if st.n and st.min is not None and st.median is not None:
             priced += 1
@@ -121,7 +138,7 @@ def completion(index: CardIndex, wanted_ids: set[str], rows: list[dict]) -> Comp
         m, t = by_rarity.get(c.rarity, (0, 0))
         by_rarity[c.rarity] = (m + (1 if c.id in wanted_ids else 0), t + 1)
     return Completion(total=len(cards), missing=len(missing), priced=priced, cost_min=cost_min, cost_median=cost_med,
-                      unpriced=sorted(unpriced, key=lambda c: c.sort_key), by_rarity=by_rarity)
+                      unpriced=sorted(unpriced, key=lambda c: c.sort_key), by_rarity=by_rarity, cm_priced=cm_priced)
 
 
 @dataclass
@@ -134,10 +151,21 @@ class Value:
     missing_cost: float = 0.0  # somma dei minimi visti per le mancanti
 
 
-def collection_value(cards: list[Card], wanted_ids: set[str], rows: list[dict]) -> Value:
-    """Quanto valgono le carte possedute (mediane viste) e quanto costano le mancanti (minimi visti)."""
+def collection_value(cards: list[Card], wanted_ids: set[str], rows: list[dict], cm: dict | None = None) -> Value:
+    """Valore delle possedute e costo delle mancanti al trend Cardmarket; senza prezzo Cardmarket, gli annunci visti."""
     v = Value()
     for c in cards:
+        _, trend = _cm_ref(cm, c.id)
+        if trend:
+            if c.id in wanted_ids:
+                v.missing += 1
+                v.missing_priced += 1
+                v.missing_cost += trend
+            else:
+                v.owned += 1
+                v.owned_priced += 1
+                v.owned_value += trend
+            continue
         st = card_prices(rows, c).overall
         if c.id in wanted_ids:
             v.missing += 1

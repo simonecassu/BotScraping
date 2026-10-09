@@ -91,6 +91,14 @@ def main(argv: list[str] | None = None) -> int:
             want_search = commands.poll_once(timeout=0)
         else:
             print("TELEGRAM_BOT_TOKEN mancante: nessun comando letto, nessuna notifica possibile.")
+        from pokebot import cardmarket
+        try:  # prezzi Cardmarket (TCGdex): ogni carta una volta al giorno, prima le mancanti
+            all_wanted = set().union(*(db.wanted_for(c) for c in db.chat_ids())) if db.chat_ids() else set()
+            line = cardmarket.refresh(db, index, wanted_first=all_wanted)
+            if line:
+                print(f"cardmarket · {line}")
+        except Exception as exc:  # noqa: BLE001 - i prezzi non devono mai fermare il bot
+            print(f"cardmarket · errore: {exc}")
         from pokebot.watch import run_watches
         for line in run_watches(index, db):  # inseguimenti (/insegui): a ogni sveglia, 5 minuti
             print(f"inseguimento · {line}")

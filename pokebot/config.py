@@ -36,7 +36,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "max_price": 0,  # 0 = nessun limite
     "max_per_card": 5,  # per ogni carta, quanti annunci (i più economici) inviare per ciclo
     "language": "ita",  # "ita" scarta gli annunci dichiaratamente in altre lingue (FR/EN/DE/ES/JP); "tutte" accetta tutto
-    "deal_pct": 60,  # avviso 🔥 se il prezzo è sotto questa % della mediana storica della carta (0 = spento)
+    "deal_pct": 70,  # avviso 🔥 se il prezzo è sotto questa % del trend Cardmarket (e sotto il minimo Cardmarket) (0 = spento)
     "max_messages_per_run": 10,  # tetto ai messaggi raggruppati per giro: il resto finisce nello storico senza invio
     "max_deals_per_run": 3,  # tetto agli avvisi affare per giro
     "images": True,  # immagine della carta nei messaggi raggruppati

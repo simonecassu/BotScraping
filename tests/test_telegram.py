@@ -258,14 +258,14 @@ def test_prices_progress_and_settings_commands(index):
     _hist(db, "me55-131", "Lapras 131/128", [20, 10, 30], "vinted", "v")
     _hist(db, "me55-131", "Lapras 131/128", [15], "ebay", "e")
     r = h.handle("/prezzi 131")
-    assert "Lapras 131/128" in r.text and "Minimo <b>10,00 €</b>" in r.text and "mediana 17,50 €" in r.text
+    assert "Lapras 131/128" in r.text and "minimo 10,00 €" in r.text and "mediana 17,50 €" in r.text and "Cardmarket" in r.text
     assert "eBay.it: min 15,00 €" in r.text and "Vinted: min 10,00 €" in r.text
-    assert "Nessun prezzo" in h.handle("/prezzi 145").text
+    assert "Nessun annuncio" in h.handle("/prezzi 145").text
     tot = h.handle("/prezzi").text
-    assert "2 carte mancanti" in tot and "<b>10,00 €</b>" in tot and "1 ancora senza prezzo" in tot
+    assert "2 carte mancanti" in tot and "<b>17,50 €</b>" in tot and "1 ancora senza prezzo" in tot and "annunci visti dal bot per 1" in tot
     prog = h.handle("/progresso").text
-    assert "189/191" in prog and "🟩" in prog and "Illustration Rare: 2/19" in prog and "10,00 €" in prog
-    assert "60%" in h.handle("/affari").text
+    assert "189/191" in prog and "🟩" in prog and "Illustration Rare: 2/19" in prog and "17,50 €" in prog
+    assert "70%" in h.handle("/affari").text and "Cardmarket" in h.handle("/affari").text
     h.handle("/affari 50")
     assert db.settings_for("me")["deal_pct"] == 50
     h.handle("/affari off")

@@ -17,6 +17,7 @@ import requests
 from . import config
 from .cards import Card, CardIndex, normalize
 from .db import Database
+from . import cardmarket
 
 log = logging.getLogger(__name__)
 
@@ -589,10 +590,20 @@ class CommandHandler:
             if not card:
                 return Reply("Carta non riconosciuta: usa il numero (es. <code>/prezzi 145</code>) o il codice c1..c30.")
             cp = pstats.card_prices(rows, card)
+            cmp = cardmarket.get(self.db, card.id)
+            lines = [f"💶 <b>{html.escape(card.label)}</b>"]
+            if cmp and cmp.ref:
+                lines.append(f"🏷 <b>Cardmarket</b>: trend <b>{pstats.fmt_eur(cmp.trend or cmp.ref)}</b> · minimo {pstats.fmt_eur(cmp.low)}"
+                             f" · media 30 giorni {pstats.fmt_eur(cmp.avg30)}" + (f" <i>(al {cmp.updated})</i>" if cmp.updated else ""))
+                lines.append(f"🔥 Affare sotto {pstats.fmt_eur((cmp.trend or cmp.ref) * cardmarket.DEAL_PCT / 100)}"
+                             + (f" e sotto il minimo {pstats.fmt_eur(cmp.low)}" if cmp.low else ""))
+            else:
+                lines.append("🏷 Cardmarket: prezzo non disponibile per questa carta.")
             if not cp.overall.n:
-                return Reply(f"<b>{html.escape(card.label)}</b>\nNessun prezzo visto finora per questa carta.")
-            lines = [f"💶 <b>{html.escape(card.label)}</b> · {cp.overall.n} annunci visti",
-                     f"Minimo <b>{pstats.fmt_eur(cp.overall.min)}</b> · mediana {pstats.fmt_eur(cp.overall.median)} · massimo {pstats.fmt_eur(cp.overall.max)}"]
+                lines.append("Nessun annuncio visto finora dal bot.")
+                return Reply("\n".join(lines))
+            lines += [f"\n👀 <b>Annunci visti dal bot</b> ({cp.overall.n}): minimo {pstats.fmt_eur(cp.overall.min)} · "
+                      f"mediana {pstats.fmt_eur(cp.overall.median)} · massimo {pstats.fmt_eur(cp.overall.max)}"]
             for src in pstats.SOURCE_ORDER:
                 st = cp.by_source.get(src)
                 if st and st.n:
@@ -602,20 +613,27 @@ class CommandHandler:
                 arrow = "📈" if delta > 5 else "📉" if delta < -5 else "➡️"
                 lines.append(f"{arrow} Ultimi 7 giorni: mediana {pstats.fmt_eur(cp.recent_median)} ({delta:+.0f}% rispetto a prima)")
             return Reply("\n".join(lines), buttons=[[("📂 Storico", f"/storico {self.index.code_of[card.id]}")]])
-        comp = pstats.completion(self.scope_index(), self._wanted(), rows)
+        cm = cardmarket.all_prices(self.db)
+        comp = pstats.completion(self.scope_index(), self._wanted(), rows, cm)
         if not comp.missing:
             return Reply(f"🎉 Nessuna carta mancante: {html.escape(self.current().name)} completa!")
+        other = comp.priced - comp.cm_priced
         lines = [f"💶 <b>Per finire il set</b> ({comp.missing} carte mancanti)",
-                 f"Ai prezzi <b>minimi</b> visti: <b>{pstats.fmt_eur(comp.cost_min)}</b> · ai prezzi mediani: {pstats.fmt_eur(comp.cost_median)}",
-                 f"Stima su {comp.priced} carte con prezzi visti" + (f"; {len(comp.unpriced)} ancora senza prezzo" if comp.unpriced else "")]
+                 f"Circa <b>{pstats.fmt_eur(comp.cost_median)}</b> al valore di mercato · {pstats.fmt_eur(comp.cost_min)} ai prezzi minimi",
+                 f"Prezzi Cardmarket per {comp.cm_priced} carte" + (f", annunci visti dal bot per {other}" if other else "")
+                 + (f"; {len(comp.unpriced)} ancora senza prezzo" if comp.unpriced else "")]
         priced = []
         for c in sorted((c for c in self.index.by_id.values() if c.id in self._wanted()), key=lambda c: c.sort_key):
+            p = cm.get(c.id)
+            if p and p.ref:
+                priced.append((p.ref, c))
+                continue
             st = pstats.card_prices(rows, c).overall
             if st.n:
                 priced.append((st.min, c))
         priced.sort(key=lambda t: -t[0])
         if priced:
-            lines.append("\nLe più care (minimo visto):")
+            lines.append("\nLe più care:")
             lines += [f"• {html.escape(c.label)}: {pstats.fmt_eur(m)}" for m, c in priced[:8]]
         if comp.unpriced:
             lines.append("\nSenza prezzo: " + html.escape(", ".join(self.index.code_of[c.id] for c in comp.unpriced[:30]))
@@ -892,9 +910,9 @@ class CommandHandler:
                 return Reply("Prima imposta il canale con <code>/canale @nomecanale</code>.")
             deals = ch.pick_deals(self.db, self.index)
             if not deals:
-                return Reply("Nessun affare nelle ultime 24 ore: niente da pubblicare. Riprova quando il bot ha trovato qualcosa 🔥.")
+                return Reply("Negli ultimi 3 giorni nessun annuncio sotto il valore Cardmarket: niente da pubblicare per ora.")
             text, buttons = ch.format_post(deals, self.db.get_kv("bot_username") or "")
-            return Reply(f"📣 Pubblico sul canale {len(deals)} affari.", sends=[(cur, text, buttons)])
+            return Reply(f"📣 Pubblico sul canale {len(deals)} occasioni.", sends=[(cur, text, buttons)])
         if a.isdigit() and 0 <= int(a) <= 23:
             self.db.set_kv("deals_channel_hour", int(a))
             return Reply(f"📣 Post giornaliero alle {int(a)}:00.")
@@ -902,7 +920,7 @@ class CommandHandler:
             self.db.set_kv("deals_channel", a)
             return Reply(f"📣 Canale affari: <code>{html.escape(a)}</code>. Ti mando subito un messaggio di prova lì: "
                          "se non arriva, controlla che il bot sia amministratore del canale.\n"
-                         f"Ogni giorno alle {hour}:00 pubblico i 3 affari migliori delle ultime 24 ore (se ce ne sono).",
+                         f"Ogni giorno alle {hour}:00 pubblico le 3 migliori occasioni, con il prezzo confrontato con Cardmarket.",
                          sends=[(a, "✅ Pokébot collegato a questo canale: da qui in poi pubblico gli affari del giorno.", None)])
         return Reply("Usa <code>/canale @nomecanale</code>, <code>/canale ora</code>, <code>/canale 20</code> o <code>/canale off</code>.")
 
@@ -1201,14 +1219,14 @@ class CommandHandler:
         from . import stats as pstats
         cur = self.current()
         cards = [c for s_ in self.scope() for c in s_.cards]
-        v = pstats.collection_value(cards, self._wanted(), self._all_price_rows())
+        v = pstats.collection_value(cards, self._wanted(), self._all_price_rows(), cardmarket.all_prices(self.db))
         lines = [f"💎 <b>{html.escape(cur.name)}</b>",
-                 f"Possiedi {v.owned} carte: valore stimato <b>{pstats.fmt_eur(v.owned_value)}</b> "
-                 f"(mediane viste su {v.owned_priced} carte" + (f", {v.owned - v.owned_priced} ancora senza prezzo" if v.owned > v.owned_priced else "") + ")"]
+                 f"Possiedi {v.owned} carte: valore <b>{pstats.fmt_eur(v.owned_value)}</b> al trend Cardmarket "
+                 f"({v.owned_priced} carte con prezzo" + (f", {v.owned - v.owned_priced} ancora senza" if v.owned > v.owned_priced else "") + ")"]
         if v.missing:
-            lines.append(f"Mancano {v.missing}: per finirla circa <b>{pstats.fmt_eur(v.missing_cost)}</b> ai minimi visti"
+            lines.append(f"Mancano {v.missing}: per finirla circa <b>{pstats.fmt_eur(v.missing_cost)}</b> al trend Cardmarket"
                          + (f" ({v.missing - v.missing_priced} senza prezzo)" if v.missing > v.missing_priced else ""))
-        lines.append("\n<i>I prezzi si accumulano a ogni giro: più il bot cerca, più la stima è completa.</i>")
+        lines.append("\n<i>Prezzi Cardmarket aggiornati ogni giorno; per le carte che Cardmarket non copre, gli annunci visti dal bot.</i>")
         return Reply("\n".join(lines), buttons=[[("🛒 Lista della spesa", "/spesa"), ("💶 Prezzi", "/prezzi")]])
 
     def _shopping(self) -> Reply:
@@ -1221,6 +1239,10 @@ class CommandHandler:
         lines = [f"🛒 <b>Lista della spesa · {html.escape(cur.name)}</b>",
                  f"{sl.covered} carte su {sl.covered + len(sl.uncovered)} mancanti, totale <b>{pstats.fmt_eur(sl.total)}</b> "
                  f"(annunci degli ultimi 14 giorni, raggruppati per venditore)"]
+        cm = cardmarket.all_prices(self.db)
+        ref_tot = sum((cm[c.id].ref or 0) for p in sl.picks for c in p.cards if c.id in cm)
+        if ref_tot:
+            lines.append(f"Al trend Cardmarket le stesse carte valgono {pstats.fmt_eur(ref_tot)}.")
         for key, picks in sl.by_seller():
             tot = sum(p.price for p in picks)
             n = sum(len(p.cards) for p in picks)
@@ -1228,7 +1250,12 @@ class CommandHandler:
             for p in picks:
                 names = ", ".join(c.label for c in p.cards)
                 tag = " 📦" if p.row.get("kind") == "lot" else ""
-                lines.append(f'• {pstats.fmt_eur(p.price)}{tag} <a href="{html.escape(p.row["url"], quote=True)}">{html.escape(names[:90])}</a>')
+                ref = sum((cm[c.id].ref or 0) for c in p.cards if c.id in cm and cm[c.id].ref)
+                note = ""
+                if ref and len(p.cards) == 1:
+                    v, _ = cardmarket.verdict(p.price, cm[p.cards[0].id])
+                    note = f" · CM {pstats.fmt_eur(ref)}" + (f" {cardmarket.VERDICT_LABEL[v].split()[0]}" if v else (" ⚠️ sopra Cardmarket" if p.price > ref * 1.15 else ""))
+                lines.append(f'• {pstats.fmt_eur(p.price)}{tag}{note} <a href="{html.escape(p.row["url"], quote=True)}">{html.escape(names[:90])}</a>')
         if sl.uncovered:
             lines.append("\n❌ Senza annuncio recente: " + ", ".join(html.escape(c.label) for c in sl.uncovered[:15])
                          + (f" e altre {len(sl.uncovered) - 15}" if len(sl.uncovered) > 15 else ""))
@@ -1244,13 +1271,19 @@ class CommandHandler:
                 return Reply("🔁 Nessun doppione segnato. Es. <code>/doppioni 131 132</code> (una copia in più ciascuna), "
                              "<code>/doppioni togli 131</code>, <code>/doppioni azzera</code>.")
             rows = self._all_price_rows()
+            cm = cardmarket.all_prices(self.db)
             lines = [f"🔁 <b>Doppioni</b> ({sum(n for _, n in mine)} copie in più)"]
             tot = 0.0
             for c, n in sorted(mine, key=lambda t: t[0].sort_key):
-                st = pstats.card_prices(rows, c).overall
-                val = f" · ~{pstats.fmt_eur(st.median)} l'una" if st.n and st.median is not None else ""
-                if st.n and st.median is not None:
-                    tot += st.median * n
+                p = cm.get(c.id)
+                if p and p.ref:
+                    unit = p.ref
+                else:
+                    st = pstats.card_prices(rows, c).overall
+                    unit = st.median if st.n and st.median is not None else None
+                val = f" · ~{pstats.fmt_eur(unit)} l'una" if unit else ""
+                if unit:
+                    tot += unit * n
                 lines.append(f"• {html.escape(c.label)} ×{n}{val}")
             if tot:
                 lines.append(f"\nValore stimato dei doppioni: <b>{pstats.fmt_eur(tot)}</b>")
@@ -1291,7 +1324,7 @@ class CommandHandler:
 
     def _progress(self) -> Reply:
         from . import stats as pstats
-        comp = pstats.completion(self.scope_index(), self._wanted(), self.db.list_found())
+        comp = pstats.completion(self.scope_index(), self._wanted(), self.db.list_found(), cardmarket.all_prices(self.db))
         filled = round(comp.percent / 10)
         bar = "🟩" * filled + "⬜" * (10 - filled)
         lines = [f"📊 <b>{html.escape(self.current().name)}</b>: {comp.owned}/{comp.total} carte ({comp.percent:.0f}%)", bar]
@@ -1305,7 +1338,7 @@ class CommandHandler:
                 if m:
                     lines.append(f"• {html.escape(k)}: {m}/{t}")
             if comp.priced:
-                lines.append(f"\n💶 Stima per finire: <b>{pstats.fmt_eur(comp.cost_min)}</b> ai minimi visti"
+                lines.append(f"\n💶 Stima per finire: <b>{pstats.fmt_eur(comp.cost_median)}</b> al trend Cardmarket"
                              f" ({comp.priced} carte con prezzo" + (f", {len(comp.unpriced)} senza" if comp.unpriced else "") + ")")
         else:
             lines.append("🎉 Collezione completa!")
@@ -1317,16 +1350,17 @@ class CommandHandler:
             self._save({"deal_pct": 0})
             return Reply("🔥 Avvisi affare disattivati.")
         if not a:
-            cur = int(self._settings().get("deal_pct", 60) or 0)
-            return Reply(f"🔥 Avviso affare: {'spento' if not cur else f'sotto il {cur}% della mediana storica'}.\n"
-                         "Imposta con <code>/affari 60</code> oppure spegni con <code>/affari off</code>.")
+            cur = int(self._settings().get("deal_pct", 70) or 0)
+            return Reply(f"🔥 Avviso affare: {'spento' if not cur else f'sotto il {cur}% del trend Cardmarket (e sotto il minimo Cardmarket)'}.\n"
+                         "Imposta con <code>/affari 70</code> oppure spegni con <code>/affari off</code>.")
         try:
             v = max(10, min(95, int(float(a))))
         except ValueError:
             return Reply("Serve una percentuale, es. <code>/affari 60</code>, oppure <code>/affari off</code>.")
         self._save({"deal_pct": v})
-        return Reply(f"🔥 Avviso affare attivo: ti scrivo subito se una carta mancante esce sotto il {v}% della sua mediana storica "
-                     "(servono almeno 4 prezzi visti per quella carta).")
+        return Reply(f"🔥 Avviso affare attivo: ti scrivo subito se una carta mancante esce sotto il {v}% del suo trend Cardmarket "
+                     f"e sotto il minimo Cardmarket, per carte da almeno {cardmarket.DEAL_MIN_TREND:.0f} €. "
+                     "Per le carte senza prezzo Cardmarket vale la mediana degli annunci visti.")
 
     def _quiet(self, args: str) -> Reply:
         a = args.strip().lower()

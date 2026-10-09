@@ -35,11 +35,17 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300, chat_id: s
                        "rarity": c.rarity, "image": c.image} for c in s.cards],
         })
     all_rows = rows + db.price_rows()
+    from . import cardmarket
+    cm = cardmarket.all_prices(db)
     prices = {}
     for c in index.by_id.values():
         cp = pstats.card_prices(all_rows, c)
+        p = cm.get(c.id)
+        cmd = {"low": p.low, "trend": p.ref, "avg30": p.avg30, "updated": p.updated} if p and p.ref else None
+        if not cp.overall.n and cmd:
+            prices[c.id] = {"n": 0, "min": None, "median": None, "max": None, "cm": cmd, "by_source": {}}
         if cp.overall.n:
-            prices[c.id] = {
+            prices[c.id] = {"cm": cmd,
                 "n": cp.overall.n, "min": cp.overall.min, "median": cp.overall.median, "max": cp.overall.max,
                 "recent_median": cp.recent_median, "older_median": cp.older_median,
                 "by_source": {src: {"n": st.n, "min": st.min, "median": st.median, "max": st.max}
@@ -47,7 +53,7 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300, chat_id: s
             }
     from .cards import CardIndex
     home_index = CardIndex([s for s in index.sets if s.primary], index.aliases)
-    comp = pstats.completion(home_index, wanted, rows)
+    comp = pstats.completion(home_index, wanted, rows, cm)
     active = db.active_sets(chat_id)
     settings = dict(settings, home_active=any(s.id in active for s in home_index.sets))
     runs = db.last_runs(1)
@@ -84,7 +90,7 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300, chat_id: s
         "sets": sets,
         "prices": prices,
         "completion": {"total": comp.total, "missing": comp.missing, "owned": comp.owned, "percent": comp.percent,
-                       "priced": comp.priced, "cost_min": comp.cost_min, "cost_median": comp.cost_median,
+                       "priced": comp.priced, "cm_priced": comp.cm_priced, "cost_min": comp.cost_min, "cost_median": comp.cost_median,
                        "by_rarity": {k: list(v) for k, v in comp.by_rarity.items()}},
         "last_run": ({"started_at": last["started_at"], "listings_seen": last["listings_seen"], "matches": last["matches"],
                       "errors": last["errors"], "per_source": last.get("per_source") or {}} if last else None),
@@ -97,8 +103,8 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300, chat_id: s
                     for cid, w in watch.list_watches(db, chat_id).items()],
         "watch_found": list(reversed(watch.found_log(db, chat_id))),
         "collections": coll.export(db, index, chat_id),
-        "values": _values(index, wanted, all_rows, db.albums_of(chat_id)),
-        "shopping": _shopping(index, wanted, rows, db.albums_of(chat_id)),
+        "values": _values(index, wanted, all_rows, db.albums_of(chat_id), cm),
+        "shopping": _shopping(index, wanted, rows, db.albums_of(chat_id), cm),
         "copies": db.copies(chat_id),
         "active_sets": active,
         "current_set": db.current_set(chat_id),
@@ -114,23 +120,24 @@ def _groups(index: CardIndex, albums: dict | None = None) -> dict[str, list]:
     return out
 
 
-def _values(index: CardIndex, wanted: set[str], all_rows: list[dict], albums: dict | None = None) -> dict:
+def _values(index: CardIndex, wanted: set[str], all_rows: list[dict], albums: dict | None = None, cm: dict | None = None) -> dict:
     out = {}
     for key, cards in _groups(index, albums).items():
-        v = pstats.collection_value(cards, wanted, all_rows)
+        v = pstats.collection_value(cards, wanted, all_rows, cm)
         out[key] = {"owned": v.owned, "owned_priced": v.owned_priced, "owned_value": round(v.owned_value, 2),
                     "missing": v.missing, "missing_priced": v.missing_priced, "missing_cost": round(v.missing_cost, 2)}
     return out
 
 
-def _shopping(index: CardIndex, wanted: set[str], rows: list[dict], albums: dict | None = None) -> dict:
+def _shopping(index: CardIndex, wanted: set[str], rows: list[dict], albums: dict | None = None, cm: dict | None = None) -> dict:
     from . import shopping
     out = {}
     for key, cards in _groups(index, albums).items():
         sl = shopping.build(cards, wanted, rows)
         out[key] = {"total": round(sl.total, 2), "covered": sl.covered, "uncovered": [c.id for c in sl.uncovered],
                     "sellers": [{"label": sl.seller_label(k), "total": round(sum(p.price for p in picks), 2),
-                                 "picks": [{"price": p.price, "lot": p.row.get("kind") == "lot", "url": p.row["url"], "title": p.row["title"],
+                                 "picks": [{"price": p.price, "lot": p.row.get("kind") == "lot",
+                                            "cm": round(sum(cm[c.id].ref for c in p.cards if c.id in (cm or {}) and cm[c.id].ref), 2) or None, "url": p.row["url"], "title": p.row["title"],
                                             "image": p.row.get("image") or "", "cards": [c.id for c in p.cards], "key": p.row["listing_key"]} for p in picks]}
                                 for k, picks in sl.by_seller()]}
     return out

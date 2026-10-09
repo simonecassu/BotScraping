@@ -34,7 +34,7 @@ class FakeNotifier:
     def notify_many(self, items, max_per_card=5, images=True):
         return [self.notify_listing(l, r) for l, r in items]
 
-    def notify_deal(self, listing, result, median, images=True):
+    def notify_deal(self, listing, result, median, images=True, ref_label="", extra=""):
         self.sent.append((listing, result))
         self.deals = getattr(self, "deals", []) + [(listing, median)]
         return True

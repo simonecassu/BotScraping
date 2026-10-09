@@ -141,8 +141,8 @@ a{color:var(--link);text-decoration:none}
       <h2>Quanto manca</h2>
       <div id="cost"></div>
       <h2>Prezzi per carta</h2>
-      <p class="hint">Minimo, mediana e massimo degli annunci visti. Tocca una riga per aprire la cartella.</p>
-      <table id="ptable"><thead><tr><th>Carta</th><th class="r">Min</th><th class="r">Mediana</th><th class="r">Max</th><th class="r">N</th></tr></thead><tbody></tbody></table>
+      <p class="hint"><b>Cardmarket</b> è il valore di mercato (trend, aggiornato ogni giorno). Le altre colonne sono gli annunci visti dal bot. Tocca una riga per aprire la cartella.</p>
+      <table id="ptable"><thead><tr><th>Carta</th><th class="r">Cardmarket</th><th class="r">Min visto</th><th class="r">Mediana</th><th class="r">N</th></tr></thead><tbody></tbody></table>
     </div>
     <div id="seg-spesa" class="hidden">
       <p class="hint">Il paniere più economico per le carte mancanti tra gli annunci degli ultimi 14 giorni, raggruppato per venditore (meno spedizioni). Un lotto entra solo se costa meno delle singole che copre.</p>
@@ -189,7 +189,7 @@ const tg = window.Telegram && window.Telegram.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const eur = (v) => v == null ? "n.d." : v.toLocaleString("it-IT", { style: "currency", currency: "EUR" });
+const eur = (v) => v == null ? "–" : v.toLocaleString("it-IT", { style: "currency", currency: "EUR" });
 const SRC = { ebay: "eBay.it", vinted: "Vinted", wallapop: "Wallapop" };
 const HOME_SETS = ["me55", "me55c"];  // la collezione "di casa": 30th Celebration + Classic Collection
 const CATALOG_URL = "https://cdn.jsdelivr.net/gh/PokemonTCG/pokemon-tcg-data@master/sets/en.json";
@@ -575,7 +575,7 @@ function renderShopping() {
   html += sl.sellers.map((g) => `<div class="folder"><div class="hd"><b>${esc(g.label)}</b><span class="cnt">${eur(g.total)}</span></div><div class="bd">` +
     g.picks.map((p) => `<div class="lst" data-url="${esc(p.url)}">${p.image ? `<img loading="lazy" src="${esc(p.image)}" alt="">` : '<div class="ph">foto n.d.</div>'}
       <div class="t"><div class="ti">${p.lot ? "📦 " : ""}${esc(p.cards.map((id) => { const c = cardInfo(id); return c ? cardTitle(c) : id; }).join(", "))}</div><div class="mt">${esc(p.title.slice(0, 70))}</div></div>
-      <div class="pr">${eur(p.price)}</div></div>`).join("") + `</div></div>`).join("");
+      <div class="pr">${eur(p.price)}${p.cm ? `<small style="display:block;font-size:10px;color:var(--hint);font-weight:700">CM ${eur(p.cm)}</small>` : ""}</div></div>`).join("") + `</div></div>`).join("");
   if (sl.uncovered.length) html += `<p class="hint">❌ Senza annuncio recente: ${esc(sl.uncovered.map((id) => { const c = cardInfo(id); return c ? cardTitle(c) : id; }).join(", "))}</p>`;
   $("#shop").innerHTML = html;
   $("#shop").querySelectorAll(".lst").forEach((el) => el.onclick = () => openLink(el.dataset.url));
@@ -633,8 +633,10 @@ function pricesOfSet() {
   }
   const out = {};
   for (const [id, v] of Object.entries(p)) { v.sort((a, b) => a - b); out[id] = { min: v[0], max: v[v.length - 1], median: v[Math.floor(v.length / 2)], n: v.length }; }
+  for (const [id, sp] of Object.entries(state.prices || {})) if (sp.cm && inCurSet(id)) (out[id] ||= { min: null, max: null, median: null, n: 0 }).cm = sp.cm;
   return out;
 }
+function refOf(s) { return (s && s.cm && s.cm.trend) || (s && s.min) || 0; }
 function renderPrices() {
   if (curSet !== "home") {
     const e = extra[curSet], total = e.cards.length || e.meta.total || 0, owned = e.owned.size, pct = total ? 100 * owned / total : 0;
@@ -642,8 +644,8 @@ function renderPrices() {
       <div class="kpi"><div><b>${owned}/${total}</b><span>carte possedute (${pct.toFixed(0)}%)</span></div><div><b>${total - owned}</b><span>mancanti</span></div></div>`;
     $("#cost").innerHTML = e.active ? '<p class="hint">Stima di spesa disponibile man mano che il bot trova annunci.</p>' : '<p class="hint">Ricerca spenta per questa collezione: accendila dalla checklist per raccogliere prezzi.</p>';
     const p = pricesOfSet();
-    const rows = e.cards.filter((k) => p[k.id]).sort((a, b) => p[b.id].min - p[a.id].min);
-    $("#ptable tbody").innerHTML = rows.map((k) => { const s = p[k.id]; return `<tr data-id="${k.id}"><td>${!e.owned.has(k.number) ? "⭐ " : ""}${esc(k.name)} <span class="hint">${k.number}${k.printed ? "/" + k.printed : ""}</span></td><td class="r">${eur(s.min)}</td><td class="r">${eur(s.median)}</td><td class="r">${eur(s.max)}</td><td class="r">${s.n}</td></tr>`; }).join("")
+    const rows = e.cards.filter((k) => p[k.id]).sort((a, b) => refOf(p[b.id]) - refOf(p[a.id]));
+    $("#ptable tbody").innerHTML = rows.map((k) => { const s = p[k.id]; return `<tr data-id="${k.id}"><td>${!e.owned.has(k.number) ? "⭐ " : ""}${esc(k.name)} <span class="hint">${k.number}${k.printed ? "/" + k.printed : ""}</span></td><td class="r"><b>${eur(s.cm && s.cm.trend)}</b></td><td class="r">${eur(s.min)}</td><td class="r">${eur(s.median)}</td><td class="r">${s.n}</td></tr>`; }).join("")
       || '<tr><td colspan="5" class="hint">Nessun prezzo ancora.</td></tr>';
     $("#ptable tbody").querySelectorAll("tr[data-id]").forEach((tr) => tr.onclick = () => openFolder(tr.dataset.id));
     return;
@@ -657,13 +659,14 @@ function renderPrices() {
       <div><b>${c.missing}</b><span>mancanti</span></div>
     </div>
     ${Object.entries(c.by_rarity).filter(([, v]) => v[0] > 0).map(([k, v]) => `<div class="set"><label>${esc(k)}</label><span>${v[0]}/${v[1]}</span></div>`).join("")}`;
+  const other = (c.priced || 0) - (c.cm_priced || 0);
   $("#cost").innerHTML = c.missing ? `<div class="kpi">
-      <div><b>${eur(c.cost_min)}</b><span>ai prezzi minimi visti</span></div>
-      <div><b>${eur(c.cost_median)}</b><span>ai prezzi mediani</span></div></div>
-    <p class="hint">Stima su ${c.priced} carte con prezzi visti${c.missing - c.priced ? `, ${c.missing - c.priced} ancora senza prezzo` : ""}.</p>` : "<p>🎉 Set completo!</p>";
-  const rows = cards.filter((k) => p[k.id]).sort((a, b) => (wanted.has(b.id) - wanted.has(a.id)) || (p[b.id].min - p[a.id].min));
+      <div><b>${eur(c.cost_median)}</b><span>al valore di mercato</span></div>
+      <div><b>${eur(c.cost_min)}</b><span>ai prezzi minimi</span></div></div>
+    <p class="hint">Prezzi Cardmarket per ${c.cm_priced || 0} carte${other ? `, annunci visti dal bot per ${other}` : ""}${c.missing - c.priced ? `, ${c.missing - c.priced} ancora senza prezzo` : ""}.</p>` : "<p>🎉 Set completo!</p>";
+  const rows = cards.filter((k) => p[k.id]).sort((a, b) => (wanted.has(b.id) - wanted.has(a.id)) || (refOf(p[b.id]) - refOf(p[a.id])));
   $("#ptable tbody").innerHTML = rows.map((k) => { const s = p[k.id]; const tr = s.recent_median != null && s.older_median ? (s.recent_median > s.older_median * 1.05 ? " 📈" : s.recent_median < s.older_median * 0.95 ? " 📉" : "") : "";
-    return `<tr data-id="${k.id}"><td>${wanted.has(k.id) ? "⭐ " : ""}${esc(k.name)} <span class="hint">${k.printed ? k.number + "/" + k.printed : "Classic"}</span>${tr}</td><td class="r">${eur(s.min)}</td><td class="r">${eur(s.median)}</td><td class="r">${eur(s.max)}</td><td class="r">${s.n}</td></tr>`; }).join("")
+    return `<tr data-id="${k.id}"><td>${wanted.has(k.id) ? "⭐ " : ""}${esc(k.name)} <span class="hint">${k.printed ? k.number + "/" + k.printed : "Classic"}</span>${tr}</td><td class="r"><b>${eur(s.cm && s.cm.trend)}</b></td><td class="r">${eur(s.min)}</td><td class="r">${eur(s.median)}</td><td class="r">${s.n}</td></tr>`; }).join("")
     || '<tr><td colspan="5" class="hint">Nessun prezzo ancora.</td></tr>';
   $("#ptable tbody").querySelectorAll("tr[data-id]").forEach((tr) => tr.onclick = () => openFolder(tr.dataset.id));
 }

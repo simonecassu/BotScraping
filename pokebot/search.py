@@ -11,6 +11,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from . import config
+from . import cardmarket
 from . import plans
 from . import stats as pstats
 
@@ -317,6 +318,7 @@ def _notify_pending(pending: list, db: Database, report: RunReport, dry_run: boo
     else:
         recipients = [(chat, TelegramNotifier(chat_ids=[chat]), db.settings_for(chat)) for chat in db.chat_ids()]
     history = db.list_found()
+    cm = cardmarket.all_prices(db)
     all_pending = pending
     pending_keys = set(found_ids)
     sent_any: set[str] = set()
@@ -341,7 +343,7 @@ def _notify_pending(pending: list, db: Database, report: RunReport, dry_run: boo
                 report.queued += len(pending)
             log.info("Notifiche sospese per %s (pausa/notte): %d annunci in coda", chat or "destinatario", len(pending))
             continue
-        delivered, deals = _deliver(pending, ntf, st, history, dry_run, report if first else None, pending_keys)
+        delivered, deals = _deliver(pending, ntf, st, history, dry_run, report if first else None, pending_keys, cm)
         log.info("Consegna a %s: %d annunci, %d inviati", chat or "destinatario", len(pending), len(delivered))
         sent_any |= delivered
         deal_keys |= deals
@@ -350,11 +352,11 @@ def _notify_pending(pending: list, db: Database, report: RunReport, dry_run: boo
 
 
 def _deliver(pending: list, notifier: TelegramNotifier, settings: dict, history: list[dict], dry_run: bool,
-             report: RunReport | None, pending_keys: set[str] | None = None) -> tuple[set[str], set[str]]:
+             report: RunReport | None, pending_keys: set[str] | None = None, cm: dict | None = None) -> tuple[set[str], set[str]]:
     """Consegna a una persona: affari 🔥, poi i gruppi per carta con il tetto per giro.
     Restituisce (chiavi inviate, chiavi segnalate come affare)."""
     images = bool(settings.get("images", True))
-    deal_pct = float(settings.get("deal_pct", 60) or 0)
+    deal_pct = float(settings.get("deal_pct", 70) or 0)
     max_per_card = int(settings.get("max_per_card", 5) or 5)
     sent: set[str] = set()
     deals: set[str] = set()
@@ -364,15 +366,22 @@ def _deliver(pending: list, notifier: TelegramNotifier, settings: dict, history:
         for lst, result in pending:
             if result.kind != "single" or not result.wanted or lst.price is None or lst.price < 1:
                 continue
+            cmp = (cm or {}).get(result.wanted[0].id)
+            if cmp and cmp.ref:  # riferimento: Cardmarket (trend, e mai sopra il minimo)
+                v, ratio = cardmarket.verdict(lst.price, cmp, deal_pct)
+                if v == "deal":
+                    extra = f" · minimo Cardmarket {cmp.low:.2f} €" if cmp.low else ""
+                    candidates.append((ratio, lst, result, cmp.ref, "del trend Cardmarket", extra))
+                continue
             median = pstats.median_for_deal(history, result.wanted[0].id, exclude_keys=pending_keys or {lst.key})
-            # sotto il 25% della mediana è quasi sempre un errore di riconoscimento o un'inserzione sospetta
+            # senza prezzo Cardmarket: mediana degli annunci; sotto il 25% è quasi sempre un errore di riconoscimento
             if median and median * 0.25 <= lst.price <= median * deal_pct / 100.0:
-                candidates.append((lst.price / median, lst, result, median))
+                candidates.append((lst.price / median, lst, result, median, "della mediana degli annunci", ""))
         candidates.sort(key=lambda t: t[0])
         if len(candidates) > max_deals:
             log.info("Affari trovati: %d, inviati solo i %d migliori", len(candidates), max_deals)
-        for _, lst, result, median in candidates[:max_deals]:
-            ok = False if dry_run else notifier.notify_deal(lst, result, median, images)
+        for _, lst, result, median, ref_label, extra in candidates[:max_deals]:
+            ok = False if dry_run else notifier.notify_deal(lst, result, median, images, ref_label, extra)
             deals.add(lst.key)
             if ok:
                 sent.add(lst.key)

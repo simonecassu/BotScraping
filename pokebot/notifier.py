@@ -156,14 +156,15 @@ class TelegramNotifier:
                 sent_keys.update(lst.key for lst, _ in chosen)
         return [lst.key in sent_keys for lst, _ in items]
 
-    def notify_deal(self, listing: Listing, result: MatchResult, median: float, images: bool = True) -> bool:
-        """Avviso immediato 🔥 per un prezzo molto sotto la mediana storica."""
+    def notify_deal(self, listing: Listing, result: MatchResult, median: float, images: bool = True,
+                    ref_label: str = "della mediana", extra: str = "") -> bool:
+        """Avviso immediato 🔥 per un prezzo molto sotto il valore della carta (trend Cardmarket o mediana storica)."""
         card = result.wanted[0]
         pct = 100.0 * (listing.price or 0) / median if median else 0
         esc = html.escape
         text = (f"🔥 <b>AFFARE</b> · {esc(card.label)}\n"
                 f"<b>{esc(listing.price_text or f'{listing.price:.2f} €')}</b> · {esc(SOURCE_LABELS.get(listing.source, listing.source))}"
-                f" · {pct:.0f}% della mediana ({median:.2f} €)\n"
+                f" · {pct:.0f}% {ref_label} ({median:.2f} €){extra}\n"
                 f'<a href="{esc(listing.url, quote=True)}">{esc(listing.title[:80])}</a>')
         # foto dell'annuncio (com'è messa la carta in vendita); se manca, l'immagine ufficiale della carta
         return self.send_with_image(text, listing.image or card.image, images)
