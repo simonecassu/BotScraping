@@ -511,7 +511,7 @@ function cardHits(q) {
   const groups = [];
   // own: true = ce l'hai, false = ti manca, null = collezione che non segui (non si sa)
   const home = cards.filter((c) => hit(c.number, c.name));
-  if (home.length) groups.push({ id: "home", name: setName("me55"), cards: home.map((c) => ({ number: c.number, name: c.name, rarity: c.rarity || "", image: c.image, own: !wanted.has(c.id) })) });
+  if (home.length) groups.push({ id: "home", name: setName("me55"), year: "2026", cards: home.map((c) => ({ number: c.number, name: c.name, rarity: c.rarity || "", image: c.image, own: !wanted.has(c.id) })) });
   // tutte le espansioni dell'indice, nell'ordine del catalogo se c'è (le più recenti prima), altrimenti dalla più recente
   const order = catalog && catalog.length ? catalog.map((s) => s.id) : Object.keys(cardIndex || {}).reverse();
   for (const sid of order) {
@@ -520,7 +520,8 @@ function cardHits(q) {
     const pat = imgPattern[sid] || `https://images.pokemontcg.io/${sid}/{n}.png`;
     const found = ((cardIndex || {})[sid] || []).filter(([n, nm]) => hit(n, nm)).map(([number, name, r, url]) =>
       ({ number, name, rarity: rarityNames[r] || "", image: url || pat.replace("{n}", number), own: known ? e.owned.has(number) : null }));
-    if (found.length) groups.push({ id: sid, name: setName(sid, ((catalog || []).find((s) => s.id === sid) || {}).name || sid), cards: found });
+    const meta = (catalog || []).find((s) => s.id === sid) || {};
+    if (found.length) groups.push({ id: sid, name: setName(sid, meta.name || sid), year: (meta.release || "").slice(0, 4), cards: found });
   }
   return groups;
 }
@@ -537,7 +538,7 @@ function renderCardHits(q) {
   if (hitRarity) groups = groups.map((g) => ({ ...g, cards: g.cards.filter((c) => (c.rarity || "?") === hitRarity) })).filter((g) => g.cards.length);
   const total = groups.reduce((a, g) => a + g.cards.length, 0);
   return `<h2>Carte (${total})</h2><div class="card-row" id="hitpills">${pills}</div>
-    <div class="legend"><span><i class="ok">✓</i> ce l'hai</span><span><i class="no">!</i> ti manca</span><span><i class="na"></i> collezione che non segui</span><span>tocca una carta per aprirla</span></div>` + groups.slice(0, 40).map((g) => `<h3>${esc(g.name)}</h3><div class="hits">` +
+    <div class="legend"><span><i class="ok">✓</i> ce l'hai</span><span><i class="no">!</i> ti manca</span><span><i class="na"></i> collezione che non segui</span><span>tocca una carta per aprirla</span></div>` + groups.slice(0, 40).map((g) => `<h3>${esc(g.name)}${g.year ? ` <span style="opacity:.6;font-weight:700">· ${esc(g.year)}</span>` : ""}</h3><div class="hits">` +
     g.cards.slice(0, 24).map((c) => `<div class="hit ${c.own === false ? "miss" : ""}" data-set="${esc(g.id)}" data-num="${esc(c.number)}" title="${esc(c.name)} #${esc(c.number)}">
       <img loading="lazy" src="${esc(c.image || "")}" alt="" onerror="this.style.visibility='hidden'"><span class="num">#${esc(c.number)}</span>
       ${c.own === true ? '<span class="own" title="ce l\'hai">✓</span>' : c.own === false ? '<span class="own" title="ti manca">!</span>' : ""}<b>${esc(c.name)}</b></div>`).join("") +
