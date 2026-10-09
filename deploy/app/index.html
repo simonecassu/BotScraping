@@ -310,10 +310,15 @@ $("#plan-go").onclick = async () => {
 };
 
 /* ---------- Amici ---------- */
-function setName(sid) {
-  if (sid === "me55") return "30th Celebration";
+let namesIt = {};  // nomi italiani delle espansioni (da cards.json); la scelta ita/eng è del telefono, non del bot
+const itNames = () => lsGet("setNamesIt") !== "0";
+function setName(sid, fallback) {
+  const en = sid === "me55" ? "30th Celebration" : sid === "me55c" ? "Classic Collection"
+    : fallback || ((extra[sid] || {}).meta || {}).name || ((catalog || []).find((x) => x.id === sid) || {}).name || sid;
+  if (!itNames()) return en;
+  if (sid === "me55" || sid === "home") return ((state || {}).sets || []).find((x) => x.id === "me55")?.name_it || en;
   if (sid === "me55c") return "Classic Collection";
-  return ((extra[sid] || {}).meta || {}).name || sid;
+  return namesIt[sid] || en;
 }
 function renderFriends() {
   if (!state) return;
@@ -428,7 +433,7 @@ const fold = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g,
 function loadCardIndex() {
   if (cardIndex || cardIndexLoading) return cardIndexLoading;
   cardIndexLoading = fetch("/app/cards.json").then((r) => r.ok ? r.json() : { sets: {} }).catch(() => ({ sets: {} }))
-    .then((d) => { cardIndex = d.sets || {}; renderCollections(); });
+    .then((d) => { cardIndex = d.sets || {}; namesIt = d.names_it || {}; renderAll(); });
   return cardIndexLoading;
 }
 function cardHits(q) {
@@ -437,11 +442,11 @@ function cardHits(q) {
   const hit = (number, name) => isNum ? number === fq : fold(name).includes(fq);
   const groups = [];
   const home = cards.filter((c) => hit(c.number, c.name));
-  if (home.length) groups.push({ id: "home", name: "30th Celebration", cards: home.map((c) => ({ number: c.number, name: c.name })) });
+  if (home.length) groups.push({ id: "home", name: setName("me55"), cards: home.map((c) => ({ number: c.number, name: c.name })) });
   for (const s of (catalog || [])) {
     if (HOME_SETS.includes(s.id)) continue;
     const found = ((cardIndex || {})[s.id] || []).filter(([n, nm]) => hit(n, nm)).map(([number, name]) => ({ number, name }));
-    if (found.length) groups.push({ id: s.id, name: s.name, cards: found });
+    if (found.length) groups.push({ id: s.id, name: setName(s.id, s.name), cards: found });
   }
   return groups;
 }
@@ -469,13 +474,13 @@ function renderCollections() {
   let html = "";
   const mine = [];
   const st = (on) => on ? '<span class="st on">🔎 attiva</span>' : '<span class="st">💤 spenta</span>';
-  if (!q || "30th celebration classic".includes(q)) mine.push(row({ id: "me55", name: "30th Celebration", logo: ((catalog || []).find((s) => s.id === "me55") || {}).logo || "" },
+  if (!q || ("30th celebration classic " + fold(setName("me55"))).includes(q)) mine.push(row({ id: "me55", name: setName("me55"), logo: ((catalog || []).find((s) => s.id === "me55") || {}).logo || "" },
     st(state.settings.home_active !== false), "home", `${cards.length} carte (con Classic Collection) · ${homeMissing()} mancanti` + valTxt("home") + ((((state.home_album || {}).me55 || {}).shared_with || []).length ? ` · 👥 ${state.home_album.me55.shared_with.map((u) => u.name).join(", ")}` : "")));
   for (const e of Object.values(extra)) {
-    if (!e.mine || (q && !e.meta.name.toLowerCase().includes(q))) continue;
+    if (!e.mine || (q && !(e.meta.name + " " + setName(e.meta.id)).toLowerCase().includes(q))) continue;
     const miss = e.cards.length ? e.cards.length - e.owned.size : (e.meta.total || "?");
     const sw = (e.shared_with || []).length ? ` · 👥 ${e.shared_with.map((u) => u.name).join(", ")}` : "";
-    mine.push(row(e.meta, st(e.active), e.meta.id, `${e.cards.length || e.meta.total || "?"} carte · ${miss} mancanti` + valTxt(e.meta.id) + sw));
+    mine.push(row({ ...e.meta, name: setName(e.meta.id, e.meta.name) }, st(e.active), e.meta.id, `${e.cards.length || e.meta.total || "?"} carte · ${miss} mancanti` + valTxt(e.meta.id) + sw));
   }
   const vals = state.values || {};
   const totVal = Object.values(vals).reduce((a, v) => a + (v.owned_value || 0), 0);
@@ -484,11 +489,11 @@ function renderCollections() {
   html += `<h2>Le tue</h2>` + (totPriced ? `<div class="kpi" style="grid-template-columns:1fr"><div><b>💎 ${eur(totVal)}</b><span>valore stimato delle carte che hai (${totPriced} con prezzo: Cardmarket, altrimenti gli annunci visti)</span></div></div>` : "") + `${mine.join("") || '<p class="hint">Nessuna.</p>'}`;
   if (!catalog) html += '<h2>Tutte</h2><p class="hint">Carico il catalogo…</p>';
   else {
-    const list = catalog.filter((s) => !HOME_SETS.includes(s.id) && !(extra[s.id] || {}).mine && (!q || s.name.toLowerCase().includes(q) || s.series.toLowerCase().includes(q) || s.id.includes(q)));
+    const list = catalog.filter((s) => !HOME_SETS.includes(s.id) && !(extra[s.id] || {}).mine && (!q || s.name.toLowerCase().includes(q) || fold(namesIt[s.id] || "").includes(q) || s.series.toLowerCase().includes(q) || s.id.includes(q)));
     const bySeries = {};
     list.forEach((s) => (bySeries[s.series || "Altro"] ||= []).push(s));
     html += `<h2>Tutte (${list.length})</h2>` + Object.entries(bySeries).map(([ser, ss]) => `<h3>${esc(ser)}</h3>` +
-      ss.map((s) => row(s, '<span class="st">💤 spenta</span>', s.id, `${s.total} carte · tutte mancanti · ${(s.release || "").slice(0, 4)}`)).join("")).join("");
+      ss.map((s) => row({ ...s, name: setName(s.id, s.name) }, '<span class="st">💤 spenta</span>', s.id, `${s.total} carte · tutte mancanti · ${(s.release || "").slice(0, 4)}`)).join("")).join("");
   }
   $("#coll-list").innerHTML = html;
   $("#coll-list").querySelectorAll(".coll").forEach((el) => el.onclick = () => openSet(el.dataset.go));
@@ -561,7 +566,7 @@ function renderChecklist() {
     };
     pills.innerHTML = state.sets.map((s) => {
       const miss = s.cards.filter((c) => wanted.has(c.id)).length;
-      return `<span class="pill ${filterSet === s.id ? "on" : ""}" data-set="${s.id}">${esc(s.name)} · ${miss}/${s.cards.length} mancanti</span>`;
+      return `<span class="pill ${filterSet === s.id ? "on" : ""}" data-set="${s.id}">${esc(setName(s.id, s.name))} · ${miss}/${s.cards.length} mancanti</span>`;
     }).join("") + `<span class="pill">Mancanti <b>${homeMissing()}</b>/${cards.length}</span>`;
     pills.querySelectorAll("[data-set]").forEach((p) => p.onclick = () => { filterSet = filterSet === p.dataset.set ? "" : p.dataset.set; renderChecklist(); });
   } else {
@@ -791,7 +796,7 @@ function refOf(s) { return (s && s.cm && s.cm.trend) || (s && s.min) || 0; }
 function renderPrices() {
   if (curSet !== "home") {
     const e = extra[curSet], total = e.cards.length || e.meta.total || 0, owned = e.owned.size, pct = total ? 100 * owned / total : 0;
-    $("#progress").innerHTML = `<h2>Progresso ${esc(e.meta.name)}</h2><div class="bar"><i style="width:${pct.toFixed(0)}%"></i></div>
+    $("#progress").innerHTML = `<h2>Progresso ${esc(setName(curSet, e.meta.name))}</h2><div class="bar"><i style="width:${pct.toFixed(0)}%"></i></div>
       <div class="kpi"><div><b>${owned}/${total}</b><span>carte possedute (${pct.toFixed(0)}%)</span></div><div><b>${total - owned}</b><span>mancanti</span></div></div>`;
     $("#cost").innerHTML = e.active ? '<p class="hint">Stima di spesa disponibile man mano che il bot trova annunci.</p>' : '<p class="hint">Ricerca spenta per questa collezione: accendila dalla checklist per raccogliere prezzi.</p>';
     const p = pricesOfSet();
@@ -838,6 +843,7 @@ function renderSettings() {
     ${row("Soglia lotti %", "quota minima di carte mancanti in un lotto", num(Math.round((s.lot_min_ratio || 0) * 100), "/soglia {v}"))}
     ${owner ? row("Ricerca ogni (min)", "intervallo della ricerca automatica, per tutti", num(s.interval_minutes, "/intervallo {v}", 1, 5)) : ""}
     ${row("Solo carte italiane", "scarta annunci in francese, inglese e altre lingue", sw(s.language === "ita", "/lingua ita", "/lingua tutte"))}
+    ${row("Nomi delle espansioni in italiano", "nella Mini App (es. Scintille Folgoranti invece di Surging Sparks)", `<button class="sw ${itNames() ? "on" : ""}" id="sw-names"></button>`)}
     ${row("Immagini nei messaggi", "foto degli annunci e della carta", sw(s.images !== false, "/immagini on", "/immagini off"))}
     ${row("Ore silenziose", s.quiet_hours ? `dalle ${s.quiet_hours[0]} alle ${s.quiet_hours[1]}` : "nessuna",
       `<span><input type="number" min="0" max="23" value="${s.quiet_hours ? s.quiet_hours[0] : 23}" id="qh1" style="width:62px"> – <input type="number" min="0" max="23" value="${s.quiet_hours ? s.quiet_hours[1] : 8}" id="qh2" style="width:62px"> ${sw(!!s.quiet_hours, "/notte {qh}", "/notte off")}</span>`)}
@@ -849,6 +855,7 @@ function renderSettings() {
     if (!state.settings.quiet_hours) return;  // spente: valgono quando le accendi
     const cmd = `/notte ${$("#qh1").value} ${$("#qh2").value}`; if (await sendCmd(cmd)) toast("Inviato: " + cmd);
   });
+  $("#sw-names").onclick = () => { lsSet("setNamesIt", itNames() ? "0" : "1"); if (!cardIndex) loadCardIndex(); renderAll(); toast(itNames() ? "Nomi in italiano" : "Nomi in inglese"); };
   $("#settings").querySelectorAll(".sw[data-src]").forEach((b) => b.onclick = async () => {
     // le fonti si leggono dagli interruttori al momento del tocco (non da quando la pagina è stata disegnata)
     b.classList.toggle("on");
@@ -884,7 +891,7 @@ function showTab(name, push = true) {
   const cur = document.querySelector("main > section:not(.hidden)");
   if (push && cur) stack.push(cur.id.replace("tab-", ""));
   ["home", "coll", "check", "settings", "friends", "reports"].forEach((t) => $("#tab-" + t).classList.toggle("hidden", t !== name));
-  $("#ttl").textContent = name === "check" ? (curSet === "home" ? "30th Celebration" : ((extra[curSet] || {}).meta || {}).name || curSet) : TITLES[name];
+  $("#ttl").textContent = name === "check" ? setName(curSet === "home" ? "me55" : curSet) : TITLES[name];
   $("#back").classList.toggle("hidden", name === "home");
   if (name === "check") { showCseg("check"); setSeg("ann"); renderChecklist(); renderShared(); }
   if (name === "reports" && state && (state.reports || {}).all) {  // letto: il contatore delle nuove si azzera
@@ -894,7 +901,7 @@ function showTab(name, push = true) {
 }
 $("#back").onclick = () => { let prev = stack.pop() || "home"; if (prev === "check") prev = "coll"; showTab(prev, false); if (prev === "home") stack.length = 0; };
 if (tg && tg.BackButton) { tg.BackButton.onClick(() => $("#back").click()); new MutationObserver(() => $("#back").classList.contains("hidden") ? tg.BackButton.hide() : tg.BackButton.show()).observe($("#back"), { attributes: true }); }
-load().then(loadCatalog).then(renderCollections);
+load().then(loadCatalog).then(() => { renderCollections(); if (itNames()) loadCardIndex(); });
 setInterval(load, 90000);
 </script>
 </body>
