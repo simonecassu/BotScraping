@@ -1,23 +1,25 @@
-"""Comandi Telegram: il bot si configura e si comanda direttamente dalla chat.
+"""Comandi Telegram: ogni persona collegata gestisce dalla chat il suo Pokébot (album, notifiche, inseguimenti).
 
-Al primo /start salva il chat id (niente getUpdates a mano). Poi:
-  /mancanti, /aggiungi 131 132 149-152 c4, /rimuovi ..., /lista, /stato, /soglia 50, /prezzo 100, /cerca ...
+Il primo /start in assoluto rende quella chat il proprietario; gli altri entrano dalla lista d'attesa (/approva)
+o con un codice d'invito. Ogni messaggio può contenere più comandi, uno per riga.
 """
 from __future__ import annotations
 
 import html
 import json
 import logging
+import math
 import re
 import time
 from dataclasses import dataclass, field
 
 import requests
 
-from . import config
+from . import cardmarket, config, plans, watch
+from . import collections as coll
+from . import stats as pstats
 from .cards import Card, CardIndex, normalize
 from .db import Database
-from . import cardmarket
 
 log = logging.getLogger(__name__)
 
@@ -35,86 +37,81 @@ RARITY_SHORTCUTS = {
 }
 
 HELP = """<b>Comandi</b>
-/mancanti – elenco carte che ti mancano
-/aggiungi 131 132 149-152 c4 – segna come mancanti (numeri, intervalli, codici c1..c30 per la Classic)
-/aggiungi ir | sir | pr | pikachu | tutte | classic – per rarità, per nome o tutto il set
-/rimuovi 131 ... – l'hai trovata: toglila (anche /ho 131)
-/lista – tutte le carte del set con i numeri  ·  /lista classic – la Classic Collection
-/stato – ultimo ciclo, errori, impostazioni
-/storico – cartelle per carta: tutti gli annunci trovati finora, divisi per eBay / Vinted / Wallapop
-/prezzi 145 – min / mediana / max visti per la carta, per marketplace · /prezzi – quanto costa finire il set
-/progresso – avanzamento del set, mancanti per rarità, stima di spesa
-/affari 60 – avviso 🔥 immediato se un prezzo è sotto il 60% della mediana storica · /affari off
-/pausa · /riprendi – sospendi/riattiva le notifiche (il bot accumula) · /notte 23 8 – ore silenziose
-/valore – quanto valgono le carte che hai e quanto costa finire · /spesa – paniere più economico per le mancanti, raggruppato per venditore
-/doppioni 131 132 – segna copie in più (·/doppioni togli 131) · /scambio – messaggio "cerco / offro" pronto da inviare
-/esporta – file Excel con checklist, storico e prezzi · /immagini on|off – foto della carta nei messaggi
-/soglia 50 – % minima di carte mancanti perché un lotto venga segnalato
-/prezzo 100 – prezzo massimo in € (0 = nessun limite)
-/fonti wallapop vinted ebay – quali marketplace usare
-/lingua ita – scarta annunci in francese/inglese/altre lingue · /lingua tutte – accetta tutto
-/intervallo 20 – ogni quanti minuti fare la ricerca
-/max 5 – per ogni carta, quanti annunci (i più economici) ricevere a ogni giro
-/cerca – ricerca immediata · /cerca 145 – una carta: tutto ciò che è in vendita adesso, dal più economico
-/insegui 151 – per 6 ore cerca la 151 ogni 5 minuti e ti avvisa appena spunta un annuncio nuovo
-/insegui 151 2h · /insegui 151 2h ogni 10m · /insegui 131 151 – durata, frequenza, più carte · /insegui – attivi · /insegui stop
-/invita – codice per collegare un'altra persona (stesse notifiche, stessa checklist, stessa app) · /utenti · /espelli ID
-/attesa – chi ha scritto /start e aspetta l'accesso · /approva ID (o tutti) · /rifiuta ID
-/abbonati – il tuo piano e l'abbonamento (250 ⭐ al mese) · /voto 1-5 · /recensione testo
-/piano ID sempre|pro 30|prova 5|light – (proprietario) cambia il piano di qualcuno · /recensioni · /rimborsa ID
-/canale @nome – canale pubblico dove ogni giorno pubblico i 3 affari migliori · /canale ora · /canale 20 · /canale off
-/collezione – le collezioni seguite · /collezione sv8 – passa a quella (scaricata al volo, parte da "mi mancano tutte"): da lì /mancanti, /aggiungi, /ho, /progresso, /prezzi lavorano su di lei · /collezione 30th – torna alla 30th
-/collezione sv8 attiva – ⚠️ la cerca anche sui marketplace · /collezione sv8 disattiva · sv8:7 – una sua carta in qualsiasi comando (es. /insegui sv8:7)
-/resetvisti – rinotifica anche gli annunci già visti
+/mancanti – le carte che ti mancano · /lista – tutte le carte della collezione con i numeri
+/aggiungi 131 132 149-152 c4 – segna come mancanti (anche ir, sir, pr, un nome o tutte) · /ho 131 – l'hai trovata
+/collezione – le tue collezioni · /collezione sv8 – passa a quella (o la segue, partendo da "mi mancano tutte")
+/collezione sv8 attiva | disattiva – accende o spegne la ricerca e le notifiche di quella collezione · sv8:7 – una sua carta in qualsiasi comando
+/cerca 145 – cosa c'è in vendita adesso per quella carta, dal più economico
+/insegui 151 – per 6 ore la cerca ogni 5 minuti e ti avvisa appena spunta un annuncio nuovo · /insegui 151 2h ogni 10m · /insegui stop
+/storico – gli annunci trovati, divisi per carta e marketplace
+/prezzi 145 – valore Cardmarket e annunci visti · /prezzi – quanto costa finire la collezione
+/valore – quanto vale ciò che hai · /progresso – avanzamento per rarità
+/spesa – il paniere più economico per le mancanti, raggruppato per venditore
+/affari 70 – avviso 🔥 se un prezzo è sotto il 70% del valore Cardmarket (e sotto il minimo) · /affari off
+/doppioni 131 132 – le tue copie in più · /scambio – messaggio "cerco / offro" pronto da inviare
+/amico – il tuo codice amico · /amico CODICE – diventate amici · /amici – elenco
+/condividi sv8 NOME – album in comune con un amico · /accetta CODICE · /esci sv8 – torni ad avere un album tuo
+/pausa · /riprendi – sospendi o riattiva le notifiche · /notte 23 8 – ore silenziose
+/prezzo 100 – prezzo massimo · /lingua ita | tutte · /soglia 50 – % minima di carte mancanti nei lotti
+/max 5 – annunci per carta in ogni messaggio · /immagini on | off · /esporta – file Excel
+/abbonati – il tuo piano e l'abbonamento · /voto 1-5 · /recensione testo
 Puoi scrivere più comandi in un solo messaggio, uno per riga."""
+
+OWNER_HELP = """
+<b>Solo per te (proprietario)</b>
+/attesa – chi aspetta l'accesso · /approva ID (o tutti) · /rifiuta ID · /invita – codice d'invito
+/utenti – le persone collegate e il loro piano · /espelli ID · /piano ID sempre | pro 30 | prova 5 | light
+/recensioni · /rimborsa ID (entro {refund_days} giorni; annulla = ferma solo il rinnovo)
+/canale @nome – canale degli affari · /canale ora · /canale 20 · /canale off
+/fonti wallapop vinted ebay · /intervallo 20 – valgono per tutti
+/cerca – ricerca completa adesso · /storico svuota · /resetvisti – rinotifica gli annunci già visti"""
 
 
 # Presentazione del bot: la descrizione compare nella chat vuota prima di "Avvia", la breve nel profilo e nei link
 BOT_DESCRIPTION = ("🃏 Pokébot trova le carte Pokémon che mancano alla tua collezione.\n\n"
                    "✅ Segni nell'app le carte che hai: le altre le cerco io su Vinted, Wallapop ed eBay\n"
                    "🔔 Ti avviso appena spunta un annuncio, con prezzo e foto\n"
-                   "🔥 Affari sotto il prezzo medio, lista della spesa, doppioni da scambiare\n"
+                   "🔥 Affari sotto il valore Cardmarket, lista della spesa, doppioni da scambiare\n"
                    "👥 Album condivisi con gli amici\n\n"
-                   "Premi Avvia per chiedere l'accesso: 5 giorni di prova con tutto, poi gratis in versione Light.")
+                   "Premi Avvia per chiedere l'accesso: {trial} giorni di prova con tutto, poi gratis in versione Light.")
 BOT_SHORT_DESCRIPTION = "Cerca su Vinted, Wallapop ed eBay le carte Pokémon che ti mancano e ti avvisa appena spuntano."
-PROFILE_VERSION = 2
+PROFILE_VERSION = 3
 
-# Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot)
-MENU_VERSION = 17
+# Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot); il proprietario ne ha uno suo
+MENU_VERSION = 18
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
-    ("rimuovi", "Trovata! Toglila: /rimuovi 131"),
-    ("lista", "Tutte le carte con i numeri (/lista classic per la Classic)"),
-    ("stato", "Ultimo giro, errori, impostazioni"),
-    ("storico", "Cartelle per carta con tutti gli annunci trovati, divisi per marketplace"),
-    ("prezzi", "Prezzi visti per una carta (/prezzi 145) o costo per finire il set (/prezzi)"),
-    ("progresso", "Avanzamento del set, mancanti per rarita', stima di spesa"),
-    ("affari", "Avviso immediato se un prezzo e' sotto la % della mediana: /affari 60, /affari off"),
-    ("pausa", "Sospende le notifiche (continua a cercare e accumula)"),
-    ("riprendi", "Riattiva le notifiche e invia quanto accumulato"),
-    ("notte", "Ore silenziose: /notte 23 8 (accumula e invia al mattino), /notte off"),
-    ("valore", "Valore delle carte possedute e costo per finire la collezione"),
-    ("spesa", "Lista della spesa: paniere piu' economico per le mancanti, per venditore"),
-    ("doppioni", "Copie in piu' da scambiare: /doppioni 131 132, /doppioni togli 131"),
+    ("ho", "L'hai trovata: /ho 131"),
+    ("collezione", "Le tue collezioni; /collezione sv8 passa a quella"),
+    ("lista", "Tutte le carte della collezione con i numeri"),
+    ("cerca", "Cosa c'e' in vendita adesso per una carta: /cerca 145"),
+    ("insegui", "Cerca una carta ogni 5 minuti per 6 ore: /insegui 151"),
+    ("storico", "Annunci trovati, divisi per carta e marketplace"),
+    ("prezzi", "Valore Cardmarket di una carta (/prezzi 145) o costo per finire (/prezzi)"),
+    ("valore", "Valore delle carte che hai e costo per finire"),
+    ("progresso", "Avanzamento della collezione per rarita'"),
+    ("spesa", "Lista della spesa: paniere piu' economico, per venditore"),
+    ("affari", "Avviso se un prezzo e' sotto il valore Cardmarket: /affari 70, /affari off"),
+    ("doppioni", "Copie in piu' da scambiare: /doppioni 131 132"),
     ("scambio", "Messaggio cerco/offro pronto da inviare"),
-    ("esporta", "File Excel con checklist, storico annunci e prezzi"),
-    ("immagini", "Immagine della carta nei messaggi: /immagini on | off"),
-    ("cerca", "Cerca subito tutto, oppure una carta mirata: /cerca 145"),
-    ("insegui", "Cerca una carta ogni 5 minuti per 6 ore: /insegui 151 (o /insegui 151 2h ogni 10m)"),
     ("amico", "Il tuo codice amico, o /amico CODICE per aggiungerne uno"),
     ("condividi", "Album in comune con un amico: /condividi me55 NOME"),
-    ("abbonati", "Il tuo piano e l'abbonamento completo"),
-    ("invita", "Codice per collegare un'altra persona al bot"),
-    ("utenti", "Chi e' collegato al bot"),
-    ("collezione", "Collezioni seguite; /collezione sv8 passa a quella; /collezione sv8 attiva la cerca"),
-    ("intervallo", "Ogni quanti minuti cercare: /intervallo 20"),
-    ("max", "Quanti annunci (i piu' economici) per carta in ogni giro: /max 5"),
-    ("soglia", "Percentuale minima di carte mancanti nei lotti: /soglia 50"),
+    ("pausa", "Sospende le notifiche"),
+    ("riprendi", "Riattiva le notifiche"),
+    ("notte", "Ore silenziose: /notte 23 8, /notte off"),
     ("prezzo", "Prezzo massimo in euro: /prezzo 100 (0 = nessun limite)"),
-    ("fonti", "Marketplace da usare: /fonti wallapop vinted ebay"),
-    ("lingua", "Solo carte italiane (/lingua ita) oppure tutte le lingue (/lingua tutte)"),
-    ("resetvisti", "ATTENZIONE: rinotifica tutti gli annunci gia' visti (chiede conferma)"),
+    ("lingua", "Solo carte italiane (/lingua ita) oppure tutte (/lingua tutte)"),
+    ("esporta", "File Excel con checklist, annunci e prezzi"),
+    ("abbonati", "Il tuo piano e l'abbonamento"),
+    ("aiuto", "Elenco dei comandi"),
+]
+OWNER_MENU_COMMANDS = MENU_COMMANDS[:-1] + [
+    ("attesa", "Chi aspetta l'accesso"),
+    ("utenti", "Persone collegate e piani"),
+    ("canale", "Canale degli affari"),
+    ("fonti", "Marketplace da usare (per tutti)"),
+    ("intervallo", "Ogni quanti minuti cercare (per tutti)"),
     ("aiuto", "Elenco dei comandi"),
 ]
 
@@ -125,7 +122,7 @@ class Reply:
     run_search: bool = False
     buttons: list[list[tuple[str, str]]] | None = None  # righe di pulsanti (etichetta, comando)
     document: tuple[str, bytes] | None = None  # (nome file, contenuto) da inviare come allegato
-    sends: list | None = None  # [(chat_id, testo, pulsanti)] da recapitare ad altre persone (proposte di condivisione)
+    sends: list | None = None  # [(chat_id, testo, pulsanti)] da recapitare ad altre persone o al canale
 
 
 @dataclass
@@ -159,10 +156,12 @@ class TelegramClient:
             raise requests.RequestException(f"getUpdates: {data.get('description', resp.status_code)}")
         return data.get("result", [])
 
-    def set_my_commands(self, commands: list[tuple[str, str]]) -> bool:
-        resp = requests.post(f"{self.base}/setMyCommands",
-                             json={"commands": [{"command": c, "description": d[:256]} for c, d in commands]},
-                             timeout=config.HTTP_TIMEOUT)
+    def set_my_commands(self, commands: list[tuple[str, str]], chat_id: str = "") -> bool:
+        """Menu dei comandi: per tutti, oppure solo per una chat (il proprietario)."""
+        body: dict = {"commands": [{"command": c, "description": d[:256]} for c, d in commands]}
+        if chat_id:
+            body["scope"] = {"type": "chat", "chat_id": int(chat_id)}
+        resp = requests.post(f"{self.base}/setMyCommands", json=body, timeout=config.HTTP_TIMEOUT)
         return resp.status_code == 200 and bool(resp.json().get("ok"))
 
     def cancel_subscription(self, user_id: str, charge_id: str) -> tuple[bool, str]:
@@ -231,11 +230,18 @@ def _button(label: str, data: str) -> dict:
 
 
 def _chunks(text: str) -> list[str]:
+    """Spezza i messaggi lunghi tra una riga e l'altra (una riga troppo lunga si taglia a pezzi)."""
     if len(text) <= MAX_LEN:
         return [text]
-    out, cur = [], ""
+    lines = []
     for line in text.split("\n"):
-        if len(cur) + len(line) + 1 > MAX_LEN:
+        while len(line) > MAX_LEN:
+            lines.append(line[:MAX_LEN])
+            line = line[MAX_LEN:]
+        lines.append(line)
+    out, cur = [], ""
+    for line in lines:
+        if cur and len(cur) + len(line) + 1 > MAX_LEN:
             out.append(cur)
             cur = ""
         cur += ("\n" if cur else "") + line
@@ -266,7 +272,6 @@ class CommandHandler:
             self.db.save_settings(shared)
 
     def _album(self, set_id: str) -> str:
-        from . import collections as coll
         return coll.album_for(self.db, self.chat, set_id)
 
     def _wanted(self) -> set[str]:
@@ -274,17 +279,36 @@ class CommandHandler:
             self._album(s_.id)  # gli album di casa nascono al primo uso
         return self.db.wanted_for(self.chat)
 
-    def _set_wanted(self, cards: list, wanted: bool) -> None:
+    def _set_wanted(self, cards: list, wanted: bool) -> list[str]:
+        """Segna le carte nei propri album; restituisce le collezioni saltate per il limite della Light."""
         by_set: dict[str, list[str]] = {}
         for c in cards:
             by_set.setdefault(c.set_id, []).append(c.id)
+        skipped = []
         for sid, ids in by_set.items():
+            if self._follow_limit(sid):
+                skipped.append(sid)
+                continue
             self.db.set_wanted_bulk(ids, wanted, self._album(sid))
+        return skipped
 
     def _my_sets(self) -> list:
         """Collezioni della persona: quelle di casa più i suoi album."""
         albums = self.db.albums_of(self.chat)
         return [s_ for s_ in self.index.sets if s_.primary or s_.id in albums]
+
+    @staticmethod
+    def _set_alias(set_id: str) -> str:
+        set_id = set_id.lower().strip()
+        return config.HOME_SET_IDS[0] if set_id in ("30th", "30", "celebration") else set_id
+
+    def _follow_limit(self, set_id: str) -> Reply | None:
+        """Light: al massimo LIGHT_MAX_COLLECTIONS collezioni. None se si può seguire (o la segue già)."""
+        if (set_id in config.HOME_SET_IDS or set_id in self.db.albums_of(self.chat) or plans.is_full(self.db, self.chat)
+                or plans.collections_count(self.db, self.chat) < plans.LIGHT_MAX_COLLECTIONS):
+            return None
+        return Reply(f"🌱 Con la versione Light segui fino a {plans.LIGHT_MAX_COLLECTIONS} collezioni. "
+                     "/abbonati per seguirne quante vuoi.")
 
     # ------------------------------------------------------------------
     def handle(self, text: str, chat_id: str = "") -> Reply:
@@ -294,7 +318,19 @@ class CommandHandler:
         if len(lines) <= 1:
             return self._handle_one(lines[0] if lines else "", chat_id)
         replies = [self._handle_one(ln, chat_id) for ln in lines]
-        return Reply("\n\n".join(r.text for r in replies), run_search=any(r.run_search for r in replies))
+        return Reply("\n\n".join(r.text for r in replies), run_search=any(r.run_search for r in replies),
+                     buttons=next((r.buttons for r in reversed(replies) if r.buttons), None),
+                     document=next((r.document for r in reversed(replies) if r.document), None),
+                     sends=[x for r in replies for x in (r.sends or [])] or None)
+
+    def _help(self, chat_id: str = "") -> str:
+        return HELP + (OWNER_HELP.format(refund_days=plans.REFUND_DAYS) if self._is_owner(chat_id or self.chat) else "")
+
+    def _owner_only(self, chat_id: str = "") -> Reply | None:
+        """Comandi che cambiano qualcosa per tutti: solo il proprietario."""
+        if self._is_owner(chat_id or self.chat):
+            return None
+        return Reply("Questo comando vale per tutti gli utenti: lo può usare solo il proprietario del bot.")
 
     def _handle_one(self, text: str, chat_id: str = "") -> Reply:
         text = (text or "").strip()
@@ -304,13 +340,12 @@ class CommandHandler:
         cmd = cmd.split("@", 1)[0].lower()
         args = args.strip()
         if cmd == "/start":
-            from . import plans
             if plans.onboarding(self.db, self.chat):
                 text, buttons = plans.welcome_message()
                 return Reply(text, buttons=buttons)
-            return Reply("✅ Collegato! Da adesso ti mando qui gli annunci delle carte mancanti.\n\n" + HELP)
+            return Reply("✅ Collegato! Da adesso ti mando qui gli annunci delle carte mancanti.\n\n" + self._help(chat_id))
         if cmd in ("/aiuto", "/help"):
-            return Reply(HELP)
+            return Reply(self._help(chat_id))
         if cmd == "/mancanti":
             return Reply(self._fmt_missing())
         if cmd in ("/aggiungi", "/manca", "/mancano"):
@@ -322,7 +357,7 @@ class CommandHandler:
         if cmd == "/stato":
             return Reply(self._fmt_status())
         if cmd in ("/storico", "/cartelle", "/trovati"):
-            return self._history(args)
+            return self._history(args, chat_id)
         if cmd in ("/prezzi", "/prezzo_carta"):
             return self._prices(args)
         if cmd in ("/progresso", "/avanzamento"):
@@ -333,7 +368,6 @@ class CommandHandler:
             self._save({"paused": True})
             return Reply("⏸ Notifiche in pausa. Continuo a cercare e accumulo: con /riprendi ti mando tutto in un colpo.")
         if cmd in ("/riprendi", "/play", "/riparti", "/notifiche"):
-            from . import plans
             first = plans.onboarding(self.db, self.chat)
             plans.set_onboarding(self.db, self.chat, False)
             self._save({"paused": False})
@@ -373,10 +407,10 @@ class CommandHandler:
             return self._set_number(args, "max_per_card", lambda v: max(1, min(20, int(v))),
                                     lambda v: f"Per ogni carta ricevi al massimo {v} annunci (i più economici) per giro.")
         if cmd == "/intervallo":
-            return self._set_number(args, "interval_minutes", lambda v: max(5, int(v)),
-                                    lambda v: f"Ricerca ogni {v} minuti.")
+            return self._owner_only(chat_id) or self._set_number(args, "interval_minutes", lambda v: max(5, min(1440, int(v))),
+                                                                 lambda v: f"Ricerca ogni {v} minuti.")
         if cmd == "/fonti":
-            return self._set_sources(args)
+            return self._owner_only(chat_id) or self._set_sources(args)
         if cmd == "/lingua":
             a = args.strip().lower()
             if a in ("ita", "it", "italiano", "italiana"):
@@ -389,6 +423,12 @@ class CommandHandler:
         if cmd == "/cerca":
             if args.strip():
                 return self._search_cards(args)
+            if not self._is_owner(chat_id or self.chat):  # la ricerca completa vale per tutti: una richiesta ogni 15 minuti
+                last = float(self.db.get_kv(f"last_cerca:{self.chat}", 0) or 0)
+                if time.time() - last < 15 * 60:
+                    return Reply("🔎 Ho appena cercato: la ricerca completa si può chiedere una volta ogni 15 minuti. "
+                                 "Per una carta sola usa <code>/cerca 145</code>.")
+                self.db.set_kv(f"last_cerca:{self.chat}", time.time())
             return Reply("🔎 Ok, cerco adesso.", run_search=True)
         if cmd == "/insegui":
             return self._chase(args)
@@ -431,6 +471,8 @@ class CommandHandler:
         if cmd in ("/collezione", "/collezioni", "/set"):
             return self._collection(args)
         if cmd == "/resetvisti":
+            if self._owner_only(chat_id):
+                return self._owner_only(chat_id)
             if args.strip().lower() != "conferma":
                 return Reply("⚠️ Questo rinotifica <b>tutti</b> gli annunci già visti (possono essere centinaia).\n"
                              "Se sei sicuro scrivi <code>/resetvisti conferma</code>.")
@@ -461,6 +503,15 @@ class CommandHandler:
         if cur.primary:
             return self.index.by_code.get(n)
         return self.index.by_set_number.get((cur.id, n))
+
+    def _one_card(self, arg: str) -> Card | None:
+        """Una carta: numero della collezione corrente, codice della 30th, id o set:numero."""
+        arg = arg.strip().lower()
+        if not arg:
+            return None
+        if ":" in arg:
+            return self._card_of_other_set(arg)
+        return self._by_number(arg) or self.index.by_code.get(arg) or self.index.by_id.get(arg)
 
     def resolve(self, args: str) -> tuple[list[Card], list[str]]:
         """Trasforma '131 132 149-152 c4 ir pikachu sv8:7' in carte della collezione corrente (o set:numero di altre).
@@ -497,8 +548,7 @@ class CommandHandler:
                     c = self._by_number(str(n))
                     if c:
                         cards[c.id] = c
-            elif self._by_number(t):
-                c = self._by_number(t)
+            elif (c := self._by_number(t)):
                 cards[c.id] = c
             elif t in self.index.by_code:
                 c = self.index.by_code[t]
@@ -518,8 +568,8 @@ class CommandHandler:
                 hits = [c for c in scope_cards if normalize(c.name) == phrase]
                 if not hits:
                     hits = [c for c in scope_cards if phrase in normalize(c.name)]
-                if not hits:
-                    hits = [c for c in self.index.by_id.values() if normalize(c.name) == phrase]
+                if not hits:  # nelle altre collezioni della persona (mai in quelle che non segue)
+                    hits = [c for s_ in self._my_sets() for c in s_.cards if normalize(c.name) == phrase]
                 if hits:
                     cards.update({c.id: c for c in hits})
                 else:
@@ -529,7 +579,6 @@ class CommandHandler:
 
     def _card_of_other_set(self, token: str) -> Card | None:
         """'sv8:7': carta di una collezione anche non ancora seguita (la scarica e la aggiunge all'indice)."""
-        from . import collections as coll
         sid, _, num = token.partition(":")
         try:
             cs = coll.get_set(self.db, sid.lower())
@@ -546,7 +595,11 @@ class CommandHandler:
         cards, unknown = self.resolve(args)
         if not cards:
             return Reply("Non ho riconosciuto nessuna carta in: " + html.escape(args) + "\n/lista per vedere i numeri.")
-        self._set_wanted(cards, wanted)
+        skipped = self._set_wanted(cards, wanted)
+        if skipped:
+            cards = [c for c in cards if c.set_id not in skipped]
+            if not cards:
+                return self._follow_limit(skipped[0])
         verb = "segnate come mancanti" if wanted else "tolte dalle mancanti"
         lines = [f"{'➕' if wanted else '✅'} {len(cards)} carte {verb}:"]
         lines += [self._card_line(c) for c in cards[:40]]
@@ -566,8 +619,11 @@ class CommandHandler:
 
     def _set_number(self, args: str, key: str, conv, fmt) -> Reply:
         try:
-            v = conv(float(args.replace(",", ".").replace("%", "").replace("€", "").strip()))
-        except ValueError:
+            raw = float(args.replace(",", ".").replace("%", "").replace("€", "").strip())
+            if not math.isfinite(raw):
+                raise ValueError(raw)
+            v = conv(raw)
+        except (ValueError, OverflowError):
             return Reply("Serve un numero, es. <code>/soglia 50</code> oppure <code>/prezzo 100</code>.")
         self._save({key: v})
         return Reply("⚙️ " + fmt(v))
@@ -582,21 +638,22 @@ class CommandHandler:
 
     # ------------------------------------------------------------------
     def _prices(self, args: str) -> Reply:
-        from . import stats as pstats
         rows = self.db.list_found()
         arg = args.strip().lower()
         if arg:
-            card = self.index.by_code.get(arg) or self.index.by_id.get(arg)
+            card = self._one_card(arg)
             if not card:
-                return Reply("Carta non riconosciuta: usa il numero (es. <code>/prezzi 145</code>) o il codice c1..c30.")
+                return Reply("Carta non riconosciuta: usa il numero (es. <code>/prezzi 145</code>), un codice c1..c30 o sv8:7.")
             cp = pstats.card_prices(rows, card)
             cmp = cardmarket.get(self.db, card.id)
             lines = [f"💶 <b>{html.escape(card.label)}</b>"]
             if cmp and cmp.ref:
                 lines.append(f"🏷 <b>Cardmarket</b>: trend <b>{pstats.fmt_eur(cmp.trend or cmp.ref)}</b> · minimo {pstats.fmt_eur(cmp.low)}"
                              f" · media 30 giorni {pstats.fmt_eur(cmp.avg30)}" + (f" <i>(al {cmp.updated})</i>" if cmp.updated else ""))
-                lines.append(f"🔥 Affare sotto {pstats.fmt_eur((cmp.trend or cmp.ref) * cardmarket.DEAL_PCT / 100)}"
-                             + (f" e sotto il minimo {pstats.fmt_eur(cmp.low)}" if cmp.low else ""))
+                pct = float(self._settings().get("deal_pct", cardmarket.DEAL_PCT) or 0)
+                if pct and cmp.ref >= cardmarket.DEAL_MIN_TREND:  # sotto i 5 € di valore non c'è mai un "affare"
+                    lines.append(f"🔥 Affare sotto {pstats.fmt_eur(cmp.ref * pct / 100)}"
+                                 + (f" e sotto il minimo {pstats.fmt_eur(cmp.low)}" if cmp.low else ""))
             else:
                 lines.append("🏷 Cardmarket: prezzo non disponibile per questa carta.")
             if not cp.overall.n:
@@ -612,7 +669,7 @@ class CommandHandler:
                 delta = 100.0 * (cp.recent_median - cp.older_median) / cp.older_median
                 arrow = "📈" if delta > 5 else "📉" if delta < -5 else "➡️"
                 lines.append(f"{arrow} Ultimi 7 giorni: mediana {pstats.fmt_eur(cp.recent_median)} ({delta:+.0f}% rispetto a prima)")
-            return Reply("\n".join(lines), buttons=[[("📂 Storico", f"/storico {self.index.code_of[card.id]}")]])
+            return Reply("\n".join(lines), buttons=[[("📂 Storico", f"/storico {card.set_id}:{card.number}")]])
         cm = cardmarket.all_prices(self.db)
         comp = pstats.completion(self.scope_index(), self._wanted(), rows, cm)
         if not comp.missing:
@@ -623,7 +680,8 @@ class CommandHandler:
                  f"Prezzi Cardmarket per {comp.cm_priced} carte" + (f", annunci visti dal bot per {other}" if other else "")
                  + (f"; {len(comp.unpriced)} ancora senza prezzo" if comp.unpriced else "")]
         priced = []
-        for c in sorted((c for c in self.index.by_id.values() if c.id in self._wanted()), key=lambda c: c.sort_key):
+        wanted = self._wanted()
+        for c in sorted((c for s_ in self.scope() for c in s_.cards if c.id in wanted), key=lambda c: c.sort_key):
             p = cm.get(c.id)
             if p and p.ref:
                 priced.append((p.ref, c))
@@ -653,8 +711,8 @@ class CommandHandler:
         self.db.set_kv("invite_code", {"code": code, "expires": time.time() + 48 * 3600})
         return Reply("👥 Codice invito (vale 48 ore, una persona):\n"
                      f"<code>/start {code}</code>\n\n"
-                     "Chi lo riceve apre il bot e incolla quel comando: da lì riceve le stesse notifiche, "
-                     "gestisce la stessa checklist e apre la stessa Mini App dal pulsante App.")
+                     f"Chi lo riceve apre il bot e incolla quel comando: entra subito, senza lista d'attesa, con il suo "
+                     f"Pokébot personale e {plans.TRIAL_DAYS} giorni di prova.")
 
     def _users(self, chat_id: str) -> Reply:
         if not self._is_owner(chat_id):
@@ -662,13 +720,11 @@ class CommandHandler:
         ids = self.db.chat_ids()
         if not ids:
             return Reply("Nessuno collegato ancora.")
-        from . import plans
         lines = [f"👥 <b>Persone collegate</b> ({len(ids)})"]
         for cid in ids:
             lines.append(f"• {html.escape(self.db.user_name(cid))} <code>{cid}</code> · {plans.describe(self.db, cid)}"
                          f"{' · tu' if cid == str(chat_id) else ''}")
-        if self._is_owner(chat_id):
-            lines.append("\n/invita per aggiungere qualcuno · /espelli ID per scollegarlo · /piano ID per cambiare piano · /recensioni")
+        lines.append("\n/invita per aggiungere qualcuno · /espelli ID per scollegarlo · /piano ID per cambiare piano · /recensioni")
         return Reply("\n".join(lines))
 
     def _kick(self, chat_id: str, args: str) -> Reply:
@@ -679,14 +735,26 @@ class CommandHandler:
             return Reply("Usa <code>/espelli ID</code> con l'ID che vedi in /utenti.")
         if target == self.db.owner_chat_id():
             return Reply("Il proprietario non si può scollegare.")
-        if self.db.remove_chat_id(target):
-            return Reply(f"👋 Chat <code>{target}</code> scollegata: non riceve più notifiche né comandi.")
-        return Reply("Quell'ID non è tra le persone collegate (vedi /utenti).")
+        if not self.db.remove_chat_id(target):
+            return Reply("Quell'ID non è tra le persone collegate (vedi /utenti).")
+        self.db.ban(target)  # non rientra da solo (un rinnovo dell'abbonamento o un /start)
+        note = ""
+        pays = [x for x in (plans.get(self.db, target).get("payments") or []) if x.get("charge") and not x.get("refunded")]
+        if pays:
+            try:
+                ok, _ = TelegramClient().cancel_subscription(target, pays[-1]["charge"])
+            except (requests.RequestException, ValueError):
+                ok = False
+            note = ("\nAbbonamento: rinnovo fermato." if ok else "\n⚠️ Non sono riuscito a fermare il rinnovo dell'abbonamento: "
+                    f"usa <code>/rimborsa {target}</code>.")
+        return Reply(f"👋 Chat <code>{target}</code> scollegata: non riceve più notifiche né comandi.{note}")
 
     # ---- lista d'attesa e canale degli affari ---------------------------------
     def waitlist_signup(self, chat_id: str, name: str = "", source: str = "") -> Reply:
         """Qualcuno senza invito ha scritto /start: va in lista d'attesa e il proprietario viene avvisato."""
         chat_id = str(chat_id)
+        if self.db.is_banned(chat_id):
+            return Reply("Pokébot non è disponibile per questo account.")
         if not self.db.add_to_waitlist(chat_id, name, source):
             pos = list(self.db.waitlist()).index(chat_id) + 1 if chat_id in self.db.waitlist() else 0
             return Reply("⏳ Sei già in lista d'attesa" + (f" (posizione {pos})" if pos else "") +
@@ -707,8 +775,8 @@ class CommandHandler:
                      "Pokébot cerca su Wallapop, Vinted ed eBay le carte che mancano alla tua collezione e ti avvisa "
                      "appena spuntano, con prezzi, affari 🔥, lista della spesa e album da condividere con gli amici.\n\n"
                      f"⏳ Per ora l'accesso è su invito: sei in lista d'attesa (posizione {pos}). "
-                     "Ti scrivo io qui appena viene attivato, non devi fare altro: da quel momento hai 5 giorni di prova "
-                     "con tutte le funzioni, poi resta gratis in versione Light.", sends=sends)
+                     f"Ti scrivo io qui appena viene attivato, non devi fare altro: da quel momento hai {plans.TRIAL_DAYS} giorni "
+                     "di prova con tutte le funzioni, poi resta gratis in versione Light.", sends=sends)
 
     def _waitlist(self, chat_id: str) -> Reply:
         if not self._is_owner(chat_id):
@@ -729,16 +797,15 @@ class CommandHandler:
     def _approve(self, chat_id: str, args: str) -> Reply:
         if not self._is_owner(chat_id):
             return Reply("Solo il proprietario del bot può approvare le richieste.")
-        from . import collections as coll
-        from . import plans
         wl = self.db.waitlist()
         target = args.strip().lower()
         ids = list(wl) if target in ("tutti", "tutte", "all") else [args.strip()]
         done, sends = [], []
         for cid in ids:
             entry = self.db.remove_from_waitlist(cid)
-            if entry is None:
+            if entry is None or cid in self.db.chat_ids():  # già dentro (es. con un invito): niente da rifare
                 continue
+            self.db.unban(cid)
             self.db.add_chat_id(cid)
             plans.start_trial(self.db, cid)
             for sid in config.HOME_SET_IDS:
@@ -761,7 +828,6 @@ class CommandHandler:
 
     # ---- piani: prova, Light, abbonamento ---------------------------------------
     def _subscribe(self) -> Reply:
-        from . import plans
         t = plans.tier(self.db, self.chat)
         head = plans.describe(self.db, self.chat)
         if t == "owner":
@@ -771,8 +837,8 @@ class CommandHandler:
         link = plans.invoice_link(self.db, TelegramClient(), self.chat)
         text = (f"{head}\n\n⭐ <b>Pokébot completo · {plans.PRICE_STARS} Stars al mese</b>\n"
                 "• avvisi nel momento in cui esce l'annuncio, non una volta al giorno\n"
-                "• affari 🔥 sotto il prezzo medio\n"
-                "• inseguimenti ogni 5 minuti, fino a 10 carte insieme\n"
+                "• affari 🔥 sotto il valore Cardmarket\n"
+                f"• inseguimenti ogni {watch.fmt_duration(watch.EVERY_S)}, fino a {watch.MAX_WATCHES} carte insieme\n"
                 "• collezioni illimitate\n\n"
                 "Si paga con le Stars di Telegram (anche con Apple Pay) e si rinnova ogni mese: disdici quando vuoi.")
         if not link:
@@ -781,7 +847,6 @@ class CommandHandler:
 
     def _plan(self, chat_id: str, args: str) -> Reply:
         """/piano – il tuo piano · (proprietario) /piano ID [sempre|light|pro 30|prova 5]."""
-        from . import plans
         a = args.split()
         if not a or not self._is_owner(chat_id):
             return Reply(plans.describe(self.db, self.chat) + "\n/abbonati per i dettagli dell'abbonamento.")
@@ -808,7 +873,6 @@ class CommandHandler:
     def _refund(self, chat_id: str, args: str) -> Reply:
         """(proprietario) /rimborsa ID – rimborso intero entro REFUND_DAYS dal pagamento (Telegram non fa rimborsi parziali);
         dopo: /rimborsa ID annulla ferma solo il rinnovo; /rimborsa ID forza rimborsa comunque."""
-        from . import plans
         if not self._is_owner(chat_id):
             return Reply("Solo il proprietario può fare rimborsi.")
         parts = args.split()
@@ -823,7 +887,10 @@ class CommandHandler:
         used = (time.time() - float(last.get("ts") or 0)) / 86400
         used_txt = f"{used:.0f} giorn{'o' if round(used) == 1 else 'i'}" if used >= 1 else "meno di un giorno"
         if mode in ("annulla", "stop", "disdici"):
-            ok, err = TelegramClient().cancel_subscription(target, last["charge"])
+            try:
+                ok, err = TelegramClient().cancel_subscription(target, last["charge"])
+            except (requests.RequestException, ValueError) as exc:
+                ok, err = False, str(exc)
             if not ok:
                 return Reply(f"⚠️ Non riesco a fermare il rinnovo: {html.escape(err or 'errore Telegram')}")
             return Reply(f"⏹ Rinnovo fermato per {who}: resta completo fino al {plans._date(p.get('pro_until'))}, poi passa a Light.",
@@ -834,46 +901,46 @@ class CommandHandler:
                          "e Telegram non permette rimborsi parziali.\n"
                          f"• <code>/rimborsa {target} annulla</code> – ferma il rinnovo, resta completo fino al {plans._date(p.get('pro_until'))}\n"
                          f"• <code>/rimborsa {target} forza</code> – rimborsa comunque tutte le {last.get('stars', 0)} ⭐")
-        ok, err = TelegramClient().refund_stars(target, last["charge"])
+        try:
+            ok, err = TelegramClient().refund_stars(target, last["charge"])
+        except (requests.RequestException, ValueError) as exc:
+            ok, err = False, str(exc)
         if not ok:
             return Reply(f"⚠️ Rimborso non riuscito: {html.escape(err or 'errore Telegram')}")
         for x in p["payments"]:
             if x.get("charge") == last["charge"]:
                 x["refunded"] = True
-        self.db.set_kv(f"plan:{target}", p)
+        plans.save(self.db, target, p)
         plans.set_light(self.db, target)
         return Reply(f"↩️ Rimborsate {last.get('stars', 0)} ⭐ a {who}: rinnovo fermato, ora è su Light.",
                      sends=[(target, f"↩️ Ti ho rimborsato {last.get('stars', 0)} ⭐ e fermato l'abbonamento. Resti sulla versione Light.", None)])
 
+    def _feedback(self, key: str, value, owner_text: str, reply: str) -> Reply:
+        """Salva voto o recensione nel piano della persona e lo fa sapere al proprietario."""
+        p = plans.get(self.db, self.chat)
+        p[key] = value
+        p[f"{key}_ts"] = time.time()
+        plans.save(self.db, self.chat, p)
+        owner = self.db.owner_chat_id()
+        who = html.escape(self.db.user_name(self.chat))
+        return Reply(reply, sends=[(owner, owner_text.format(who=who), None)] if owner and owner != self.chat else None)
+
     def _vote(self, args: str) -> Reply:
-        from . import plans
         a = args.strip()
         if not a.isdigit() or not 1 <= int(a) <= 5:
             return Reply("Vota da 1 a 5, per esempio <code>/voto 4</code>.")
-        p = plans.get(self.db, self.chat)
-        p["rating"] = int(a)
-        p["rating_ts"] = time.time()
-        self.db.set_kv(f"plan:{self.chat}", p)
-        owner = self.db.owner_chat_id()
-        sends = [(owner, f"⭐ {html.escape(self.db.user_name(self.chat))} ha votato <b>{a}/5</b>", None)] if owner and owner != self.chat else []
-        return Reply("🙏 Grazie! Se vuoi, dimmi in una riga cosa ti è piaciuto o cosa manca: "
-                     "<code>/recensione il tuo commento</code>.", sends=sends)
+        return self._feedback("rating", int(a), "⭐ {who} ha votato <b>" + a + "/5</b>",
+                              "🙏 Grazie! Se vuoi, dimmi in una riga cosa ti è piaciuto o cosa manca: "
+                              "<code>/recensione il tuo commento</code>.")
 
     def _review(self, args: str) -> Reply:
-        from . import plans
         text = args.strip()[:500]
         if not text:
             return Reply("Scrivi il commento dopo il comando, per esempio <code>/recensione mi ha trovato il Charizard!</code>")
-        p = plans.get(self.db, self.chat)
-        p["review"] = text
-        p["review_ts"] = time.time()
-        self.db.set_kv(f"plan:{self.chat}", p)
-        owner = self.db.owner_chat_id()
-        sends = [(owner, f"💬 Recensione di {html.escape(self.db.user_name(self.chat))}: {html.escape(text)}", None)] if owner and owner != self.chat else []
-        return Reply("🙏 Grazie, la leggo di sicuro.", sends=sends)
+        return self._feedback("review", text, "💬 Recensione di {who}: " + html.escape(text).replace("{", "{{").replace("}", "}}"),
+                              "🙏 Grazie, la leggo di sicuro.")
 
     def _reviews(self, chat_id: str) -> Reply:
-        from . import plans
         if not self._is_owner(chat_id):
             return Reply("Solo il proprietario vede le recensioni.")
         rows = [(c, plans.get(self.db, c)) for c in self.db.chat_ids()]
@@ -894,7 +961,7 @@ class CommandHandler:
         from . import channel as ch
         a = args.strip()
         cur = self.db.get_kv("deals_channel") or ""
-        hour = int(self.db.get_kv("deals_channel_hour", ch.DEFAULT_HOUR) or ch.DEFAULT_HOUR)
+        hour = ch.post_hour(self.db)
         if not a:
             if not cur:
                 return Reply("📣 Nessun canale impostato.\nCrea un canale Telegram, aggiungi il bot come amministratore e scrivi "
@@ -916,7 +983,7 @@ class CommandHandler:
         if a.isdigit() and 0 <= int(a) <= 23:
             self.db.set_kv("deals_channel_hour", int(a))
             return Reply(f"📣 Post giornaliero alle {int(a)}:00.")
-        if a.startswith("@") or a.lstrip("-").isdigit():
+        if a.startswith("@") or (a.startswith("-100") and a[1:].isdigit()):  # @nome oppure l'id numerico del canale
             self.db.set_kv("deals_channel", a)
             return Reply(f"📣 Canale affari: <code>{html.escape(a)}</code>. Ti mando subito un messaggio di prova lì: "
                          "se non arriva, controlla che il bot sia amministratore del canale.\n"
@@ -926,7 +993,6 @@ class CommandHandler:
 
     def _collection(self, args: str) -> Reply:
         """/collezione – le mie · /collezione sv8 – seguila (album mio) e rendila corrente · … attiva|disattiva · … ho|manca N… · … tutte|svuota."""
-        from . import collections as coll
         a = args.strip()
         active = set(self.db.active_sets(self.chat))
         cur = self.current()
@@ -946,15 +1012,11 @@ class CommandHandler:
                          "<code>/collezione sv8 attiva</code> la fa cercare; <code>/condividi sv8</code> la condivide con un amico.")
             return Reply("\n".join(lines))
         set_id, _, rest = a.partition(" ")
-        set_id = set_id.lower().strip()
-        if set_id in ("30th", "30", "celebration"):
-            set_id = "me55"
+        set_id = self._set_alias(set_id)
         rest = rest.strip()
-        from . import plans
-        if (set_id not in self.db.albums_of(self.chat) and not plans.is_full(self.db, self.chat)
-                and plans.collections_count(self.db, self.chat) >= plans.LIGHT_MAX_COLLECTIONS):
-            return Reply(f"🌱 Con la versione Light segui fino a {plans.LIGHT_MAX_COLLECTIONS} collezioni. "
-                         "/abbonati per seguirne quante vuoi.")
+        blocked = self._follow_limit(set_id)
+        if blocked:
+            return blocked
         try:
             cs, album, created = coll.follow(self.db, self.chat, set_id)
         except KeyError:
@@ -976,18 +1038,21 @@ class CommandHandler:
                          + (" · 👥 condivisa con " + ", ".join(html.escape(self.db.user_name(m)) for m in others) if others else "")
                          + f"\n\n/mancanti · /aggiungi 4 7 · /ho 4 · /progresso · /prezzi · "
                          f"<code>/collezione {cs.id} {'disattiva' if on else 'attiva'}</code> · <code>/condividi {cs.id}</code>")
+        # la 30th e la sua Classic Collection si accendono e si spengono insieme
+        toggle_ids = list(config.HOME_SET_IDS) if cs.id in config.HOME_SET_IDS else [cs.id]
         if verb in ("attiva", "on", "cerca"):
-            from . import plans
-            if (cs.id not in self.db.active_sets(self.chat) and not plans.is_full(self.db, self.chat)
+            if (cs.id not in active and not plans.is_full(self.db, self.chat)
                     and plans.active_count(self.db, self.chat) >= plans.LIGHT_MAX_ACTIVE):
                 return Reply(f"🌱 Con la versione Light puoi tenere le notifiche accese su {plans.LIGHT_MAX_ACTIVE} collezioni. "
                              "Spegnine una con <code>/collezione ID disattiva</code>, oppure /abbonati per accenderle tutte.")
-            self.db.set_active(cs.id, True, self.chat)
+            for sid in toggle_ids:
+                self.db.set_active(sid, True, self.chat)
             return Reply(f"🔎 Ricerca attiva per <b>{html.escape(cs.name)}</b> ({len([c for c in cs.cards if c.id in wanted_album])} mancanti). "
                          f"⚠️ Ogni collezione attiva aggiunge ricerche e notifiche a ogni giro: tienine poche accese. "
                          f"<code>/collezione {cs.id} disattiva</code> per spegnerla.")
         if verb in ("disattiva", "off", "spegni"):
-            self.db.set_active(cs.id, False, self.chat)
+            for sid in toggle_ids:
+                self.db.set_active(sid, False, self.chat)
             return Reply(f"💤 Ricerca spenta per <b>{html.escape(cs.name)}</b>: la checklist resta.")
         if verb in ("svuota", "reset", "completa"):
             coll.mark(self.db, cs, [c.number for c in cs.cards], False, album)
@@ -1001,8 +1066,8 @@ class CommandHandler:
                 numbers, bad = [], []
                 for t in nums.replace(",", " ").split():
                     if "-" in t and all(x.isdigit() for x in t.split("-", 1)):
-                        lo, hi = (int(x) for x in t.split("-", 1))
-                        numbers += [str(i) for i in range(lo, hi + 1) if str(i) in by_num]
+                        lo, hi = sorted(int(x) for x in t.split("-", 1))  # solo i numeri che esistono: mai un ciclo enorme
+                        numbers += [by_num[k].number for k in sorted((k for k in by_num if k.isdigit()), key=int) if lo <= int(k) <= hi]
                     elif t.lower() in by_num:
                         numbers.append(by_num[t.lower()].number)
                     else:
@@ -1074,33 +1139,36 @@ class CommandHandler:
     def _share(self, args: str) -> Reply:
         """/condividi sv8 NOME – propone a un amico l'album; lui accetta con /accetta."""
         import secrets
-        from . import collections as coll
         parts = args.strip().split(maxsplit=1)
         if not parts:
             return Reply("Usa <code>/condividi me55 NOME</code> (un amico, vedi /amici) oppure <code>/condividi me55</code> per un codice da passare.")
-        set_id = parts[0].lower()
-        if set_id in ("30th", "30", "celebration"):
-            set_id = "me55"
+        set_id = self._set_alias(parts[0])
         cs = self.index.get_set(set_id)
-        if not cs:
+        if not cs or not (cs.primary or cs.id in self.db.albums_of(self.chat)):
             return Reply("Collezione non tra le tue: prima <code>/collezione " + html.escape(set_id) + "</code>.")
+        target = self._friend_by_name(parts[1]) if len(parts) > 1 else None
+        if len(parts) > 1 and not target:
+            return Reply("Amico non trovato: /amici per l'elenco, oppure <code>/condividi " + cs.id + "</code> per un codice.")
         album = coll.album_for(self.db, self.chat, cs.id)
         code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
         self.db.set_kv(f"share:{code}", {"album": album, "from": self.chat, "expires": time.time() + 7 * 86400})
-        if len(parts) > 1:
-            target = self._friend_by_name(parts[1])
-            if not target:
-                return Reply("Amico non trovato: /amici per l'elenco, oppure <code>/condividi " + cs.id + "</code> per un codice.")
+        if target:
             text = (f"👥 <b>{html.escape(self.db.user_name(self.chat))}</b> vuole condividere con te l'album "
                     f"<b>{html.escape(cs.name)}</b>: diventerebbe unico per tutti e due (le carte che uno dei due ha contano come prese).")
             return Reply(f"📨 Proposta inviata a {html.escape(self.db.user_name(target))}: quando accetta, l'album diventa unico.",
-                         sends=[(target, text, [[("✅ Accetta", f"/accetta {code}"), ("✖️ No grazie", "/accetta no")]])])
+                         sends=[(target, text, [[("✅ Accetta", f"/accetta {code}"), ("✖️ No grazie", f"/accetta no {code}")]])])
         return Reply(f"👥 Codice per condividere <b>{html.escape(cs.name)}</b> (vale 7 giorni):\n<code>/accetta {code}</code>\n"
                      "Chi lo scrive al bot entra nel tuo album: diventa unico per tutti e due.")
 
     def _accept(self, args: str) -> Reply:
         code = args.strip().upper()
-        if not code or code == "NO":
+        if not code or code.startswith("NO"):
+            refused = code[2:].strip()
+            inv = self.db.get_kv(f"share:{refused}") if refused else None
+            if inv:
+                self.db.set_kv(f"share:{refused}", None)
+                return Reply("Ok, album non condiviso.", sends=[(str(inv["from"]), f"✖️ {html.escape(self.db.user_name(self.chat))} "
+                                                                                     "ha preferito non condividere l'album.", None)])
             return Reply("Ok, album non condiviso.")
         inv = self.db.get_kv(f"share:{code}") or {}
         if not inv or float(inv.get("expires") or 0) < time.time():
@@ -1111,7 +1179,9 @@ class CommandHandler:
             return Reply("Quell'album non esiste più.")
         if str(inv["from"]) == self.chat:
             return Reply("È un tuo album 🙂")
-        from . import collections as coll
+        blocked = self._follow_limit(set_id)
+        if blocked:
+            return blocked
         cs = coll.get_set(self.db, set_id)
         self.index.add_set(cs)
         self.db.join_album(self.chat, album)
@@ -1125,9 +1195,7 @@ class CommandHandler:
                      sends=[(other, f"✅ {html.escape(self.db.user_name(self.chat))} ha accettato: <b>{html.escape(cs.name)}</b> è un album unico.", None)])
 
     def _leave(self, args: str) -> Reply:
-        set_id = args.strip().lower()
-        if set_id in ("30th", "30", "celebration"):
-            set_id = "me55"
+        set_id = self._set_alias(args)
         album = self.db.albums_of(self.chat).get(set_id)
         if not album or len(self.db.album_members(album)) < 2:
             return Reply("Quell'album non è condiviso.")
@@ -1136,7 +1204,6 @@ class CommandHandler:
 
     def _chase(self, args: str) -> Reply:
         """/insegui 151 – per 6 ore cerca quella carta ogni 5 minuti; /insegui – elenco; /insegui stop [carte]."""
-        from . import watch
         a = args.strip()
         if not a:
             return Reply(watch.describe(self.index, self.db, self.chat))
@@ -1155,19 +1222,21 @@ class CommandHandler:
         cards, unknown = self.resolve(card_args)
         if not cards:
             return Reply("Carta non riconosciuta. Es. <code>/insegui 151</code>, <code>/insegui c4 2h</code>, <code>/insegui 151 2h ogni 10m</code>.")
-        from . import plans
         light = not plans.is_full(self.db, self.chat)
         max_w = plans.LIGHT_MAX_WATCHES if light else watch.MAX_WATCHES
         if light:
             every = max(every, plans.LIGHT_WATCH_EVERY_S)
             duration = max(duration, every)
         active = watch.list_watches(self.db, self.chat)
-        room = max_w - len({cid for cid in active if cid not in {c.id for c in cards}})
+        asked = {c.id for c in cards}
+        room = max_w - len({cid for cid in active if cid not in asked})
+        left_out = cards[max(0, room):]
         cards = cards[:max(0, room)]
         if not cards:
             if light:
-                return Reply(f"🌱 Con la versione Light puoi inseguire una carta alla volta, controllata ogni 2 ore. "
-                             "Ferma quella attiva con /insegui stop, oppure /abbonati per inseguirne fino a 10 ogni 5 minuti.")
+                return Reply(f"🌱 Con la versione Light puoi inseguire una carta alla volta, controllata ogni "
+                             f"{watch.fmt_duration(plans.LIGHT_WATCH_EVERY_S)}. Ferma quella attiva con /insegui stop, oppure "
+                             f"/abbonati per inseguirne fino a {watch.MAX_WATCHES} ogni {watch.fmt_duration(watch.EVERY_S)}.")
             return Reply(f"Al massimo {watch.MAX_WATCHES} inseguimenti insieme: ferma qualcosa con /insegui stop.")
         for c in cards:
             w = watch.add_watch(self.db, c.id, duration, every, self.chat)
@@ -1175,14 +1244,15 @@ class CommandHandler:
         lines = [f"🏃 Inseguo <b>{names}</b>: ogni {watch.fmt_duration(every)} per {watch.fmt_duration(duration)} "
                  f"(fino alle {watch.fmt_time(w['until'])}).",
                  "Primo controllo tra pochi secondi, poi ti avviso solo quando spunta un annuncio nuovo. Alla fine, il riepilogo."]
+        if left_out:
+            lines.append(f"⚠️ Non inseguite (massimo {max_w} insieme): " + html.escape(", ".join(c.label for c in left_out)))
         if unknown:
             lines.append("❓ Non capiti: " + html.escape(" ".join(unknown)))
-        code = watch.code_for(self.index, cards[0])
-        return Reply("\n".join(lines), buttons=[[("⏹ Ferma", f"/insegui stop {code}"), ("🏃 Attivi", "/insegui")]])
+        stop = f"{cards[0].set_id}:{cards[0].number}"  # vale anche se nel frattempo cambi collezione corrente
+        return Reply("\n".join(lines), buttons=[[("⏹ Ferma", f"/insegui stop {stop}"), ("🏃 Attivi", "/insegui")]])
 
     def _search_cards(self, args: str) -> Reply:
         """Ricerca mirata, subito, di una o più carte (max 3): cosa c'è in vendita adesso."""
-        from . import stats as pstats
         from .search import search_card
         cards, unknown = self.resolve(args)
         if not cards:
@@ -1213,10 +1283,12 @@ class CommandHandler:
         return Reply("\n\n".join(out), buttons=[[("💶 Prezzi", f"/prezzi {code}"), ("📂 Storico", f"/storico {code}")]])
 
     def _all_price_rows(self) -> list[dict]:
-        return self.db.list_found() + self.db.price_rows()
+        """Annunci trovati più i punti prezzo, senza contare due volte lo stesso annuncio."""
+        found = self.db.list_found()
+        keys = {r["listing_key"] for r in found}
+        return found + [r for r in self.db.price_rows() if r["listing_key"] not in keys]
 
     def _value(self) -> Reply:
-        from . import stats as pstats
         cur = self.current()
         cards = [c for s_ in self.scope() for c in s_.cards]
         v = pstats.collection_value(cards, self._wanted(), self._all_price_rows(), cardmarket.all_prices(self.db))
@@ -1230,7 +1302,7 @@ class CommandHandler:
         return Reply("\n".join(lines), buttons=[[("🛒 Lista della spesa", "/spesa"), ("💶 Prezzi", "/prezzi")]])
 
     def _shopping(self) -> Reply:
-        from . import shopping, stats as pstats
+        from . import shopping
         cur = self.current()
         cards = [c for s_ in self.scope() for c in s_.cards]
         sl = shopping.build(cards, self._wanted(), self.db.list_found())
@@ -1262,7 +1334,6 @@ class CommandHandler:
         return Reply("\n".join(lines), buttons=[[("💎 Valore", "/valore"), ("🃏 Mancanti", "/mancanti")]])
 
     def _copies(self, args: str) -> Reply:
-        from . import stats as pstats
         a = args.strip()
         copies = self.db.copies(self.chat)
         if not a:
@@ -1319,11 +1390,10 @@ class CommandHandler:
         if offer:
             lines.append("OFFRO (doppioni): " + ", ".join(f"{c.label}" + (f" ×{n}" if n > 1 else "") for c, n in sorted(offer, key=lambda t: t[0].sort_key)))
         lines.append("Scrivetemi in privato, scambio anche più carte insieme.")
-        text = "\n".join(lines)
-        return Reply("Copia e incolla dove vuoi:\n\n<code>" + html.escape(text) + "</code>")
+        # un <code> per riga: se il messaggio viene spezzato, ogni pezzo resta HTML valido
+        return Reply("Copia e incolla dove vuoi:\n\n" + "\n".join(f"<code>{html.escape(ln)}</code>" for ln in lines))
 
     def _progress(self) -> Reply:
-        from . import stats as pstats
         comp = pstats.completion(self.scope_index(), self._wanted(), self.db.list_found(), cardmarket.all_prices(self.db))
         filled = round(comp.percent / 10)
         bar = "🟩" * filled + "⬜" * (10 - filled)
@@ -1355,7 +1425,7 @@ class CommandHandler:
                          "Imposta con <code>/affari 70</code> oppure spegni con <code>/affari off</code>.")
         try:
             v = max(10, min(95, int(float(a))))
-        except ValueError:
+        except (ValueError, OverflowError):
             return Reply("Serve una percentuale, es. <code>/affari 60</code>, oppure <code>/affari off</code>.")
         self._save({"deal_pct": v})
         return Reply(f"🔥 Avviso affare attivo: ti scrivo subito se una carta mancante esce sotto il {v}% del suo trend Cardmarket "
@@ -1378,21 +1448,25 @@ class CommandHandler:
 
     def _export(self) -> Reply:
         from .export import build_workbook
-        content = build_workbook(self.index, self.db)
+        content = build_workbook(self.index, self.db, self._wanted(), self._my_sets(), self._my_rows())
         name = time.strftime("pokebot_%Y%m%d_%H%M.xlsx")
         return Reply("📎 Ecco il file Excel: checklist, storico annunci e prezzi.", document=(name, content))
 
     # ------------------------------------------------------------------
-    SOURCE_ORDER = ["ebay", "vinted", "wallapop"]
-    SOURCE_LABELS = {"ebay": "eBay.it", "vinted": "Vinted", "wallapop": "Wallapop"}
+    def _my_rows(self) -> list[dict]:
+        """Annunci dello storico che riguardano le collezioni della persona."""
+        mine = {c.id for s_ in self._my_sets() for c in s_.cards}
+        return [r for r in self.db.list_found() if any(m["id"] in mine for m in r["matched"])]
 
-    def _history(self, args: str) -> Reply:
-        """Cartelle per carta con lo storico degli annunci trovati."""
+    def _history(self, args: str, chat_id: str = "") -> Reply:
+        """Cartelle per carta con lo storico degli annunci trovati (solo le collezioni della persona)."""
         arg = args.strip().lower()
         if arg in ("svuota", "cancella", "pulisci"):
+            if self._owner_only(chat_id):  # lo storico è uno solo per tutti
+                return self._owner_only(chat_id)
             self.db.clear_found()
             return Reply("🗑 Storico svuotato. Gli annunci già visti non verranno comunque rinotificati.")
-        rows = self.db.list_found()
+        rows = self._my_rows()
         if not rows:
             return Reply("Nessun annuncio trovato finora. Lo storico si riempie a ogni giro di ricerca.")
         if not arg:
@@ -1400,7 +1474,7 @@ class CommandHandler:
         if arg in ("lotti", "lotto", "lot"):
             members = [r for r in rows if r["kind"] == "lot"]
             return self._history_detail("📦 Lotti con carte mancanti", members, show_cards=True)
-        card = self.index.by_code.get(arg) or self.index.by_id.get(arg)
+        card = self._one_card(arg)
         if not card:
             return Reply("Carta non riconosciuta. Usa /storico senza argomenti e tocca una cartella.")
         members = [r for r in rows if r["kind"] != "lot" and any(m["id"] == card.id for m in r["matched"])]
@@ -1427,10 +1501,10 @@ class CommandHandler:
                 row = []
         if row:
             buttons.append(row)
+        buttons = buttons[:48]  # Telegram accetta un numero limitato di righe di pulsanti
         if lots:
             buttons.append([(f"📦 Lotti · {lots}", "/storico lotti")])
-        buttons.append([("🗑 Svuota storico", "/storico svuota")])
-        return Reply("\n".join(lines), buttons=buttons[:50])
+        return Reply("\n".join(lines), buttons=buttons)
 
     def _history_detail(self, title: str, members: list[dict], show_cards: bool = False, per_source: int = 12) -> Reply:
         from .scrapers.base import parse_price
@@ -1440,11 +1514,11 @@ class CommandHandler:
         by_source: dict[str, list[dict]] = {}
         for r in members:
             by_source.setdefault(r["source"], []).append(r)
-        order = [s for s in self.SOURCE_ORDER if s in by_source] + [s for s in by_source if s not in self.SOURCE_ORDER]
+        order = [s for s in pstats.SOURCE_ORDER if s in by_source] + [s for s in by_source if s not in pstats.SOURCE_ORDER]
         for src in order:
             items = by_source[src]
-            items.sort(key=lambda r: (parse_price(r.get("price")) if r.get("price") else float("inf"), -r["created_at"]))
-            lines.append(f"\n<b>{html.escape(self.SOURCE_LABELS.get(src, src))}</b> ({len(items)})")
+            items.sort(key=lambda r: (parse_price(r.get("price")) or float("inf"), -r["created_at"]))
+            lines.append(f"\n<b>{html.escape(pstats.SOURCE_LABELS.get(src, src))}</b> ({len(items)})")
             for r in items[:per_source]:
                 when = time.strftime("%d/%m", time.localtime(r["created_at"]))
                 price = html.escape(r.get("price") or "n.d.")
@@ -1490,17 +1564,18 @@ class CommandHandler:
         wanted = self._wanted()
         lines = []
         scope = self.scope()
-        if not any(not s.printed_total for s in scope):
-            want_classic = False
+        # la divisione "set principale / Classic" serve solo se la collezione ha entrambe le parti
+        if not (any(s.printed_total for s in scope) and any(not s.printed_total for s in scope)):
+            want_classic = None
         for s in scope:
-            if bool(s.printed_total) == want_classic:
+            if want_classic is not None and bool(s.printed_total) == want_classic:
                 continue
             lines.append(f"<b>{html.escape(s.name)}</b> – {len(s.cards)} carte (✗ = ti manca)")
             ordered = sorted(s.cards, key=lambda c: c.sort_key) if s.printed_total else s.cards
             for c in ordered:
                 mark = "✗ " if c.id in wanted else ""
                 lines.append(mark + self._card_line(c))
-        if not want_classic and any(not s.printed_total for s in scope):
+        if want_classic is False:
             lines.append("\nPer la Classic Collection: /lista classic")
         return "\n".join(lines)
 
@@ -1535,7 +1610,7 @@ class CommandHandler:
             per_source = r.get("per_source") or {}
             if per_source:
                 lines.append("📊 Letti per fonte: " + " · ".join(
-                    f"{self.SOURCE_LABELS.get(k, k)} {v}" for k, v in per_source.items()))
+                    f"{pstats.SOURCE_LABELS.get(k, k)} {v}" for k, v in per_source.items()))
             for k, v in (r["errors"] or {}).items():
                 lines.append(f"⚠️ {html.escape(k)}: {html.escape(str(v)[:200])}")
         else:
@@ -1570,16 +1645,18 @@ class TelegramCommands:
             return
         if self.db.get_kv("telegram_profile_version") != PROFILE_VERSION and hasattr(self.client, "set_profile"):
             try:
-                if self.client.set_profile(BOT_DESCRIPTION, BOT_SHORT_DESCRIPTION):
+                if self.client.set_profile(BOT_DESCRIPTION.format(trial=plans.TRIAL_DAYS), BOT_SHORT_DESCRIPTION):
                     self.db.set_kv("telegram_profile_version", PROFILE_VERSION)
                     log.info("Presentazione del bot registrata")
             except requests.RequestException as exc:
                 log.warning("Telegram setMyDescription: %s", exc)
-        if self.db.get_kv("telegram_menu_version") == MENU_VERSION:
+        owner = self.db.owner_chat_id()
+        version = f"{MENU_VERSION}:{owner}"  # il menu del proprietario va rifatto se cambia il proprietario
+        if self.db.get_kv("telegram_menu_version") == version:
             return
         try:
-            if self.client.set_my_commands(MENU_COMMANDS):
-                self.db.set_kv("telegram_menu_version", MENU_VERSION)
+            if self.client.set_my_commands(MENU_COMMANDS) and (not owner or self.client.set_my_commands(OWNER_MENU_COMMANDS, owner)):
+                self.db.set_kv("telegram_menu_version", version)
                 log.info("Menu comandi Telegram registrato")
         except requests.RequestException as exc:
             log.warning("Telegram setMyCommands: %s", exc)
@@ -1622,23 +1699,27 @@ class TelegramCommands:
             else:
                 msg = upd.get("message") or {}
                 text = msg.get("text") or ""
-            chat = msg.get("chat") or {}
-            chat_id = str(chat.get("id") or "")
+            chat_id = str((msg.get("chat") or {}).get("id") or "")
             frm = (cb.get("from") if cb else msg.get("from")) or {}
-            if chat_id and frm.get("first_name"):
-                self.db.set_user_name(chat_id, str(frm.get("first_name"))[:40])
-            if not chat_id or not text:
-                continue
-            if not self._authorized(chat_id, text):
-                if _is_start(text):
-                    self._deliver(chat_id, self._signup(chat_id, text, str(frm.get("first_name") or "")))
-                else:
-                    log.warning("Messaggio ignorato da chat non autorizzata %s", chat_id)
-                continue
-            reply = self.handler.handle(text, chat_id)
-            want_search = want_search or reply.run_search
-            self._deliver(chat_id, reply)
+            want_search = self._process(chat_id, text, str(frm.get("first_name") or "")) or want_search
         return want_search
+
+    def _process(self, chat_id: str, text: str, name: str) -> bool:
+        """Un messaggio: chi non è autorizzato può solo chiedere l'accesso con /start. True se chiede la ricerca."""
+        if not chat_id or not text:
+            return False
+        name = name[:40]
+        if not self._authorized(chat_id, text):
+            if _is_start(text):
+                self._deliver(chat_id, self._signup(chat_id, text, name))
+            else:
+                log.info("Messaggio ignorato da una chat non autorizzata")
+            return False
+        if name:
+            self.db.set_user_name(chat_id, name)
+        reply = self.handler.handle(text, chat_id)
+        self._deliver(chat_id, reply)
+        return reply.run_search
 
     def _deliver(self, chat_id: str, reply: Reply) -> None:
         try:
@@ -1659,25 +1740,21 @@ class TelegramCommands:
         if chat_id and isinstance(payload.get("payment"), dict):  # scritto solo dal ponte, mai dal testo dell'utente
             self._payment(chat_id, payload["payment"], str(payload.get("name") or ""))
             return False
-        if not chat_id or not text:
-            return False
-        name = str(payload.get("name") or "")[:40]
-        if not self._authorized(chat_id, text):
-            if _is_start(text):
-                self._deliver(chat_id, self._signup(chat_id, text, name))
-            else:
-                log.warning("Comando via ponte ignorato da chat non autorizzata %s", chat_id)
-            return False
-        if name:
-            self.db.set_user_name(chat_id, name)
-        reply = self.handler.handle(text, chat_id)
-        self._deliver(chat_id, reply)
-        return reply.run_search
+        return self._process(chat_id, text, str(payload.get("name") or ""))
 
     def _payment(self, chat_id: str, pay: dict, name: str) -> None:
-        from . import plans
         if pay.get("currency") != "XTR" or not str(pay.get("invoice_payload", "")).startswith("pro:"):
-            log.warning("Pagamento ignorato (non è l'abbonamento): %s", pay)
+            log.warning("Pagamento ignorato: non è l'abbonamento")
+            return
+        owner = self.db.owner_chat_id()
+        if self.db.is_banned(chat_id):  # espulso: le Stars tornano indietro e l'abbonamento si ferma
+            try:
+                ok, _ = self.client.refund_stars(chat_id, str(pay.get("telegram_payment_charge_id") or ""))
+            except (requests.RequestException, ValueError):
+                ok = False
+            if owner:
+                self._deliver(owner, Reply(f"⛔ Pagamento da un account espulso (<code>{chat_id}</code>): "
+                                           + ("rimborsato." if ok else "rimborso non riuscito, controlla in Telegram.")))
             return
         if name:
             self.db.set_user_name(chat_id, name[:40])
@@ -1685,12 +1762,14 @@ class TelegramCommands:
             self.db.remove_from_waitlist(chat_id)
             self.db.add_chat_id(chat_id)
         p = plans.record_payment(self.db, chat_id, pay)
+        if p is None:
+            log.info("Pagamento già registrato: ignorato")
+            return
         renewal = bool(pay.get("is_recurring")) and not pay.get("is_first_recurring")
-        log.info("Pagamento Stars da %s: %s (rinnovo: %s)", chat_id, pay.get("total_amount"), renewal)
+        log.info("Pagamento Stars registrato (%s stelle, rinnovo: %s)", pay.get("total_amount"), renewal)
         self._deliver(chat_id, Reply(
             ("🔁 Abbonamento rinnovato, grazie!" if renewal else "🎉 <b>Grazie!</b> Ora hai Pokébot completo: avvisi immediati, affari 🔥, "
              "inseguimenti ogni 5 minuti e collezioni illimitate.") + f"\n{plans.describe(self.db, chat_id)}"))
-        owner = self.db.owner_chat_id()
         if owner and owner != chat_id:
             self._deliver(owner, Reply(f"💰 {'Rinnovo' if renewal else 'Nuovo abbonamento'}: {html.escape(self.db.user_name(chat_id))} "
                                        f"(<code>{chat_id}</code>) · {int(pay.get('total_amount') or 0)} ⭐ · fino al {plans._date(p.get('pro_until'))}"))
@@ -1704,14 +1783,15 @@ class TelegramCommands:
         return self.handler.waitlist_signup(chat_id, name, source)
 
     def _authorized(self, chat_id: str, text: str) -> bool:
-        """Proprietario (dall'ambiente o dal primo /start) e persone invitate (`/start CODICE` entro 48 ore)."""
+        """Persone collegate (proprietario, approvate dalla lista d'attesa, entrate con un invito). Un `/start CODICE`
+        con il codice d'invito valido fa entrare subito; il primo /start in assoluto crea il proprietario."""
         chat_id = str(chat_id)
         allowed = self.db.chat_ids()
         if chat_id in allowed:
             return True
-        parts = text.strip().split()
-        if not parts or not parts[0].lower().startswith("/start"):
+        if not _is_start(text):
             return False
+        parts = text.strip().split()
         if not allowed:
             self.db.set_kv("telegram_chat_id", chat_id)  # il primo che scrive /start diventa il proprietario
             log.info("Chat id Telegram salvato: %s", chat_id)
@@ -1721,8 +1801,9 @@ class TelegramCommands:
         inv = self.db.get_kv("invite_code") or {}
         if (isinstance(inv, dict) and inv.get("code") and parts[1].upper() == str(inv["code"]).upper()
                 and float(inv.get("expires") or 0) > time.time()):
+            self.db.remove_from_waitlist(chat_id)
+            self.db.unban(chat_id)
             self.db.add_chat_id(chat_id)
-            from . import plans
             plans.start_trial(self.db, chat_id)
             plans.set_onboarding(self.db, chat_id, True)
             self.db.set_kv("invite_code", None)  # monouso

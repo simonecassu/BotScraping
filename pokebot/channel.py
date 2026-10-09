@@ -86,13 +86,18 @@ def format_post(deals: list[dict], bot_username: str, day: dt.date | None = None
     return "\n".join(lines), buttons
 
 
+def post_hour(db: Database) -> int:
+    """Ora del post giornaliero (anche 0 = mezzanotte è valida)."""
+    h = db.get_kv("deals_channel_hour")
+    return DEFAULT_HOUR if h is None else int(h)
+
+
 def due(db: Database, now: float | None = None) -> bool:
     """True se il canale è impostato, è passata l'ora del post e oggi non è ancora stato pubblicato."""
     if not db.get_kv("deals_channel"):
         return False
     local = dt.datetime.fromtimestamp(now or time.time(), ZoneInfo(config.TIMEZONE))
-    hour = int(db.get_kv("deals_channel_hour", DEFAULT_HOUR) or DEFAULT_HOUR)
-    return local.hour >= hour and db.get_kv("deals_channel_last") != local.date().isoformat()
+    return local.hour >= post_hour(db) and db.get_kv("deals_channel_last") != local.date().isoformat()
 
 
 def post_daily(db: Database, index: CardIndex, client, now: float | None = None, force: bool = False) -> str:

@@ -67,8 +67,9 @@ class FakeClient:
         self.sent = []
         self.menu = None
 
-    def set_my_commands(self, commands):
-        self.menu = commands
+    def set_my_commands(self, commands, chat_id=""):
+        if not chat_id:
+            self.menu = commands
         return True
 
     def get_me(self):
@@ -115,7 +116,7 @@ def test_poll_saves_chat_id_and_ignores_strangers(index, monkeypatch):
     # menu comandi registrato una volta sola
     assert client.menu and client.menu[0][0] == "mancanti"
     from pokebot.telegram_bot import MENU_VERSION
-    assert db.get_kv("telegram_menu_version") == MENU_VERSION
+    assert db.get_kv("telegram_menu_version") == f"{MENU_VERSION}:42"
     client.menu = None
     tc.poll_once()
     assert client.menu is None
@@ -297,7 +298,7 @@ def test_export_sends_document(index):
     from openpyxl import load_workbook
     import io
     from pokebot.export import build_workbook
-    wb = load_workbook(io.BytesIO(build_workbook(index, db)))
+    wb = load_workbook(io.BytesIO(build_workbook(index, db, db.wanted_ids(), index.sets, db.list_found())))
     assert wb.sheetnames == ["Checklist", "Annunci", "Prezzi"]
     assert wb["Checklist"].max_row == 192 and wb["Annunci"].max_row == 2
 

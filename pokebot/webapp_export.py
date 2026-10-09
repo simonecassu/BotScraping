@@ -150,12 +150,12 @@ def _plan_info(db: Database, chat_id: str) -> dict:
             "trial_until": float(p.get("trial_until") or 0), "pro_until": float(p.get("pro_until") or 0),
             "lifetime": bool(p.get("lifetime")), "price": plans.PRICE_STARS,
             "onboarding": plans.onboarding(db, chat_id), "max_active": None if plans.is_full(db, chat_id) else plans.LIGHT_MAX_ACTIVE,
-            "invoice": str(db.get_kv(f"invoice:{chat_id}") or "")}
+            "invoice": plans.cached_invoice(db, chat_id)}
 
 
 def build_summary(index: CardIndex, db: Database) -> dict:
     """state.json: solo ciò che serve al ponte (timer, persone collegate), senza dati personali."""
-    from . import plans
+    from . import channel, plans
     any_watch = [{"until": w.get("until")} for _, ws in watch.all_watches(db) for w in ws.values()]
     return {
         "generated_at": time.time(),
@@ -167,7 +167,7 @@ def build_summary(index: CardIndex, db: Database) -> dict:
         "watches": any_watch,
         "settings": {k: db.get_settings().get(k) for k in ("interval_minutes", "paused", "quiet_hours")},
         "per_user": True,
-        "channel": {"set": bool(db.get_kv("deals_channel")), "hour": int(db.get_kv("deals_channel_hour", 19) or 19),
+        "channel": {"set": bool(db.get_kv("deals_channel")), "hour": channel.post_hour(db),
                     "last": db.get_kv("deals_channel_last") or ""},
         "waitlist": len(db.waitlist()),
     }

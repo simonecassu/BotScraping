@@ -423,6 +423,21 @@ class Database:
         self.set_kv("signups_total", int(self.get_kv("signups_total", 0) or 0) + 1)
         return True
 
+    def ban(self, chat_id: str) -> None:
+        """Chi è stato espulso: non rientra da solo (/start, rinnovo dell'abbonamento)."""
+        banned = set(self.get_kv("banned", []) or [])
+        banned.add(str(chat_id))
+        self.set_kv("banned", sorted(banned))
+
+    def unban(self, chat_id: str) -> None:
+        banned = set(self.get_kv("banned", []) or [])
+        if str(chat_id) in banned:
+            banned.discard(str(chat_id))
+            self.set_kv("banned", sorted(banned))
+
+    def is_banned(self, chat_id: str) -> bool:
+        return str(chat_id) in set(self.get_kv("banned", []) or [])
+
     def remove_from_waitlist(self, chat_id: str) -> dict | None:
         wl = self.waitlist()
         entry = wl.pop(str(chat_id).strip(), None)
