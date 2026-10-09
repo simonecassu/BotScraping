@@ -6,15 +6,14 @@ import cli
 from pokebot.db import Database
 
 
-def test_dispatch_payload(monkeypatch):
-    monkeypatch.delenv("POKEBOT_DISPATCH_PAYLOAD", raising=False)
-    assert cli._dispatch_payload() is None
-    monkeypatch.setenv("POKEBOT_DISPATCH_PAYLOAD", "null")
-    assert cli._dispatch_payload() is None
-    monkeypatch.setenv("POKEBOT_DISPATCH_PAYLOAD", '{"chat_id": 5, "text": "/cerca"}')
-    assert cli._dispatch_payload() == {"chat_id": 5, "text": "/cerca"}
-    monkeypatch.setenv("POKEBOT_DISPATCH_PAYLOAD", "{non json")
-    assert cli._dispatch_payload() is None
+def test_seal_and_unseal_files(monkeypatch):
+    monkeypatch.setattr("pokebot.config.TELEGRAM_BOT_TOKEN", "123:abc")
+    d = tempfile.mkdtemp()
+    src, enc, out = (os.path.join(d, n) for n in ("db", "db.enc", "db.out"))
+    open(src, "wb").write(b"SQLite format 3\x00 dati")
+    assert cli.main(["seal", src, enc]) == 0 and b"dati" not in open(enc, "rb").read()
+    assert cli.main(["unseal", enc, out]) == 0 and open(out, "rb").read() == open(src, "rb").read()
+    assert cli.main(["unseal", src, out]) == 0 and open(out, "rb").read() == open(src, "rb").read()  # in chiaro: passa così
 
 
 def test_search_due():

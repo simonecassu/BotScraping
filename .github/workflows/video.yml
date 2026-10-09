@@ -5,8 +5,8 @@ on:
   workflow_dispatch:
     inputs:
       chat_id:
-        description: "Chat Telegram a cui mandare il video (vuoto = solo artefatto)"
-        default: "346053777"
+        description: "Chat Telegram a cui mandare il video (vuoto = al secret TELEGRAM_CHAT_ID, se c'è)"
+        default: ""
         required: false
 
 permissions:
@@ -44,18 +44,20 @@ jobs:
           name: pokebot-demo
           path: /tmp/video/pokebot-demo.mp4
       - name: Salva il video sul ramo "video"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           mkdir -p /tmp/vb && cd /tmp/vb && git init -q -b video
           cp /tmp/video/pokebot-demo.mp4 .
-          git -c user.name=pokebot -c user.email=pokebot@users.noreply.github.com add . 
+          git -c user.name=pokebot -c user.email=pokebot@users.noreply.github.com add .
           git -c user.name=pokebot -c user.email=pokebot@users.noreply.github.com commit -qm "Video demo"
-          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" video
+          git push -q -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" video
       - name: Manda su Telegram
-        if: ${{ inputs.chat_id != '' }}
         env:
           TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHAT: ${{ inputs.chat_id }}
+          CHAT: ${{ inputs.chat_id || secrets.TELEGRAM_CHAT_ID }}
         run: |
+          [ -n "$CHAT" ] || { echo "nessuna chat: il video resta tra gli artefatti"; exit 0; }
           curl -sS -o /tmp/tg.json -F chat_id="$CHAT" -F supports_streaming=true \
             -F caption="🎬 Video demo della Mini App (dati dimostrativi)" \
             -F video=@/tmp/video/pokebot-demo.mp4 "https://api.telegram.org/bot$TOKEN/sendVideo"

@@ -21,9 +21,6 @@ header{position:sticky;top:0;z-index:5;background:linear-gradient(180deg,var(--r
 .title .ball{width:30px;height:30px;border-radius:50%;background:linear-gradient(180deg,#fff 0,#fff 46%,#111 46%,#111 54%,#e3350d 54%);position:relative;flex:none;border:3px solid #111}
 .title .ball::after{content:"";position:absolute;left:50%;top:50%;width:9px;height:9px;border:3px solid #111;border-radius:50%;background:#fff;transform:translate(-50%,-50%)}
 .title small{color:#ffe9a8;font-weight:700;font-size:12px;margin-left:auto}
-nav{display:flex;gap:6px;overflow-x:auto;padding:10px 0 8px}
-nav button{flex:1;padding:8px 6px;border:2px solid transparent;border-radius:999px;background:rgba(255,255,255,.08);color:#dbe4f5;font:800 13px "Nunito",sans-serif;white-space:nowrap}
-nav button.on{background:var(--yel);color:#1a1a1a;border-color:#fff3b0;box-shadow:0 3px 0 var(--yel2)}
 main{padding:12px;padding-bottom:40px}.hidden{display:none}
 .card-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 input[type=search],select,input[type=number]{padding:9px 12px;border-radius:12px;border:2px solid var(--line);background:var(--sec);color:var(--txt);font:700 15px "Nunito",sans-serif}
@@ -40,7 +37,6 @@ input[type=search]{flex:1;min-width:150px}
 .c .tag{position:absolute;top:8px;left:8px;background:#0a1328;color:#dbe4f5;border:1px solid #2a3a60;font-size:10px;font-weight:900;padding:2px 7px;border-radius:7px;letter-spacing:.3px;z-index:1}
 .c.pending{opacity:.55}
 .c .dup{position:absolute;left:8px;bottom:44px;background:var(--red);color:#fff;font-size:11px;font-weight:900;padding:2px 7px;border-radius:7px;z-index:1}
-.c.dupsel{outline:3px solid var(--red)}
 h2{font-size:18px;font-weight:900;margin:16px 0 8px;color:var(--yel)}h3{font-size:13px;color:var(--hint);margin:12px 0 6px;font-weight:800;text-transform:uppercase;letter-spacing:.6px}
 .folder{background:var(--sec);border-radius:14px;padding:10px 12px;margin-bottom:9px;border:2px solid var(--line)}
 .folder .hd{display:flex;align-items:center;gap:10px}.folder .hd img{width:36px;height:50px;object-fit:cover;border-radius:5px;border:2px solid var(--yel)}
@@ -77,7 +73,7 @@ a{color:var(--link);text-decoration:none}
 .coll img{width:64px;height:36px;object-fit:contain;flex:none}.coll .sy{width:64px;text-align:center;color:var(--hint);font-weight:900;flex:none}
 .coll b{display:block;font-weight:900;font-size:14px}.coll small{color:var(--hint);font-weight:700;font-size:12px}
 .coll .st{flex:none;font-size:11px;font-weight:900;padding:4px 9px;border-radius:999px;background:#0a1328;color:var(--hint);border:1px solid var(--line)}
-.coll .st.on{background:var(--yel);color:#1a1a1a;border-color:#fff3b0}.coll .st.mine{background:#163a1f;color:#9fe3ad;border-color:#2d7a3e}
+.coll .st.on{background:var(--yel);color:#1a1a1a;border-color:#fff3b0}
 .seg{display:flex;background:#0a1328;border-radius:999px;padding:3px;margin-bottom:10px;border:2px solid var(--line)}.seg button{flex:1;border:0;border-radius:999px;padding:8px;background:transparent;color:var(--hint);font:800 13px "Nunito",sans-serif}.seg button.on{background:var(--yel);color:#1a1a1a}
 .warn{background:#3a2a0a;border:2px solid var(--warn);color:#ffd9a0;border-radius:12px;padding:9px 12px;font-size:13px;font-weight:700;margin:8px 0}
 </style>
@@ -119,7 +115,7 @@ a{color:var(--link);text-decoration:none}
     <div id="grid" class="grid"></div>
   </div>
     <div id="cseg-chase" class="hidden">
-    <p class="hint">Un inseguimento cerca una carta di questa collezione <b>ogni 5 minuti per 6 ore</b> e ti avvisa in chat solo sugli annunci nuovi.</p>
+    <p class="hint" id="chase-hint"></p>
     <div class="card-row">
       <input id="chase-card" type="search" placeholder="Es. 151 o c4" style="flex:1;min-width:110px">
       <select id="chase-dur"><option value="">6 ore</option><option value="1h">1 ora</option><option value="2h">2 ore</option><option value="12h">12 ore</option><option value="24h">24 ore</option></select>
@@ -150,10 +146,6 @@ a{color:var(--link);text-decoration:none}
     </div>
   </div>
   </section>
-
-  
-
-  
 
   <section id="tab-friends" class="hidden">
     <div class="fcode">
@@ -245,14 +237,13 @@ async function load() {
     const r = tg && tg.initData
       ? await fetch("/api/state?t=" + Date.now(), { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: tg.initData }) })
       : await fetch("/api/state?t=" + Date.now(), { cache: "no-store" });
-    if (!r.ok) throw new Error(r.status);
-    state = await r.json();
-    if (state.per_user) throw new Error("apri da Telegram");
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || "il bot non risponde adesso: riprova tra un minuto");
+    if (d.per_user) throw new Error("apri la Mini App da Telegram (pulsante App) per vedere la tua collezione");
+    state = d;
   } catch (e) {
     $("#upd").textContent = "stato non disponibile";
-    $("#home-hint").innerHTML = String(e).includes("apri da Telegram") ? '<span class="err">Apri la Mini App da Telegram (pulsante App) per vedere la tua collezione.</span>'
-      : String(e).includes("403") || String(e).includes("401") ? '<span class="err">Non sei tra le persone collegate al bot: chiedi un /invita.</span>'
-      : '<span class="err">Il bot non ha ancora pubblicato lo stato. Riprova tra un minuto.</span>';
+    if (!state) $("#home-hint").innerHTML = `<span class="err">${esc(e.message || e)}</span>`;
     return;
   }
   cards = state.sets.flatMap((s) => s.cards.map((c) => ({ ...c, set: s.id, setName: s.name, printed: s.printed_total })));
@@ -261,7 +252,7 @@ async function load() {
   copies = state.copies || {};
   for (const c of (state.collections || [])) {
     extra[c.id] = { meta: { id: c.id, name: c.name, series: c.series, logo: c.logo, symbol: c.symbol, total: c.total, printed_total: c.printed_total },
-      cards: c.cards.map((k) => ({ ...k, set: c.id, setName: c.name, printed: c.printed_total, code: k.number })), owned: new Set(c.owned || []), active: c.active, loaded: true, shared_with: c.shared_with || [] };
+      cards: c.cards.map((k) => ({ ...k, set: c.id, setName: c.name, printed: c.printed_total, code: k.number })), owned: new Set(c.owned || []), active: c.active, loaded: true, mine: true, shared_with: c.shared_with || [] };
   }
   applyOverrides();
   const d = new Date(state.generated_at * 1000);
@@ -303,7 +294,7 @@ function renderFriends() {
   const fr = state.friends || [], code = state.friend_code || "";
   $("#t-fr").textContent = fr.length ? `${fr.length} ${fr.length === 1 ? "amico" : "amici"}` : "aggiungi i tuoi amici";
   $("#fcode").textContent = code || "······";
-  const mySets = [["me55", "30th Celebration"], ...Object.values(extra).map((e) => [e.meta.id, e.meta.name])];
+  const mySets = [["me55", "30th Celebration"], ...Object.values(extra).filter((e) => e.mine).map((e) => [e.meta.id, e.meta.name])];
   $("#friend-list").innerHTML = fr.length ? fr.map((f) => {
     const shared = (f.shared || []).filter((sid) => sid !== "me55c").map(setName);
     const opts = mySets.filter(([id]) => !(f.shared || []).includes(id)).map(([id, n]) => `<option value="${esc(id)}">${esc(n)}</option>`).join("");
@@ -340,11 +331,11 @@ $("#friendgo").onclick = async () => {
 
 /* ---------- Home ---------- */
 function renderHome() {
-  const nExtraActive = Object.values(extra).filter((e) => e.active).length;
+  const nExtraActive = Object.values(extra).filter((e) => e.mine && e.active).length;
   const ws = state.watches || [];
   $("#t-coll").textContent = `30th Celebration · ${homeMissing()} mancanti` + (nExtraActive ? ` · +${nExtraActive} attive` : "") + (ws.length ? ` · ${ws.length} inseguit${ws.length === 1 ? "a" : "e"}` : "");
   const s = state.settings;
-  $("#t-set").textContent = s.paused ? "⏸ in pausa" : `ogni ${s.interval_minutes} min · ${(s.sources || []).length} fonti`;
+  $("#t-set").textContent = s.paused ? "⏸ notifiche in pausa" : isOwner() ? `ogni ${s.interval_minutes} min · ${(s.sources || []).length} fonti` : "🔔 notifiche attive";
   renderPlan();
   const lr = state.last_run;
   $("#home-hint").textContent = lr ? `Ultimo giro ${new Date(lr.started_at * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}: ${lr.listings_seen} annunci letti, ${lr.matches} segnalati.` : "";
@@ -375,7 +366,7 @@ function renderCollections() {
   if (!q || "30th celebration classic".includes(q)) mine.push(row({ id: "me55", name: "30th Celebration", logo: ((catalog || []).find((s) => s.id === "me55") || {}).logo || "" },
     st(state.settings.home_active !== false), "home", `${cards.length} carte (con Classic Collection) · ${homeMissing()} mancanti` + valTxt("home") + ((((state.home_album || {}).me55 || {}).shared_with || []).length ? ` · 👥 ${state.home_album.me55.shared_with.map((u) => u.name).join(", ")}` : "")));
   for (const e of Object.values(extra)) {
-    if (q && !e.meta.name.toLowerCase().includes(q)) continue;
+    if (!e.mine || (q && !e.meta.name.toLowerCase().includes(q))) continue;
     const miss = e.cards.length ? e.cards.length - e.owned.size : (e.meta.total || "?");
     const sw = (e.shared_with || []).length ? ` · 👥 ${e.shared_with.map((u) => u.name).join(", ")}` : "";
     mine.push(row(e.meta, st(e.active), e.meta.id, `${e.cards.length || e.meta.total || "?"} carte · ${miss} mancanti` + valTxt(e.meta.id) + sw));
@@ -383,10 +374,10 @@ function renderCollections() {
   const vals = state.values || {};
   const totVal = Object.values(vals).reduce((a, v) => a + (v.owned_value || 0), 0);
   const totPriced = Object.values(vals).reduce((a, v) => a + (v.owned_priced || 0), 0);
-  html += `<h2>Le tue</h2>` + (totPriced ? `<div class="kpi" style="grid-template-columns:1fr"><div><b>💎 ${eur(totVal)}</b><span>valore stimato delle carte che hai (${totPriced} con prezzo visto, mediane degli annunci)</span></div></div>` : "") + `${mine.join("") || '<p class="hint">Nessuna.</p>'}`;
+  html += `<h2>Le tue</h2>` + (totPriced ? `<div class="kpi" style="grid-template-columns:1fr"><div><b>💎 ${eur(totVal)}</b><span>valore stimato delle carte che hai (${totPriced} con prezzo: Cardmarket, altrimenti gli annunci visti)</span></div></div>` : "") + `${mine.join("") || '<p class="hint">Nessuna.</p>'}`;
   if (!catalog) html += '<h2>Tutte</h2><p class="hint">Carico il catalogo…</p>';
   else {
-    const list = catalog.filter((s) => !HOME_SETS.includes(s.id) && !extra[s.id] && (!q || s.name.toLowerCase().includes(q) || s.series.toLowerCase().includes(q) || s.id.includes(q)));
+    const list = catalog.filter((s) => !HOME_SETS.includes(s.id) && !(extra[s.id] || {}).mine && (!q || s.name.toLowerCase().includes(q) || s.series.toLowerCase().includes(q) || s.id.includes(q)));
     const bySeries = {};
     list.forEach((s) => (bySeries[s.series || "Altro"] ||= []).push(s));
     html += `<h2>Tutte (${list.length})</h2>` + Object.entries(bySeries).map(([ser, ss]) => `<h3>${esc(ser)}</h3>` +
@@ -426,6 +417,14 @@ function cardTitle(c) { return c.printed ? `${c.name} ${c.number}/${c.printed}` 
 function chaseCode(c) { return HOME_SETS.includes(c.set) ? c.code : `${c.set}:${c.number}`; }
 
 /* ---------- Checklist ---------- */
+function isOwner() { return ((state || {}).plan || {}).tier === "owner"; }
+function atActiveLimit() {  // versione Light: al massimo N collezioni con la ricerca accesa
+  const max = ((state || {}).plan || {}).max_active;
+  const n = (state.settings.home_active !== false ? 1 : 0) + Object.values(extra).filter((e) => e.mine && e.active).length;
+  if (!max || n < max) return false;
+  toast(`Versione Light: al massimo ${max} collezioni con la ricerca accesa. Spegnine una o passa al completo.`, 3500);
+  return true;
+}
 function curCards() { return curSet === "home" ? cards : ((extra[curSet] || {}).cards || []); }
 function isMissing(c) { return curSet === "home" ? wanted.has(c.id) : !extra[curSet].owned.has(c.number); }
 function searchSwitch(on, hint) { return `<div class="set" style="border:0;padding-top:0"><label>Ricerca sui marketplace<small>${hint}</small></label><button class="sw ${on ? "on" : ""}" id="coll-sw"></button></div>`; }
@@ -440,6 +439,7 @@ function renderChecklist() {
     const on = state.settings.home_active !== false;
     head.innerHTML = searchSwitch(on, on ? "attiva: il bot cerca le mancanti della 30th a ogni giro" : "spenta: la checklist resta, il bot non la cerca");
     $("#coll-sw").onclick = async () => {
+      if (!on && atActiveLimit()) return;
       if (await sendCmd(`/collezione me55 ${on ? "disattiva" : "attiva"}`)) { state.settings.home_active = !on; toast(on ? "Ricerca spenta" : "Ricerca attivata"); renderChecklist(); renderCollections(); renderHome(); }
     };
     pills.innerHTML = state.sets.map((s) => {
@@ -452,11 +452,12 @@ function renderChecklist() {
     const miss = e.cards.length - e.owned.size;
     pills.innerHTML = `<span class="pill">Mancanti <b>${e.cards.length ? miss : (e.meta.total || "?")}</b>/${e.cards.length || e.meta.total || "?"}</span><span class="pill">Possedute <b>${e.owned.size}</b></span>` + (e.meta.printed_total ? `<span class="pill">numerazione /${e.meta.printed_total}</span>` : "");
     head.innerHTML = searchSwitch(e.active, e.active ? "attiva: il bot cerca le mancanti di questa collezione a ogni giro" : "spenta: la checklist resta, il bot non la cerca") +
-      (e.active ? "" : '<div class="warn">⚠️ Attivare altre collezioni aggiunge ricerche e notifiche a ogni giro. Per ora conviene tenere accesa solo la 30th.</div>') +
+      (e.active ? "" : '<div class="warn">⚠️ Ogni collezione attiva aggiunge ricerche e notifiche a ogni giro.</div>') +
       (!e.loaded ? '<p class="hint">Carico le carte…</p>' : "") +
       (e.loaded && e.cards.length && !e.owned.size ? '<p class="hint">Si parte da <b>mi mancano tutte</b>: tocca le carte che hai e si accendono.</p>' : "");
     $("#coll-sw").onclick = async () => {
       const on = !e.active;
+      if (on && atActiveLimit()) return;
       if (on && !confirm(`Attivare la ricerca per ${e.meta.name}? Il bot cercherà anche le sue carte mancanti a ogni giro.`)) return;
       if (await sendCmd(`/collezione ${curSet} ${on ? "attiva" : "disattiva"}`)) { e.active = on; toast(on ? "Ricerca attivata" : "Ricerca spenta"); renderChecklist(); renderCollections(); renderHome(); }
     };
@@ -511,7 +512,7 @@ function renderShared() {
 }
 $("#sharebtn").onclick = async () => {
   const friends = state.friends || [];
-  if (!friends.length) { toast("Prima aggiungi un amico da Impostazioni (codice amico)"); return; }
+  if (!friends.length) { toast("Prima aggiungi un amico dalla sezione Amici"); return; }
   const pick = friends.length === 1 ? friends[0] : friends.find((f) => f.name.toLowerCase() === (prompt("Con chi? " + friends.map((f) => f.name).join(", ")) || "").trim().toLowerCase());
   if (!pick) { toast("Amico non trovato"); return; }
   if (await sendCmd(`/condividi ${curSetId()} ${pick.name}`)) toast(`Proposta inviata a ${pick.name}: quando accetta, l'album diventa unico`);
@@ -562,13 +563,12 @@ function renderFound() {
   $("#folders").querySelectorAll(".lst").forEach((el) => el.onclick = () => openLink(el.dataset.url));
 }
 $("#qf").oninput = renderFound;
-function openFolder(id) { showCseg("found"); setSeg("ann"); $("#qf").value = ""; renderFound(); const f = $(`.folder[data-key="${id}"]`); if (f) { f.querySelector(".bd").classList.remove("hidden"); f.scrollIntoView({ behavior: "smooth" }); } }
+function openFolder(id) { showCseg("found"); setSeg("ann"); $("#qf").value = ""; renderFound(); const f = $(`#folders .folder[data-key="${id}"]`); if (f) { f.querySelector(".bd").classList.remove("hidden"); f.scrollIntoView({ behavior: "smooth" }); } }
 
 
-function setSeg(name) { document.querySelectorAll(".seg button").forEach((b) => b.classList.toggle("on", b.dataset.seg === name)); ["ann", "prz", "spesa"].forEach((t) => $("#seg-" + t).classList.toggle("hidden", t !== name)); if (name === "spesa") renderShopping(); }
-function groupKey() { return curSet === "home" ? "home" : curSet; }
+function setSeg(name) { document.querySelectorAll("[data-seg]").forEach((b) => b.classList.toggle("on", b.dataset.seg === name)); ["ann", "prz", "spesa"].forEach((t) => $("#seg-" + t).classList.toggle("hidden", t !== name)); if (name === "spesa") renderShopping(); }
 function renderShopping() {
-  const sl = (state.shopping || {})[groupKey()];
+  const sl = (state.shopping || {})[curSet];
   if (!sl || !sl.sellers.length) { $("#shop").innerHTML = '<p class="hint">Nessun annuncio recente per le carte mancanti di questa collezione.</p>'; return; }
   const tot = sl.covered + sl.uncovered.length;
   let html = `<div class="kpi"><div><b>${eur(sl.total)}</b><span>per ${sl.covered} carte su ${tot} mancanti</span></div><div><b>${sl.sellers.length}</b><span>venditor${sl.sellers.length === 1 ? "e" : "i"}</span></div></div>`;
@@ -580,10 +580,14 @@ function renderShopping() {
   $("#shop").innerHTML = html;
   $("#shop").querySelectorAll(".lst").forEach((el) => el.onclick = () => openLink(el.dataset.url));
 }
-document.querySelectorAll(".seg button").forEach((b) => b.onclick = () => setSeg(b.dataset.seg));
+document.querySelectorAll("[data-seg]").forEach((b) => b.onclick = () => setSeg(b.dataset.seg));
 
 /* ---------- Inseguimento ---------- */
 function renderChase() {
+  const light = !!((state.plan || {}).max_active);
+  $("#chase-hint").innerHTML = light
+    ? "Un inseguimento cerca una carta <b>ogni 2 ore per 6 ore</b> e ti avvisa in chat solo sugli annunci nuovi. Nella versione Light ne puoi avere uno alla volta."
+    : "Un inseguimento cerca una carta di questa collezione <b>ogni 5 minuti per 6 ore</b> e ti avvisa in chat solo sugli annunci nuovi.";
   const ws = (state.watches || []).filter((w) => inCurSet(w.card)), now = Date.now() / 1000;
   const left = (sec) => sec < 60 ? "pochi secondi" : sec < 3600 ? Math.round(sec / 60) + " min" : (sec / 3600).toFixed(sec % 3600 ? 1 : 0).replace(".0", "") + " ore";
   const hhmm = (ts) => new Date(ts * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
@@ -676,26 +680,32 @@ function renderPrices() {
 function renderSettings() {
   const s = state.settings;
   const row = (label, hint, control) => `<div class="set"><label>${label}<small>${hint}</small></label>${control}</div>`;
-  const num = (key, val, cmd, step = 1, min = 0) => `<input type="number" step="${step}" min="${min}" value="${val ?? ""}" data-cmd="${cmd}" style="width:90px">`;
+  const num = (val, cmd, step = 1, min = 0) => `<input type="number" step="${step}" min="${min}" value="${val ?? ""}" data-cmd="${cmd}" style="width:90px">`;
   const sw = (on, cmdOn, cmdOff) => `<button class="sw ${on ? "on" : ""}" data-on="${cmdOn}" data-off="${cmdOff}" aria-pressed="${on}"></button>`;
-  const srcs = ["wallapop", "vinted", "ebay"];
+  const srcs = ["wallapop", "vinted", "ebay"], owner = isOwner();
   $("#settings").innerHTML = `
     ${row("Pausa notifiche", "il bot cerca e accumula, invia tutto alla ripresa", sw(s.paused, "/pausa", "/riprendi"))}
-    ${row("Avviso affare 🔥", "sotto questa % della mediana storica (0 = spento)", num("deal_pct", s.deal_pct, "/affari {v}"))}
-    ${row("Annunci per carta", "i più economici inviati per ogni giro", num("max", s.max_per_card, "/max {v}", 1, 1))}
-    ${row("Prezzo massimo €", "0 = nessun limite", num("prezzo", s.max_price, "/prezzo {v}", 0.5))}
-    ${row("Soglia lotti %", "quota minima di carte mancanti in un lotto", num("soglia", Math.round((s.lot_min_ratio || 0) * 100), "/soglia {v}"))}
-    ${row("Ricerca ogni (min)", "intervallo della ricerca automatica", num("intervallo", s.interval_minutes, "/intervallo {v}", 1, 5))}
+    ${row("Avviso affare 🔥", "sotto questa % del valore Cardmarket (0 = spento)", num(s.deal_pct, "/affari {v}"))}
+    ${row("Annunci per carta", "i più economici inviati per ogni giro", num(s.max_per_card, "/max {v}", 1, 1))}
+    ${row("Prezzo massimo €", "0 = nessun limite", num(s.max_price, "/prezzo {v}", 0.5))}
+    ${row("Soglia lotti %", "quota minima di carte mancanti in un lotto", num(Math.round((s.lot_min_ratio || 0) * 100), "/soglia {v}"))}
+    ${owner ? row("Ricerca ogni (min)", "intervallo della ricerca automatica, per tutti", num(s.interval_minutes, "/intervallo {v}", 1, 5)) : ""}
     ${row("Solo carte italiane", "scarta annunci in francese, inglese e altre lingue", sw(s.language === "ita", "/lingua ita", "/lingua tutte"))}
     ${row("Immagini nei messaggi", "foto degli annunci e della carta", sw(s.images !== false, "/immagini on", "/immagini off"))}
     ${row("Ore silenziose", s.quiet_hours ? `dalle ${s.quiet_hours[0]} alle ${s.quiet_hours[1]}` : "nessuna",
       `<span><input type="number" min="0" max="23" value="${s.quiet_hours ? s.quiet_hours[0] : 23}" id="qh1" style="width:62px"> – <input type="number" min="0" max="23" value="${s.quiet_hours ? s.quiet_hours[1] : 8}" id="qh2" style="width:62px"> ${sw(!!s.quiet_hours, "/notte {qh}", "/notte off")}</span>`)}
-    <h2>Fonti</h2>
-    ${srcs.map((k) => row(SRC[k], "", sw((s.sources || []).includes(k), `/fonti ${[...new Set([...(s.sources || []), k])].join(" ")}`, `/fonti ${(s.sources || []).filter((x) => x !== k).join(" ") || "wallapop"}`))).join("")}`;
+    ${owner ? `<h2>Fonti</h2>${srcs.map((k) => row(SRC[k], "per tutti", `<button class="sw ${(s.sources || []).includes(k) ? "on" : ""}" data-src="${k}"></button>`)).join("")}` : ""}`;
   $("#settings").querySelectorAll("input[type=number][data-cmd]").forEach((inp) => inp.onchange = async () => {
     const cmd = inp.dataset.cmd.replace("{v}", inp.value); if (await sendCmd(cmd)) toast("Inviato: " + cmd);
   });
-  $("#settings").querySelectorAll(".sw").forEach((b) => b.onclick = async () => {
+  $("#settings").querySelectorAll(".sw[data-src]").forEach((b) => b.onclick = async () => {
+    // le fonti si leggono dagli interruttori al momento del tocco (non da quando la pagina è stata disegnata)
+    b.classList.toggle("on");
+    const chosen = [...$("#settings").querySelectorAll(".sw[data-src].on")].map((x) => x.dataset.src);
+    if (!chosen.length) { b.classList.add("on"); toast("Almeno una fonte deve restare accesa"); return; }
+    if (await sendCmd("/fonti " + chosen.join(" "))) toast("Fonti: " + chosen.map((k) => SRC[k]).join(", ")); else b.classList.toggle("on");
+  });
+  $("#settings").querySelectorAll(".sw[data-on]").forEach((b) => b.onclick = async () => {
     const on = !b.classList.contains("on");
     let cmd = on ? b.dataset.on : b.dataset.off;
     cmd = cmd.replace("{qh}", `${$("#qh1").value} ${$("#qh2").value}`);

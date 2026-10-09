@@ -172,7 +172,6 @@ def build_summary(index: CardIndex, db: Database) -> dict:
         "interval_minutes": int(db.get_settings().get("interval_minutes", 20) or 20),
         "next_watch": next_watch,
         "queued": deliverable,
-        "digest_hour": plans.DIGEST_HOUR,
         "channel": {"set": bool(db.get_kv("deals_channel")), "hour": channel.post_hour(db),
                     "last": db.get_kv("deals_channel_last") or ""},
     }

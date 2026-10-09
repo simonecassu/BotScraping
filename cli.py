@@ -13,9 +13,7 @@
 from __future__ import annotations
 
 import argparse
-import json
 import logging
-import os
 import sys
 import time
 
@@ -98,12 +96,9 @@ def main(argv: list[str] | None = None) -> int:
         n_queue, want_search = GitHubQueue().drain(commands.handle_payload)  # comandi salvati dal ponte
         if n_queue:
             print(f"Comandi dalla coda: {n_queue}")
-        payload = _dispatch_payload()
         if not commands.enabled:
             print("TELEGRAM_BOT_TOKEN mancante: nessun comando letto, nessuna notifica possibile.")
-        elif payload is not None:  # ponte senza coda (fallback): il comando viaggia nel payload
-            want_search = commands.handle_payload(payload) or want_search
-        elif not n_queue:
+        elif not n_queue:  # senza ponte (webhook spento) i messaggi si leggono direttamente da Telegram
             want_search = commands.poll_once(timeout=0)
         from pokebot import cardmarket
         try:  # prezzi Cardmarket (TCGdex): ogni carta una volta al giorno, prima le mancanti
@@ -174,18 +169,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  ambigua '{g.name}': {', '.join(c.label for c in g.candidates)}")
         return 0
     return 1
-
-
-def _dispatch_payload() -> dict | None:
-    """Payload del repository_dispatch (ponte Telegram → GitHub), se presente."""
-    raw = os.getenv("POKEBOT_DISPATCH_PAYLOAD", "").strip()
-    if not raw or raw == "null":
-        return None
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-    return data if isinstance(data, dict) and data.get("text") else None
 
 
 def _search_due(db: Database) -> bool:

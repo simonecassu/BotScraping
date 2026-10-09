@@ -40,9 +40,9 @@ def test_summary_for_bridge(index, monkeypatch):
     watch.add_watch(db, "me55-131", 3600, 300, chat_id="1")
     s = build_summary(index, db)
     assert s["chat_ids"] == ["1", "2"] and s["owner_chat_id"] == "1"
-    assert s["next_watch"] and s["queued"] == 0 and s["interval_minutes"] == 20 and s["digest_hour"] == 19
+    assert s["next_watch"] and s["queued"] == 0 and s["interval_minutes"] == 20
     assert set(s) == {"generated_at", "owner_chat_id", "chat_ids", "last_search_ts", "interval_minutes", "next_watch",
-                      "queued", "digest_hour", "channel"}
+                      "queued", "channel"}
 
 
 def test_write_state_is_sealed(index, monkeypatch):

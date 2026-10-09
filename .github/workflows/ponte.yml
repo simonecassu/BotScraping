@@ -4,11 +4,14 @@
 #   CLOUDFLARE_ACCOUNT_ID  Account ID (pagina Workers & Pages, colonna di destra)
 #   BRIDGE_GITHUB_TOKEN    fine-grained token GitHub con "Contents: Read and write" su questo repository
 #   TELEGRAM_BOT_TOKEN     già presente per il bot
-#   TELEGRAM_CHAT_ID       (facoltativo) il tuo chat id: il ponte ignora chiunque altro
+#   TELEGRAM_CHAT_ID       (facoltativo) il tuo chat id: il ponte ti riconosce anche prima che il bot salvi lo stato
 name: Ponte Telegram
 
 on:
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   pubblica:
@@ -39,7 +42,7 @@ jobs:
           if [ -n "$manca" ]; then echo "::error::Secret mancanti:$manca"; exit 1; fi
 
       - name: Pubblica il worker
-        run: npx --yes wrangler@4 deploy 2>&1 | tee deploy.log
+        run: npx --yes wrangler@4.137.0 deploy 2>&1 | tee deploy.log
 
       - name: Imposta le chiavi del worker
         env:
@@ -47,22 +50,26 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          printf '%s' "$TELEGRAM_BOT_TOKEN" | npx --yes wrangler@4 secret put TELEGRAM_BOT_TOKEN
-          printf '%s' "$BRIDGE_GITHUB_TOKEN" | npx --yes wrangler@4 secret put GITHUB_TOKEN
-          # facoltativo: se impostato, il ponte scarta i messaggi di chiunque non sia il proprietario
+          printf '%s' "$TELEGRAM_BOT_TOKEN" | npx --yes wrangler@4.137.0 secret put TELEGRAM_BOT_TOKEN
+          printf '%s' "$BRIDGE_GITHUB_TOKEN" | npx --yes wrangler@4.137.0 secret put GITHUB_TOKEN
           if [ -n "$TELEGRAM_CHAT_ID" ]; then
-            printf '%s' "$TELEGRAM_CHAT_ID" | npx --yes wrangler@4 secret put TELEGRAM_CHAT_ID
+            printf '%s' "$TELEGRAM_CHAT_ID" | npx --yes wrangler@4.137.0 secret put TELEGRAM_CHAT_ID
           fi
 
       - name: Attiva il ponte su Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
+          # /setup risponde solo con la chiave ricavata dal token (come nel worker): nessun altro può spostare il webhook
+          key=$(printf 'pokebot-admin:%s' "$TELEGRAM_BOT_TOKEN" | sha256sum | cut -c1-40)
+          echo "::add-mask::$key"
           url=$(grep -o 'https://[A-Za-z0-9.-]*workers\.dev' deploy.log | head -1)
           if [ -z "$url" ]; then echo "::error::Indirizzo del worker non trovato nel log"; exit 1; fi
           echo "Indirizzo del ponte: $url"
           # le chiavi appena caricate impiegano qualche secondo a propagarsi: riprova fino a 2 minuti
           for i in $(seq 1 12); do
             sleep 10
-            out=$(curl -sS "$url/setup" || true)
+            out=$(curl -sS -H "X-Pokebot-Key: $key" "$url/setup" || true)
             if echo "$out" | grep -q "Ponte attivo"; then
               echo "$out" | sed 's/<[^>]*>//g' | grep -v '^\s*$'
               echo "::notice::Ponte attivo su $url — ogni messaggio al bot avvia subito la ricerca"
