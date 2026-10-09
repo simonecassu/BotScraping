@@ -5,3 +5,4 @@ __pycache__/
 .env
 data/pokebot.db
 data/pokebot.db-journal
+pokebot-demo.mp4
