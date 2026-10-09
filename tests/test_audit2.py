@@ -222,3 +222,24 @@ def test_copies_set_exact_number_silently(index):
     assert "Usa" in h.handle("/doppioni imposta me55:131").text
     both = h.handle("/doppioni imposta me55:131 2\n/mancanti")  # in un messaggio con altro: nessuna riga vuota
     assert not both.text.startswith("\n") and db.copies("me") == {"me55-131": 2}
+
+
+def test_variants_and_decks_are_not_the_classic_card(matcher):
+    wanted = {"me55c-149"}
+    assert not matcher.analyze("Deck Lugia ex - classic collection", "", wanted).notify  # un mazzo con una Lugia ex
+    assert not matcher.analyze("Lugia V classic collection", "", wanted).notify
+    assert not matcher.analyze("Dark Lugia classic collection", "", wanted).notify
+    r = matcher.analyze("Lugia 149 Classic Collection 30th", "", wanted)
+    assert r.notify and [x.card.id for x in r.refs] == ["me55c-149"]
+    assert matcher.analyze("Pikachu ex 149/128 30th", "", {"me55-149"}).notify  # il nome lungo della collezione vale
+
+
+def test_chase_ignores_a_deck_of_a_different_lugia(index):
+    db = make_db()
+    db.save_settings({"sources": ["fake"], "quiet_hours": None})
+    watch.add_watch(db, "me55c-149", 3600, 300)
+    n = FakeNotifier()
+    scr = FakeScraper([Listing("fake", "D", "Deck Lugia ex - classic collection", "https://f/d", price=18.0, price_text="18 €"),
+                       Listing("fake", "L", "Lugia 149 Classic Collection 30th", "https://f/l", price=25.0, price_text="25 €")])
+    watch.run_watches(index, db, n, {"fake": scr})
+    assert [l.key for l, _ in n.sent] == ["fake:L"]

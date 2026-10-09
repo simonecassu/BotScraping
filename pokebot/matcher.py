@@ -28,10 +28,14 @@ _EURO_AMOUNT_RE = re.compile(r"\d\s*€|€\s*\d")  # sul testo originale: norma
 
 # "carta da collezione" è la descrizione di una carta, non un lotto
 _COLLECTIBLE_RE = re.compile(r"\b(?:cart[ae] )?da collezione\b")
-# parole che indicano un lotto vero e proprio
-_LOT_WORDS_RE = re.compile(r"\b(lotto|lotti|lot|bundle|collezione|stock|blocco)\b")
+# parole che indicano un lotto vero e proprio (un mazzo/deck è un insieme di carte, non la carta del titolo)
+_LOT_WORDS_RE = re.compile(r"\b(lotto|lotti|lot|bundle|collezione|stock|blocco|deck|mazzo|mazzi)\b")
 # quantità ("x2", "2 carte"): da sole, con una sola carta riconosciuta, indicano più copie della stessa carta
-_LOT_RE = re.compile(r"\b(lotto|lotti|lot|bundle|collezione|stock|blocco|x\s?\d{1,3}|\d{1,3}\s?x|\d{1,3}\s+carte)\b")
+_LOT_RE = re.compile(r"\b(lotto|lotti|lot|bundle|collezione|stock|blocco|deck|mazzo|mazzi|x\s?\d{1,3}|\d{1,3}\s?x|\d{1,3}\s+carte)\b")
+# varianti con lo stesso nome base ma carte diverse: "Lugia ex", "Lugia V", "Dark Lugia", "Alolan Exeggutor"…
+# Se la variante fosse una carta delle collezioni seguite, il nome lungo sarebbe già stato riconosciuto prima.
+_VARIANT_AFTER = {"ex", "gx", "v", "vmax", "vstar", "break", "prime", "lv", "lv.x", "star", "legend", "tag"}
+_VARIANT_BEFORE = {"dark", "light", "shining", "radiant", "alolan", "galarian", "hisuian", "paldean", "mega", "shadow"}
 _FULL_SET_RE = re.compile(r"\b(set completo|master set|masterset|full set|complete set|completo|completa|tutte le carte|intero set)\b")
 _STATED_COUNT_RE = re.compile(r"\b(\d{1,3})\s+(carte|cards|pezzi|pz)\b|\b(carte|cards)\s*x\s?(\d{1,3})\b|\bx\s?(\d{1,3})\b")
 
@@ -205,6 +209,9 @@ class Matcher:
                 if not candidates:
                     continue
                 covered.append(span)
+                after, before = text[m.end():].split(None, 1), text[:m.start()].rsplit(None, 1)
+                if (after and after[0] in _VARIANT_AFTER) or (before and before[-1] in _VARIANT_BEFORE):
+                    continue  # "Lugia ex" non è la Lugia della Classic Collection
                 # numero subito dopo il nome ("pikachu ex 149/128" oppure "pikachu ex 149")
                 tail = text[m.end(): m.end() + 24]
                 # il numero non deve essere seguito da lettere ("30th", "30esimo", "30°" non sono numeri di carta)
