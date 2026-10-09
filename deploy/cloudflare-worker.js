@@ -70,15 +70,20 @@ function base64(bytes) {
 // Dall'API di GitHub con il token del ponte: sempre aggiornato (niente cache del CDN) e senza i limiti delle letture anonime.
 // Il bot risalva lo stato a ogni giro (force-push): per qualche secondo GitHub può non servire ancora il file nuovo.
 // Allora si riprova una volta e, se ancora niente, vale l'ultimo stato letto bene (tenuto in memoria per un'ora).
-// I byte si prendono in base64 (risposta JSON dell'API): chiesti "raw", GitHub scambia i file piccoli per testo e li
-// corrompe riscrivendoli in UTF-8. Oltre 1 MB l'API non include il contenuto: allora raw (un file grande ha sempre
-// byte nulli e viene trattato come binario).
+// I byte si prendono dal blob git (API "git/blobs"): l'API dei contenuti scambia i file piccoli per testo e li
+// corrompe riscrivendoli in UTF-8, anche in base64; il blob è servito byte per byte.
 const lastGood = new Map();
 function fromBase64(b64) {
   const bin = atob(b64.replace(/\s+/g, ""));
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
+}
+async function readBlob(env, sha) {
+  const b = await gh(env, "GET", `/repos/${repoOf(env)}/git/blobs/${sha}`);
+  if (!b.ok) throw new Error("blob " + b.status);
+  const j = await b.json();
+  return fromBase64(j.content);
 }
 async function readState(env, name = "state.json") {
   const path = `/repos/${repoOf(env)}/contents/${name}.enc?ref=bot-state`;
@@ -87,14 +92,7 @@ async function readState(env, name = "state.json") {
       const r = await gh(env, "GET", path);
       if (r.ok) {
         const meta = await r.json();
-        let bytes;
-        if (meta.content && meta.encoding === "base64") bytes = fromBase64(meta.content);
-        else {
-          const raw = await gh(env, "GET", path, undefined, "application/vnd.github.raw");
-          if (!raw.ok) throw new Error("raw " + raw.status);
-          bytes = new Uint8Array(await raw.arrayBuffer());
-        }
-        const st = JSON.parse(new TextDecoder().decode(await unseal(env, bytes)));
+        const st = JSON.parse(new TextDecoder().decode(await unseal(env, await readBlob(env, meta.sha))));
         lastGood.set(name, { st, ts: Date.now() });
         return st;
       }
@@ -206,9 +204,9 @@ async function diag(env) {
     const r = await gh(env, "GET", `/repos/${repoOf(env)}/contents/state.json.enc?ref=bot-state`);
     out.contents_http = r.status;
     const meta = await r.json();
-    out.encoding = meta.encoding; out.size = meta.size; out.has_content = !!meta.content; out.message = meta.message;
-    if (meta.content) {
-      const bytes = fromBase64(meta.content);
+    out.size = meta.size; out.message = meta.message;
+    if (meta.sha) {
+      const bytes = await readBlob(env, meta.sha);
       out.bytes = bytes.length; out.magic = String.fromCharCode(...bytes.slice(0, 4));
       try { const st = JSON.parse(new TextDecoder().decode(await unseal(env, bytes))); out.decrypt = "ok"; out.chat_ids = (st.chat_ids || []).length; out.generated_at = st.generated_at; }
       catch (e) { out.decrypt = "ERRORE " + (e && e.message); }
