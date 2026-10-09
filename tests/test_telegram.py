@@ -160,7 +160,6 @@ def test_webhook_active_skips_polling(index):
 
 
 def test_notify_many_one_message_per_card_cheapest_first(index, monkeypatch):
-    from pokebot import config
     from pokebot.matcher import Matcher
     from pokebot.notifier import TelegramNotifier
     from pokebot.scrapers.base import Listing
@@ -327,7 +326,6 @@ def test_cerca_targeted_command(index, monkeypatch):
 
 
 def test_group_uses_listing_photo_album(index, monkeypatch):
-    from pokebot import config
     from pokebot.matcher import Matcher
     from pokebot.notifier import TelegramNotifier
     from pokebot.scrapers.base import Listing

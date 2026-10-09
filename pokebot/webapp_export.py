@@ -1,114 +1,111 @@
-"""Riepilogo JSON dello stato per la Mini App Telegram (pubblicato nel branch bot-state a ogni giro)."""
+"""Stato per la Mini App e per il ponte, pubblicato (cifrato, vedi vault.py) nel branch bot-state a ogni giro.
+
+- `state.json.enc`: il riepilogo che serve al ponte (chi è collegato, quando svegliare il bot);
+- `state-<chat>.json.enc`: lo stato di una persona per la sua Mini App (solo i suoi dati).
+"""
 from __future__ import annotations
 
 import json
+import os
 import time
 
-from . import config
-from . import stats as pstats
-from . import watch
+from . import cardmarket, channel, config, plans, shopping, vault, watch
 from . import collections as coll
+from . import stats as pstats
 from .cards import CardIndex
 from .db import Database
 from .scrapers.base import parse_price
 
 SETTING_KEYS = ["interval_minutes", "lot_min_ratio", "max_price", "max_per_card", "sources", "language",
-                "deal_pct", "images", "paused", "quiet_hours", "per_card_queries", "only_italy", "home_active"]
+                "deal_pct", "images", "paused", "quiet_hours", "home_active"]
 
 
-def build_state(index: CardIndex, db: Database, max_found: int = 300, chat_id: str = "") -> dict:
+class Shared:
+    """Ciò che è uguale per tutti, calcolato una volta per giro: annunci, prezzi Cardmarket, statistiche per carta."""
+
+    def __init__(self, index: CardIndex, db: Database):
+        self.rows = pstats.PriceRows(db.list_found())
+        found_keys = {r["listing_key"] for r in self.rows}
+        self.all_rows = pstats.PriceRows(self.rows + [r for r in db.price_rows() if r["listing_key"] not in found_keys])
+        self.cm = cardmarket.all_prices(db)
+        runs = db.last_runs(1)
+        self.last_run = runs[0] if runs else None
+        self._prices: dict[str, dict | None] = {}
+
+    def price(self, card) -> dict | None:
+        if card.id not in self._prices:
+            cp = pstats.card_prices(self.all_rows, card)
+            p = self.cm.get(card.id)
+            cm = {"low": p.low, "trend": p.ref, "avg30": p.avg30, "updated": p.updated} if p and p.ref else None
+            self._prices[card.id] = ({"n": cp.overall.n, "min": cp.overall.min, "median": cp.overall.median,
+                                      "max": cp.overall.max, "recent_median": cp.recent_median,
+                                      "older_median": cp.older_median, "cm": cm}
+                                     if cp.overall.n or cm else None)
+        return self._prices[card.id]
+
+
+def build_state(index: CardIndex, db: Database, max_found: int = 300, chat_id: str = "", shared: Shared | None = None) -> dict:
     """Stato per la Mini App di una persona (chat_id); senza chat: il proprietario."""
-    from . import collections as coll
+    shared = shared or Shared(index, db)
     chat_id = chat_id or db.owner_chat_id() or "me"
     for sid in config.HOME_SET_IDS:
         coll.album_for(db, chat_id, sid)
     wanted = db.wanted_for(chat_id)
-    rows = db.list_found()
-    settings = db.settings_for(chat_id)
-    sets = []
-    for s in index.sets:
-        if not s.primary:
-            continue  # le altre collezioni seguite viaggiano in "collections"
-        sets.append({
-            "id": s.id, "name": s.name, "name_it": s.name_it, "printed_total": s.printed_total,
-            "cards": [{"id": c.id, "code": index.code_of[c.id], "number": c.number, "name": c.name,
-                       "rarity": c.rarity, "image": c.image} for c in s.cards],
-        })
-    all_rows = rows + db.price_rows()
-    from . import cardmarket
-    cm = cardmarket.all_prices(db)
-    prices = {}
-    for c in index.by_id.values():
-        cp = pstats.card_prices(all_rows, c)
-        p = cm.get(c.id)
-        cmd = {"low": p.low, "trend": p.ref, "avg30": p.avg30, "updated": p.updated} if p and p.ref else None
-        if not cp.overall.n and cmd:
-            prices[c.id] = {"n": 0, "min": None, "median": None, "max": None, "cm": cmd, "by_source": {}}
-        if cp.overall.n:
-            prices[c.id] = {"cm": cmd,
-                "n": cp.overall.n, "min": cp.overall.min, "median": cp.overall.median, "max": cp.overall.max,
-                "recent_median": cp.recent_median, "older_median": cp.older_median,
-                "by_source": {src: {"n": st.n, "min": st.min, "median": st.median, "max": st.max}
-                              for src, st in cp.by_source.items()},
-            }
-    from .cards import CardIndex
+    albums = db.albums_of(chat_id)
+    groups = _groups(index, albums)
+    my_ids = {c.id for cards in groups.values() for c in cards}
     home_index = CardIndex([s for s in index.sets if s.primary], index.aliases)
-    comp = pstats.completion(home_index, wanted, rows, cm)
     active = db.active_sets(chat_id)
-    settings = dict(settings, home_active=any(s.id in active for s in home_index.sets))
-    runs = db.last_runs(1)
-    last = runs[0] if runs else None
-    found = []
-    for r in sorted(rows, key=lambda r: -r["created_at"])[:max_found]:
-        found.append({
-            "id": r["id"], "key": r["listing_key"], "source": r["source"], "title": r["title"], "url": r["url"],
-            "price": r.get("price") or "", "price_num": parse_price(r.get("price")), "location": r.get("location") or "",
-            "kind": r["kind"], "cards": [m["id"] for m in r["matched"]], "sure": [m["id"] for m in r["matched"] if m.get("sure", True)],
-            "notified": bool(r.get("notified")), "deal": bool(r.get("deal")), "image": r.get("image") or "",
-            "ts": r["created_at"],
-        })
+    settings = dict(db.settings_for(chat_id), home_active=any(s.id in active for s in home_index.sets))
+    comp = pstats.completion(home_index, wanted, shared.rows, shared.cm)
+    prices = {cid: p for cid in my_ids if (p := shared.price(index.by_id[cid])) is not None}
+    mine = [r for r in shared.rows if any(m["id"] in my_ids for m in r["matched"])]
+    last = shared.last_run
+    watches = []
+    for cid, w in watch.list_watches(db, chat_id).items():
+        card, _ = watch.resolve_card(index, db, cid)
+        watches.append({"card": cid, "label": card.label if card else cid, "code": watch.code_for(index, card) if card else cid,
+                        "started": w.get("started"), "until": w.get("until"), "every": w.get("every"),
+                        "checks": w.get("checks", 0), "found": w.get("found", 0)})
     return {
         "generated_at": time.time(),
-        "owner_chat_id": db.owner_chat_id(),
-        "chat_ids": db.chat_ids(),
-        "me": {"id": chat_id, "name": db.user_name(chat_id)},
-        "friends": [{"id": f, "name": db.user_name(f),
-                     "shared": [sid for sid, alb in db.albums_of(chat_id).items() if f in db.album_members(alb)]}
+        "friends": [{"id": f, "name": db.user_name(f), "shared": [sid for sid, alb in albums.items() if f in db.album_members(alb)]}
                     for f in db.friends(chat_id)],
         "friend_code": db.friend_code(chat_id),
         "plan": _plan_info(db, chat_id),
         "bot_username": db.get_kv("bot_username") or "",
-        "home_album": {sid: {"album": db.albums_of(chat_id).get(sid),
-                             "shared_with": [{"id": m, "name": db.user_name(m)} for m in db.album_members(db.albums_of(chat_id).get(sid, "")) if m != chat_id]}
+        "home_album": {sid: {"shared_with": [{"id": m, "name": db.user_name(m)}
+                                             for m in db.album_members(albums.get(sid, "")) if m != chat_id]}
                        for sid in config.HOME_SET_IDS},
-        # usati dal ponte per decidere se svegliare GitHub a ogni tick di 5 minuti
-        "last_search_ts": float(db.get_kv("last_search_ts", 0) or 0),
-        "queued": len(db.queued_found()),
-        "query_stats": db.get_kv("query_stats", {}) or {},
         "wanted": sorted(wanted),
         "settings": {k: settings.get(k) for k in SETTING_KEYS},
-        "sets": sets,
+        "sets": [{"id": s.id, "name": s.name, "name_it": s.name_it, "printed_total": s.printed_total,
+                  "cards": [{"id": c.id, "code": index.code_of[c.id], "number": c.number, "name": c.name,
+                             "rarity": c.rarity, "image": c.image} for c in s.cards]}
+                 for s in home_index.sets],
         "prices": prices,
         "completion": {"total": comp.total, "missing": comp.missing, "owned": comp.owned, "percent": comp.percent,
-                       "priced": comp.priced, "cm_priced": comp.cm_priced, "cost_min": comp.cost_min, "cost_median": comp.cost_median,
-                       "by_rarity": {k: list(v) for k, v in comp.by_rarity.items()}},
+                       "priced": comp.priced, "cm_priced": comp.cm_priced, "cost_min": comp.cost_min,
+                       "cost_median": comp.cost_median, "by_rarity": {k: list(v) for k, v in comp.by_rarity.items()}},
         "last_run": ({"started_at": last["started_at"], "listings_seen": last["listings_seen"], "matches": last["matches"],
                       "errors": last["errors"], "per_source": last.get("per_source") or {}} if last else None),
-        "found": found,
-        "watches": [{"card": cid, "label": (lambda c: c.label if c else cid)(watch.resolve_card(index, db, cid)[0]),
-                     "chat": chat_id,
-                     "code": (lambda c: watch.code_for(index, c) if c else cid)(watch.resolve_card(index, db, cid)[0]),
-                     "started": w.get("started"), "until": w.get("until"),
-                     "every": w.get("every"), "checks": w.get("checks", 0), "found": w.get("found", 0)}
-                    for cid, w in watch.list_watches(db, chat_id).items()],
+        "found": [_found_row(r) for r in sorted(mine, key=lambda r: -r["created_at"])[:max_found]],
+        "watches": watches,
         "watch_found": list(reversed(watch.found_log(db, chat_id))),
         "collections": coll.export(db, index, chat_id),
-        "values": _values(index, wanted, all_rows, db.albums_of(chat_id), cm),
-        "shopping": _shopping(index, wanted, rows, db.albums_of(chat_id), cm),
+        "values": _values(groups, wanted, shared),
+        "shopping": _shopping(groups, wanted, shared),
         "copies": db.copies(chat_id),
-        "active_sets": active,
-        "current_set": db.current_set(chat_id),
     }
+
+
+def _found_row(r: dict) -> dict:
+    return {"id": r["id"], "key": r["listing_key"], "source": r["source"], "title": r["title"], "url": r["url"],
+            "price": r.get("price") or "", "price_num": parse_price(r.get("price")), "location": r.get("location") or "",
+            "kind": r["kind"], "cards": [m["id"] for m in r["matched"]],
+            "sure": [m["id"] for m in r["matched"] if m.get("sure", True)],
+            "notified": bool(r.get("notified")), "deal": bool(r.get("deal")), "image": r.get("image") or "",
+            "ts": r["created_at"]}
 
 
 def _groups(index: CardIndex, albums: dict | None = None) -> dict[str, list]:
@@ -120,65 +117,79 @@ def _groups(index: CardIndex, albums: dict | None = None) -> dict[str, list]:
     return out
 
 
-def _values(index: CardIndex, wanted: set[str], all_rows: list[dict], albums: dict | None = None, cm: dict | None = None) -> dict:
+def _values(groups: dict[str, list], wanted: set[str], shared: Shared) -> dict:
     out = {}
-    for key, cards in _groups(index, albums).items():
-        v = pstats.collection_value(cards, wanted, all_rows, cm)
+    for key, cards in groups.items():
+        v = pstats.collection_value(cards, wanted, shared.all_rows, shared.cm)
         out[key] = {"owned": v.owned, "owned_priced": v.owned_priced, "owned_value": round(v.owned_value, 2),
                     "missing": v.missing, "missing_priced": v.missing_priced, "missing_cost": round(v.missing_cost, 2)}
     return out
 
 
-def _shopping(index: CardIndex, wanted: set[str], rows: list[dict], albums: dict | None = None, cm: dict | None = None) -> dict:
-    from . import shopping
+def _shopping(groups: dict[str, list], wanted: set[str], shared: Shared) -> dict:
+    cm = shared.cm
     out = {}
-    for key, cards in _groups(index, albums).items():
-        sl = shopping.build(cards, wanted, rows)
+    for key, cards in groups.items():
+        sl = shopping.build(cards, wanted, shared.rows)
         out[key] = {"total": round(sl.total, 2), "covered": sl.covered, "uncovered": [c.id for c in sl.uncovered],
                     "sellers": [{"label": sl.seller_label(k), "total": round(sum(p.price for p in picks), 2),
                                  "picks": [{"price": p.price, "lot": p.row.get("kind") == "lot",
-                                            "cm": round(sum(cm[c.id].ref for c in p.cards if c.id in (cm or {}) and cm[c.id].ref), 2) or None, "url": p.row["url"], "title": p.row["title"],
-                                            "image": p.row.get("image") or "", "cards": [c.id for c in p.cards], "key": p.row["listing_key"]} for p in picks]}
+                                            "cm": round(sum(cm[c.id].ref for c in p.cards if c.id in cm and cm[c.id].ref), 2) or None,
+                                            "url": p.row["url"], "title": p.row["title"], "image": p.row.get("image") or "",
+                                            "cards": [c.id for c in p.cards], "key": p.row["listing_key"]} for p in picks]}
                                 for k, picks in sl.by_seller()]}
     return out
 
 
 def _plan_info(db: Database, chat_id: str) -> dict:
-    from . import plans
-    p = plans.get(db, chat_id)
-    return {"tier": plans.tier(db, chat_id), "label": plans.describe(db, chat_id),
-            "trial_until": float(p.get("trial_until") or 0), "pro_until": float(p.get("pro_until") or 0),
-            "lifetime": bool(p.get("lifetime")), "price": plans.PRICE_STARS,
-            "onboarding": plans.onboarding(db, chat_id), "max_active": None if plans.is_full(db, chat_id) else plans.LIGHT_MAX_ACTIVE,
+    return {"tier": plans.tier(db, chat_id), "label": plans.describe(db, chat_id), "price": plans.PRICE_STARS,
+            "onboarding": plans.onboarding(db, chat_id),
+            "max_active": None if plans.is_full(db, chat_id) else plans.LIGHT_MAX_ACTIVE,
             "invoice": plans.cached_invoice(db, chat_id)}
 
 
 def build_summary(index: CardIndex, db: Database) -> dict:
-    """state.json: solo ciò che serve al ponte (timer, persone collegate), senza dati personali."""
-    from . import channel, plans
-    any_watch = [{"until": w.get("until")} for _, ws in watch.all_watches(db) for w in ws.values()]
+    """Il riepilogo per il ponte: chi può usare il bot e quando serve svegliarlo (nient'altro)."""
+    from .search import notifications_suppressed
+    now = time.time()
+    members = db.chat_ids()
+    # inseguimenti: il prossimo controllo dovuto (per la Light ogni 2 ore, non ogni 5 minuti)
+    next_watch = None
+    for chat, ws in watch.all_watches(db):
+        every_min = 0 if plans.is_full(db, chat) else plans.LIGHT_WATCH_EVERY_S
+        for w in ws.values():
+            due = float(w.get("last") or 0) + max(float(w.get("every") or 0), every_min)
+            due = min(due, float(w.get("until") or due))  # alla scadenza parte il riepilogo finale
+            next_watch = due if next_watch is None else min(next_watch, due)
+    # annunci in coda da mandare adesso: chi è in pausa o di notte, e la Light fino alle 19, aspettano
+    deliverable = sum(db.queued_count(c) for c in db.queued_chats()
+                      if c in members and plans.is_full(db, c) and not notifications_suppressed(db.settings_for(c)))
     return {
-        "generated_at": time.time(),
+        "generated_at": now,
         "owner_chat_id": db.owner_chat_id(),
-        "chat_ids": db.chat_ids(),
+        "chat_ids": members,
         "last_search_ts": float(db.get_kv("last_search_ts", 0) or 0),
-        # in coda e da mandare appena possibile: la Light aspetta il riepilogo delle 19 (non sveglia il bot ogni 5 minuti)
-        "queued": sum(len(db.queued_found(c)) for c in db.queued_chats() if plans.is_full(db, c)),
-        "watches": any_watch,
-        "settings": {k: db.get_settings().get(k) for k in ("interval_minutes", "paused", "quiet_hours")},
-        "per_user": True,
+        "interval_minutes": int(db.get_settings().get("interval_minutes", 20) or 20),
+        "next_watch": next_watch,
+        "queued": deliverable,
+        "digest_hour": plans.DIGEST_HOUR,
         "channel": {"set": bool(db.get_kv("deals_channel")), "hour": channel.post_hour(db),
                     "last": db.get_kv("deals_channel_last") or ""},
-        "waitlist": len(db.waitlist()),
     }
 
 
-def write_state(index: CardIndex, db: Database, path: str) -> None:
-    """Scrive state.json (riepilogo) e state-<chat>.json per ogni persona collegata nella stessa cartella."""
-    import os
-    folder = os.path.dirname(path) or "."
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(build_summary(index, db), f, ensure_ascii=False)
+def write_state(index: CardIndex, db: Database, folder: str, seal: bool = True) -> list[str]:
+    """Scrive il riepilogo e lo stato di ogni persona collegata in `folder` (cifrati, se `seal`). Restituisce i file."""
+    os.makedirs(folder, exist_ok=True)
+    shared = Shared(index, db)
+    files = {"state.json": build_summary(index, db)}
     for chat in (db.chat_ids() or [db.owner_chat_id() or "me"]):
-        with open(os.path.join(folder, f"state-{chat}.json"), "w", encoding="utf-8") as f:
-            json.dump(build_state(index, db, chat_id=chat), f, ensure_ascii=False)
+        files[f"state-{chat}.json"] = build_state(index, db, chat_id=chat, shared=shared)
+    out = []
+    for name, data in files.items():
+        raw = json.dumps(data, ensure_ascii=False).encode()
+        path = os.path.join(folder, name + (".enc" if seal else ""))
+        with open(path, "wb") as f:
+            f.write(vault.seal(raw) if seal else raw)
+        out.append(path)
+    return out

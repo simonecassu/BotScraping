@@ -17,7 +17,7 @@ import time
 from zoneinfo import ZoneInfo
 
 from . import config
-from .db import Database
+from .db import Database, masked
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +43,6 @@ def save(db: Database, chat: str, p: dict) -> None:
     db.set_kv(f"plan:{chat}", p)
 
 
-_save = save
 
 
 def tier(db: Database, chat: str, now: float | None = None) -> str:
@@ -70,7 +69,7 @@ def migrate(db: Database) -> None:
     owner = db.owner_chat_id()
     for chat in db.chat_ids():
         if chat != owner and not get(db, chat):
-            _save(db, chat, {"lifetime": True, "since": time.time(), "note": "dentro prima dei piani"})
+            save(db, chat, {"lifetime": True, "since": time.time(), "note": "dentro prima dei piani"})
     db.set_kv("plans_v1", True)
 
 
@@ -78,7 +77,7 @@ def start_trial(db: Database, chat: str, days: int = TRIAL_DAYS, now: float | No
     now = now or time.time()
     p = get(db, chat)
     p.update({"trial_until": now + days * 86400, "reminded": False, "ended": False})
-    _save(db, chat, p)
+    save(db, chat, p)
     return p
 
 
@@ -90,14 +89,15 @@ def set_pro(db: Database, chat: str, until: float | None = None, lifetime: bool 
         p["lifetime"] = False
         p["pro_until"] = float(until or 0)
     p["ended"] = True  # niente messaggio di fine prova dopo un abbonamento
-    _save(db, chat, p)
+    p["pro_ended"] = False
+    save(db, chat, p)
     return p
 
 
 def set_light(db: Database, chat: str) -> dict:
     p = get(db, chat)
     p.update({"lifetime": False, "pro_until": 0, "trial_until": 0, "ended": True, "reminded": True})
-    _save(db, chat, p)
+    save(db, chat, p)
     apply_light_limits(db, chat)
     return p
 
@@ -113,12 +113,13 @@ def record_payment(db: Database, chat: str, payment: dict, now: float | None = N
     until = float(payment.get("subscription_expiration_date") or 0) or max(now, float(p.get("pro_until") or 0)) + SUB_PERIOD_S
     p["pro_until"] = max(until, float(p.get("pro_until") or 0))
     p["ended"] = True
+    p["pro_ended"] = False
     pays = list(p.get("payments") or [])
     pays.append({"ts": now, "stars": int(payment.get("total_amount") or 0),
                  "charge": str(payment.get("telegram_payment_charge_id") or "")[:80],
                  "recurring": bool(payment.get("is_recurring")), "first": bool(payment.get("is_first_recurring"))})
     p["payments"] = pays[-24:]
-    _save(db, chat, p)
+    save(db, chat, p)
     return p
 
 
@@ -196,7 +197,9 @@ def apply_light_limits(db: Database, chat: str) -> None:
     w = db.get_kv(f"watches:{chat}", {}) or {}
     if not isinstance(w, dict) or not w:
         return
-    keep = sorted(w.items(), key=lambda kv: float(kv[1].get("started") or 0))[:LIGHT_MAX_WATCHES]
+    now = time.time()
+    alive = [kv for kv in w.items() if float(kv[1].get("until") or 0) > now]  # quelli già finiti non contano
+    keep = sorted(alive, key=lambda kv: float(kv[1].get("started") or 0))[:LIGHT_MAX_WATCHES]
     for _, v in keep:
         v["every"] = max(float(v.get("every") or 0), LIGHT_WATCH_EVERY_S)
     db.set_kv(f"watches:{chat}", dict(keep))
@@ -287,12 +290,25 @@ def reminder_message(db: Database, client, chat: str) -> tuple[str, list]:
 
 
 def check_trials(db: Database, client, now: float | None = None) -> list[str]:
-    """A ogni giro: promemoria il giorno prima della fine, messaggio di fine prova, passaggio a Light."""
+    """A ogni giro: promemoria il giorno prima della fine della prova, messaggio di fine prova, passaggio a Light;
+    anche quando un abbonamento scade senza rinnovo."""
     now = now or time.time()
     out = []
     for chat in db.chat_ids():
         p = get(db, chat)
         if not p or p.get("lifetime") or tier(db, chat, now) == "owner":
+            continue
+        pro_until = float(p.get("pro_until") or 0)
+        if pro_until and pro_until <= now and not p.get("pro_ended") and tier(db, chat, now) == "light":
+            apply_light_limits(db, chat)
+            link = invoice_link(db, client, chat)
+            client.send(chat, "⏰ <b>Il tuo abbonamento è scaduto</b>: sei tornato alla versione Light (un riepilogo al giorno, "
+                              "1 inseguimento, 3 collezioni con notifiche). Quando vuoi, riattivalo da qui.",
+                        [[(f"⭐ Abbonati · {PRICE_STARS} Stars/mese", link or "/abbonati")]])
+            p = get(db, chat)
+            p["pro_ended"] = True
+            save(db, chat, p)
+            out.append(f"{masked(chat)}: abbonamento scaduto, passato a Light")
             continue
         trial_until = float(p.get("trial_until") or 0)
         if not trial_until:
@@ -302,14 +318,14 @@ def check_trials(db: Database, client, now: float | None = None) -> list[str]:
             client.send(chat, text, buttons)
             p = get(db, chat)
             p["reminded"] = True
-            _save(db, chat, p)
-            out.append(f"{chat}: promemoria fine prova")
+            save(db, chat, p)
+            out.append(f"{masked(chat)}: promemoria fine prova")
         elif tier(db, chat, now) == "light" and not p.get("ended"):
             apply_light_limits(db, chat)
             text, buttons = end_of_trial_message(db, client, chat)
             client.send(chat, text, buttons)
             p = get(db, chat)
             p["ended"] = True
-            _save(db, chat, p)
-            out.append(f"{chat}: fine prova, passato a Light")
+            save(db, chat, p)
+            out.append(f"{masked(chat)}: fine prova, passato a Light")
     return out

@@ -85,7 +85,8 @@ def test_run_watches_notifies_only_new_and_expires(index, monkeypatch):
 
 def test_run_watches_postponed_when_paused(index):
     db = _db()
-    db.save_settings({"sources": ["fake"], "paused": True})
+    db.save_settings({"sources": ["fake"]})
+    db.save_user_prefs("me", {"paused": True})  # la pausa è personale
     watch.add_watch(db, "me55-131", 3600, 300)
     scr = FakeScraper([])
     assert watch.run_watches(index, db, FakeNotifier(), {"fake": scr}) == ["rimandate (pausa/notte)"]
@@ -105,7 +106,6 @@ def test_found_log_and_export(index):
 
 
 def test_chase_card_of_other_collection(index, monkeypatch):
-    from pokebot import collections as coll
     from pokebot.telegram_bot import CommandHandler
     from tests.test_collections import _fake_net
     _fake_net(monkeypatch)

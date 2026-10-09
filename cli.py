@@ -7,6 +7,8 @@
   python cli.py analizza "titolo annuncio" ["descrizione"]   mostra come il bot classifica un testo
   python cli.py actions          un passaggio completo per GitHub Actions / cron: legge i comandi
                                  Telegram arrivati, esegue la ricerca, compatta il database
+  python cli.py export-json DIR  scrive lo stato per la Mini App e il ponte (cifrato; --chiaro per guardarlo)
+  python cli.py seal SRC DST     cifra un file per il branch pubblico bot-state (unseal: il contrario)
 """
 from __future__ import annotations
 
@@ -18,7 +20,6 @@ import sys
 import time
 
 from pokebot import config
-from pokebot.cards import load_sets
 from pokebot.db import Database
 from pokebot.matcher import Matcher
 from pokebot.notifier import TelegramNotifier
@@ -38,8 +39,13 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("titolo")
     a.add_argument("descrizione", nargs="?", default="")
     a.add_argument("--asta", action="store_true")
-    ej = sub.add_parser("export-json", help="scrive il riepilogo JSON per la Mini App")
-    ej.add_argument("path")
+    ej = sub.add_parser("export-json", help="scrive lo stato per la Mini App e il ponte nella cartella indicata")
+    ej.add_argument("folder")
+    ej.add_argument("--chiaro", action="store_true", help="non cifrare (solo per guardarlo in locale)")
+    for name, what in (("seal", "cifra"), ("unseal", "decifra")):
+        sp = sub.add_parser(name, help=f"{what} un file (stato del branch bot-state)")
+        sp.add_argument("src")
+        sp.add_argument("dst")
     sub.add_parser("db-hash", help="impronta del contenuto del database (per salvare lo stato solo se cambiato)")
     ac = sub.add_parser("actions", help="comandi Telegram + ricerca + pulizia (per GitHub Actions / cron)")
     ac.add_argument("--force", action="store_true", help="cerca anche se l'intervallo non è ancora passato")
@@ -47,6 +53,13 @@ def main(argv: list[str] | None = None) -> int:
 
     logging.basicConfig(level=logging.DEBUG if getattr(args, "verbose", False) else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if args.cmd in ("seal", "unseal"):
+        from pokebot import vault
+        with open(args.src, "rb") as f:
+            data = f.read()
+        with open(args.dst, "wb") as f:
+            f.write(vault.seal(data) if args.cmd == "seal" else vault.unseal(data))
+        return 0
     if args.cmd == "db-hash":
         import hashlib
         import sqlite3
@@ -75,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         commands.ensure_menu()  # menu comandi e presentazione del bot, solo quando cambiano
         from pokebot import plans
         plans.migrate(db)  # chi era dentro prima dei piani tiene tutto
+        db.migrate_personal_settings()  # le vecchie impostazioni "di tutti" diventano del proprietario
         # ogni persona collegata ha i suoi album di casa (nati "tutte mancanti"): devono esistere nel database salvato
         for chat in db.chat_ids():
             for sid in config.HOME_SET_IDS:
@@ -85,16 +99,15 @@ def main(argv: list[str] | None = None) -> int:
         if n_queue:
             print(f"Comandi dalla coda: {n_queue}")
         payload = _dispatch_payload()
-        if payload is not None:  # ponte senza coda (fallback): il comando viaggia nel payload
-            want_search = commands.handle_payload(payload) or want_search
-        elif commands.enabled and not n_queue:
-            want_search = commands.poll_once(timeout=0)
-        else:
+        if not commands.enabled:
             print("TELEGRAM_BOT_TOKEN mancante: nessun comando letto, nessuna notifica possibile.")
+        elif payload is not None:  # ponte senza coda (fallback): il comando viaggia nel payload
+            want_search = commands.handle_payload(payload) or want_search
+        elif not n_queue:
+            want_search = commands.poll_once(timeout=0)
         from pokebot import cardmarket
         try:  # prezzi Cardmarket (TCGdex): ogni carta una volta al giorno, prima le mancanti
-            all_wanted = set().union(*(db.wanted_for(c) for c in db.chat_ids())) if db.chat_ids() else set()
-            line = cardmarket.refresh(db, index, wanted_first=all_wanted)
+            line = cardmarket.refresh(db, index, wanted_first=db.wanted_of_members())
             if line:
                 print(f"cardmarket · {line}")
         except Exception as exc:  # noqa: BLE001 - i prezzi non devono mai fermare il bot
@@ -108,12 +121,18 @@ def main(argv: list[str] | None = None) -> int:
             except Exception as exc:  # noqa: BLE001
                 print(f"getMe: {exc}")
         if commands.enabled:
-            for line in plans.check_trials(db, commands.client):  # promemoria e fine della prova
-                print(f"piani · {line}")
             from pokebot import channel
-            line = channel.post_daily(db, index, commands.client)  # canale degli affari: una volta al giorno
-            if line:
-                print(f"canale · {line}")
+            try:
+                for line in plans.check_trials(db, commands.client):  # promemoria e fine della prova
+                    print(f"piani · {line}")
+            except Exception as exc:  # noqa: BLE001 - un errore qui non deve fermare la ricerca
+                print(f"piani · errore: {exc}")
+            try:
+                line = channel.post_daily(db, index, commands.client)  # canale degli affari: una volta al giorno
+                if line:
+                    print(f"canale · {line}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"canale · errore: {exc}")
         if not (args.force or want_search or _search_due(db)):
             from pokebot.search import flush_all_queues
             flush_all_queues(db, index.by_id)  # chi ha finito pausa o notte riceve quello che si è accumulato
@@ -129,15 +148,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "export-json":
         from pokebot.webapp_export import write_state
-        write_state(index, db, args.path)
-        print(f"Stato scritto in {args.path}")
+        files = write_state(index, db, args.folder, seal=not args.chiaro)
+        print(f"Stato scritto in {args.folder} ({len(files)} file)")
         return 0
     if args.cmd == "test-telegram":
         ok = TelegramNotifier(chat_ids=db.chat_ids()[:1] or None).test_message()
         print("Inviato." if ok else "Invio fallito: controlla TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID.")
         return 0 if ok else 1
     if args.cmd == "mancanti":
-        wanted = db.wanted_ids()
+        wanted = db.wanted_of_members()
         for c in index.all_cards():
             if c.id in wanted:
                 print(f"{c.label:40s} {c.rarity}")
@@ -146,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "analizza":
         settings = db.get_settings()
         m = Matcher(index)
-        res = m.analyze(args.titolo, args.descrizione, db.wanted_ids(), float(settings["lot_min_ratio"]),
+        res = m.analyze(args.titolo, args.descrizione, db.wanted_of_members(), float(settings["lot_min_ratio"]),
                         bool(settings["notify_unverifiable_lots"]), args.asta)
         print(f"tipo: {res.kind}  notifica: {res.notify}  motivo: {res.reason}")
         for r in res.refs:

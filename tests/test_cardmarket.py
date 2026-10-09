@@ -128,3 +128,29 @@ def test_fair_only_on_request():
     assert cmk.verdict(12.0, p) == (None, 1.2)
     assert cmk.verdict(12.0, p, fair=True)[0] == "fair"
     assert cmk.verdict(14.0, p, fair=True)[0] is None
+
+
+def test_temporary_tcgdex_error_keeps_prices(index):
+    db = _db()
+    with db.connect() as c:
+        c.execute("INSERT INTO cm_prices(card_id, trend, low, fetched) VALUES ('me55-131', 20, 10, 0)")
+    db.set_kv("tcgdex_setmap", {"ts": time.time(), "map": {"me55": "30th"}, "tried": ["me55c"]})
+
+    def failing(url):
+        raise RuntimeError("503")
+    cmk.refresh(db, index, get=failing)
+    assert cmk.get(db, "me55-131").trend == 20  # niente prezzi cancellati da un errore passeggero
+
+
+def test_unmapped_sets_are_not_refetched_every_run(index):
+    db = _db()
+    calls = []
+
+    def get(url):
+        calls.append(url)
+        if url.endswith("/sets"):
+            return [{"id": "30th", "name": "30th Celebration"}]
+        return {"cards": []}
+    cmk.set_map(db, index.sets, get)
+    cmk.set_map(db, index.sets, get)
+    assert sum(u.endswith("/sets") for u in calls) == 1

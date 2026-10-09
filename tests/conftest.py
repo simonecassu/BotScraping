@@ -1,6 +1,5 @@
 import pytest
 
-from pokebot import config
 from pokebot.cards import load_sets
 from pokebot.matcher import Matcher
 

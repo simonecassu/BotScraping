@@ -88,7 +88,7 @@ def get(db: Database, card_id: str) -> CMPrice | None:
 
 def all_prices(db: Database) -> dict[str, CMPrice]:
     with db.connect() as c:
-        rows = c.execute("SELECT * FROM cm_prices WHERE trend IS NOT NULL OR low IS NOT NULL OR avg30 IS NOT NULL").fetchall()
+        rows = c.execute("SELECT * FROM cm_prices WHERE trend IS NOT NULL OR avg30 IS NOT NULL OR avg7 IS NOT NULL").fetchall()
     return {r["card_id"]: _row(r) for r in rows}
 
 
@@ -116,8 +116,9 @@ def set_map(db: Database, sets, get=_http_get) -> dict[str, str]:
     """Collezione nostra → collezione TCGdex (per nome e numero di carte; ricalcolata ogni settimana)."""
     cache = db.get_kv("tcgdex_setmap") or {}
     known = cache.get("map") or {}
-    missing = [s for s in sets if s.id not in known]
-    if not missing and time.time() - float(cache.get("ts") or 0) < MAP_AGE_S:
+    tried = set(cache.get("tried") or [])  # già cercate senza trovarle: si riprova solo con la mappa scaduta
+    fresh = time.time() - float(cache.get("ts") or 0) < MAP_AGE_S
+    if fresh and all(s.id in known or s.id in tried for s in sets):
         return known
     try:
         listing = get(f"{API}/sets")
@@ -139,7 +140,10 @@ def set_map(db: Database, sets, get=_http_get) -> dict[str, str]:
             cands.sort(key=lambda x: abs(int((x.get("cardCount") or {}).get("total") or 0) - int(total or 0)))
         if cands:
             out[s.id] = cands[0]["id"]
-    db.set_kv("tcgdex_setmap", {"ts": time.time(), "map": out})
+        elif s.id in by_id:  # stesso id su TCGdex (nomi diversi, es. "Base" / "Base Set")
+            out[s.id] = s.id
+    db.set_kv("tcgdex_setmap", {"ts": cache.get("ts") if fresh else time.time(), "map": out,
+                                "tried": sorted({s.id for s in sets} - set(out))})
     return out
 
 
@@ -194,10 +198,6 @@ def refresh(db: Database, index, budget: int = 250, wanted_first: set[str] | Non
             now: float | None = None) -> str:
     """Aggiorna i prezzi delle carte più vecchie di 20 ore (prima le mancanti), al massimo `budget` richieste."""
     now = now or time.time()
-    if not db.get_kv("cm_match_v2"):  # abbinamento per nome: rifà i prezzi abbinati con il vecchio metodo
-        with db.connect() as c:
-            c.execute("DELETE FROM cm_prices")
-        db.set_kv("cm_match_v2", True)
     sets = list(index.sets)
     smap = set_map(db, sets, get)
     with db.connect() as c:
@@ -215,10 +215,11 @@ def refresh(db: Database, index, budget: int = 250, wanted_first: set[str] | Non
         if tset not in cmaps:
             try:
                 cmaps[tset] = card_map(db, tset, get)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 - si riprova al prossimo giro, senza toccare i prezzi che ci sono
                 log.warning("TCGdex collezione %s: %s", tset, exc)
-                cmaps[tset] = []
-        jobs.append((card, match_card(card, cmaps[tset])))
+                cmaps[tset] = None
+        if cmaps[tset] is not None:
+            jobs.append((card, match_card(card, cmaps[tset])))
 
     def one(job):
         card, tid = job

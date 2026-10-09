@@ -19,7 +19,7 @@ from . import cardmarket, config, plans, watch
 from . import collections as coll
 from . import stats as pstats
 from .cards import Card, CardIndex, normalize
-from .db import Database
+from .db import Database, masked
 
 log = logging.getLogger(__name__)
 
@@ -203,13 +203,16 @@ class TelegramClient:
             ok = ok and resp.status_code == 200 and bool(resp.json().get("ok"))
         return ok
 
-    def send(self, chat_id: str | int, text: str, buttons: list[list[tuple[str, str]]] | None = None) -> None:
+    def send(self, chat_id: str | int, text: str, buttons: list[list[tuple[str, str]]] | None = None) -> bool:
+        """Manda il testo (a pezzi se lungo); False se Telegram ne rifiuta uno (es. il bot non è più nel canale)."""
         chunks = _chunks(text)
+        ok = True
         for i, chunk in enumerate(chunks):
             payload = {"chat_id": chat_id, "text": chunk, "parse_mode": "HTML", "disable_web_page_preview": True}
             if buttons and i == len(chunks) - 1:
                 payload["reply_markup"] = {"inline_keyboard": [[_button(lbl, data) for lbl, data in row] for row in buttons]}
-            requests.post(f"{self.base}/sendMessage", json=payload, timeout=config.HTTP_TIMEOUT)
+            ok = requests.post(f"{self.base}/sendMessage", json=payload, timeout=config.HTTP_TIMEOUT).ok and ok
+        return ok
 
     def send_document(self, chat_id: str | int, filename: str, content: bytes, caption: str = "") -> None:
         requests.post(f"{self.base}/sendDocument", data={"chat_id": chat_id, "caption": caption[:1024]},
@@ -975,9 +978,11 @@ class CommandHandler:
         if a.lower() in ("ora", "adesso", "test"):
             if not cur:
                 return Reply("Prima imposta il canale con <code>/canale @nomecanale</code>.")
-            deals = ch.pick_deals(self.db, self.index)
+            deals = ch.pick_deals(self.db, self.index, exclude=ch.posted(self.db))
             if not deals:
-                return Reply("Negli ultimi 3 giorni nessun annuncio sotto il valore Cardmarket: niente da pubblicare per ora.")
+                return Reply("Negli ultimi 3 giorni nessun annuncio nuovo con un prezzo Cardmarket da confrontare: "
+                             "niente da pubblicare per ora.")
+            ch.remember(self.db, deals)
             text, buttons = ch.format_post(deals, self.db.get_kv("bot_username") or "")
             return Reply(f"📣 Pubblico sul canale {len(deals)} occasioni.", sends=[(cur, text, buttons)])
         if a.isdigit() and 0 <= int(a) <= 23:
@@ -1794,7 +1799,7 @@ class TelegramCommands:
         parts = text.strip().split()
         if not allowed:
             self.db.set_kv("telegram_chat_id", chat_id)  # il primo che scrive /start diventa il proprietario
-            log.info("Chat id Telegram salvato: %s", chat_id)
+            log.info("Proprietario collegato: %s", masked(chat_id))
             return True
         if len(parts) < 2:
             return False
@@ -1807,6 +1812,6 @@ class TelegramCommands:
             plans.start_trial(self.db, chat_id)
             plans.set_onboarding(self.db, chat_id, True)
             self.db.set_kv("invite_code", None)  # monouso
-            log.info("Nuova persona collegata con invito: %s", chat_id)
+            log.info("Nuova persona collegata con invito: %s", masked(chat_id))
             return True
         return False

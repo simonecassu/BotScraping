@@ -1,4 +1,4 @@
-"""Statistiche prezzi dallo storico degli annunci trovati (tabella found)."""
+"""Statistiche prezzi: annunci visti dal bot (tabelle found e prices) e, dove c'è, il valore Cardmarket."""
 from __future__ import annotations
 
 import statistics
@@ -38,19 +38,32 @@ def _stats(points: list[tuple[float, float]]) -> PriceStats:
                       last_seen=max(ts for _, ts in points))
 
 
-def price_points(rows: list[dict], card_id: str) -> dict[str, list[tuple[float, float]]]:
-    """Per fonte: lista di (prezzo, timestamp) delle carte singole riconosciute con certezza."""
-    out: dict[str, list[tuple[float, float]]] = {}
+class PriceRows(list):
+    """Righe di annunci (found + punti prezzo) con l'indice per carta calcolato una volta sola: le statistiche
+    di centinaia di carte costano una passata sulle righe invece di una per carta."""
+    _by_card: dict | None = None
+
+
+def _build_index(rows: list[dict]) -> dict[str, dict[str, list[tuple[float, float]]]]:
+    idx: dict[str, dict[str, list[tuple[float, float]]]] = {}
     for r in rows:
         if r.get("kind") == "lot":
-            continue
-        if not any(m.get("id") == card_id and m.get("sure", True) for m in r.get("matched", [])):
             continue
         price = parse_price(r.get("price"))
         if price is None or price <= 0:
             continue
-        out.setdefault(r["source"], []).append((price, float(r["created_at"])))
-    return out
+        for cid in {m.get("id") for m in r.get("matched", []) if m.get("sure", True)}:
+            idx.setdefault(cid, {}).setdefault(r["source"], []).append((price, float(r["created_at"])))
+    return idx
+
+
+def price_points(rows: list[dict], card_id: str) -> dict[str, list[tuple[float, float]]]:
+    """Per fonte: lista di (prezzo, timestamp) delle carte singole riconosciute con certezza."""
+    if isinstance(rows, PriceRows):
+        if rows._by_card is None:
+            rows._by_card = _build_index(rows)
+        return rows._by_card.get(card_id, {})
+    return _build_index(rows).get(card_id, {})
 
 
 def card_prices(rows: list[dict], card: Card) -> CardPrices:
@@ -87,9 +100,9 @@ def median_for_deal(rows: list[dict], card_id: str, exclude_keys: set[str] | Non
 class Completion:
     total: int
     missing: int
-    priced: int            # carte mancanti con almeno un prezzo visto
-    cost_min: float        # somma dei minimi visti
-    cost_median: float     # somma delle mediane viste
+    priced: int            # carte mancanti con un prezzo (Cardmarket o, in mancanza, annunci visti)
+    cost_min: float        # somma dei minimi (Cardmarket, altrimenti annunci)
+    cost_median: float     # somma dei valori di mercato (trend Cardmarket, altrimenti mediana degli annunci)
     unpriced: list[Card] = field(default_factory=list)
     cm_priced: int = 0     # di cui con prezzo Cardmarket (le altre: annunci visti)
     by_rarity: dict[str, tuple[int, int]] = field(default_factory=dict)  # rarità -> (mancanti, totale)
@@ -145,10 +158,10 @@ def completion(index: CardIndex, wanted_ids: set[str], rows: list[dict], cm: dic
 class Value:
     owned: int = 0
     owned_priced: int = 0
-    owned_value: float = 0.0   # somma delle mediane viste per le carte possedute
+    owned_value: float = 0.0   # valore delle possedute (trend Cardmarket, altrimenti mediana degli annunci)
     missing: int = 0
     missing_priced: int = 0
-    missing_cost: float = 0.0  # somma dei minimi visti per le mancanti
+    missing_cost: float = 0.0  # costo delle mancanti (trend Cardmarket, altrimenti minimo degli annunci)
 
 
 def collection_value(cards: list[Card], wanted_ids: set[str], rows: list[dict], cm: dict | None = None) -> Value:

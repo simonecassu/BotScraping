@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from . import config
 from .cards import CardIndex
-from .db import Database
+from .db import Database, masked
 
 log = logging.getLogger(__name__)
 
@@ -209,7 +209,7 @@ def _run_for(index: CardIndex, db: Database, chat: str, watches: dict, notifier,
 
     settings = db.settings_for(chat)
     if notifications_suppressed(settings):
-        log.info("Inseguimenti di %s rimandati: notifiche in pausa / ore notturne", chat)
+        log.info("Inseguimenti di %s rimandati: notifiche in pausa / ore notturne", masked(chat))
         return ["rimandate (pausa/notte)"]
     now = time.time()
     log_lines: list[str] = []

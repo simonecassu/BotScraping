@@ -1,6 +1,7 @@
 """Scarica (o aggiorna) la lista carte di un set dal dataset open pokemon-tcg-data.
 
 Uso:  python scripts/import_set.py me55 "30th Celebration" --name-it "Celebrazione del 30° anniversario" --printed-total 128
+Se il file esiste già, le parti scritte a mano (queries, card_suffixes, card_query, contesto, nome italiano) restano.
 """
 from __future__ import annotations
 
@@ -44,6 +45,12 @@ def main() -> None:
         ],
     }
     path = Path(a.out) / f"{a.set_id}.json"
+    if path.exists():  # aggiornando, restano le parti scritte a mano (ricerche, parole di contesto, nome italiano)
+        old = json.loads(path.read_text(encoding="utf-8"))
+        given = {"name_it": a.name_it, "context_keywords": a.context, "printed_total": a.printed_total}
+        for k, v in old.items():
+            if k not in out or (k in given and not given[k]):
+                out[k] = v
     path.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"Scritte {len(cards)} carte in {path}")
 

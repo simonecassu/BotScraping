@@ -18,7 +18,7 @@ from . import plans
 from . import stats as pstats
 
 from .cards import CardIndex, normalize
-from .db import Database
+from .db import Database, masked
 from .matcher import Matcher, MatchResult
 from .notifier import TelegramNotifier
 from .scrapers import SCRAPERS, Listing, ScraperError
@@ -101,7 +101,7 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
     # si cercano solo le collezioni attive: indice ridotto a quelle, mancanti solo le loro
     active = set(db.active_sets())
     index = CardIndex([s for s in index.sets if s.id in active], index.aliases)
-    wanted = {cid for cid in db.wanted_ids() if cid in index.by_id}
+    wanted = {cid for cid in db.wanted_of_members() if cid in index.by_id}
     report.wanted_count = len(wanted)
     run_id = db.start_run()
     if not wanted:
@@ -125,6 +125,7 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
     queries = build_queries(index, wanted, settings, db)
     report.queries = len(queries)
     seen_this_run: set[str] = set()
+    still_online: list[str] = []
     pending: list[tuple[Listing, "MatchResult"]] = []  # match da notificare a fine ciclo (raggruppati se tanti)
 
     generic = {q.strip().lower() for q in (settings.get("generic_queries") or [q for s_ in index.sets for q in s_.queries]) if q.strip()}
@@ -139,7 +140,11 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
             new_before, match_before = report.new_listings, report.matches
             for lst in listings:
                 report.listings += 1
-                if lst.key in seen_this_run or db.is_seen(lst.key):
+                if lst.key in seen_this_run:
+                    continue
+                if db.is_seen(lst.key):
+                    still_online.append(lst.key)
+                    seen_this_run.add(lst.key)
                     continue
                 seen_this_run.add(lst.key)
                 report.new_listings += 1
@@ -150,8 +155,10 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
                 st["matches"] += report.matches - match_before
         if error and report.per_source.get(name):
             report.errors[name] = "parziale: " + error  # qualche query è riuscita: errore non bloccante
-    if qstats and not dry_run:
-        record_query_stats(db, qstats)
+    if not dry_run:
+        db.touch_seen(still_online)
+        if qstats:
+            record_query_stats(db, qstats)
 
     _notify_pending(pending, db, report, dry_run, notifier=notifier, settings=settings)
     report.finished_at = time.time()
@@ -300,7 +307,7 @@ def flush_queued(db: Database, notifier: TelegramNotifier, settings: dict, index
                                     images=bool(settings.get("images", True)))
     for row_id, sent in zip(ids, outcomes):
         db.mark_sent([row_id], sent, chat_id)
-    log.info("Coda inviata a %s: %d annunci", chat_id or "tutti", len(pairs))
+    log.info("Coda inviata a %s: %d annunci", masked(chat_id) if chat_id else "tutti", len(pairs))
     return len(pairs)
 
 
@@ -369,10 +376,10 @@ def _notify_pending(pending: list, db: Database, report: RunReport, dry_run: boo
         if light or notifications_suppressed(st):  # Light: tutto nel riepilogo delle 19
             db.enqueue(chat, [found_ids[lst.key] for lst, _ in pending])
             report.queued += len(pending)
-            log.info("In coda per %s (%s): %d annunci", chat or "destinatario", "Light" if light else "pausa/notte", len(pending))
+            log.info("In coda per %s (%s): %d annunci", masked(chat), "Light" if light else "pausa/notte", len(pending))
             continue
         delivered, deals = _deliver(pending, ntf, st, history, dry_run, report, pending_keys, cm)
-        log.info("Consegna a %s: %d annunci, %d inviati", chat or "destinatario", len(pending), len(delivered))
+        log.info("Consegna a %s: %d annunci, %d inviati", masked(chat), len(pending), len(delivered))
         sent_any |= delivered
         deal_keys |= deals
     db.mark_notified([found_ids[k] for k in sent_any])

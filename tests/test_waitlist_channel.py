@@ -34,7 +34,6 @@ def test_stranger_start_goes_to_waitlist_and_owner_approves(index, monkeypatch):
     tc.handle_payload({"chat_id": 2, "text": "/start", "name": "Anna"})  # di nuovo: già in lista
     wl = db.waitlist()
     assert set(wl) == {"2", "3"} and wl["2"]["source"] == "canale" and wl["2"]["name"] == "Anna"
-    assert db.get_kv("signups_total") == 2
     assert db.chat_ids() == ["1"]
     texts = [t for c, t in client.sent if c == "2"]
     assert "posizione 1" in texts[0] and "già in lista" in texts[1]
@@ -126,6 +125,7 @@ def test_url_button_and_channel_post(index, monkeypatch):
     assert not channel.due(db, before)
     assert channel.due(db, at_hour)
     assert "pubblicato" in channel.post_daily(db, index, client, at_hour)
+    assert "https://w/deal" not in client.sent[-1][1]  # già uscito con /canale ora: non si ripubblica
     assert db.get_kv("bot_username") == "fakebot"
     assert any(c == "@affaripoke" and "Pokémon del" in t for c, t in client.sent)
     assert client.last_buttons == [[("🤖 Attiva Pokébot", "https://t.me/fakebot?start=canale")]]

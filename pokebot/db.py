@@ -96,6 +96,12 @@ CREATE TABLE IF NOT EXISTS card_state (
 """
 
 
+def masked(chat_id) -> str:
+    """Chat id accorciato per i log (i log di GitHub Actions di un repository pubblico li vede chiunque)."""
+    s = str(chat_id or "")
+    return "…" + s[-3:] if s else "?"
+
+
 class Database:
     def __init__(self, path: Path | str | None = None):
         self.path = Path(path or config.DB_PATH)
@@ -166,11 +172,6 @@ class Database:
         with self.connect() as c:
             return [r["chat_id"] for r in c.execute("SELECT chat_id FROM album_members WHERE album_id = ? ORDER BY rowid", (album_id,))]
 
-    def all_albums(self) -> list[tuple[str, str]]:
-        """[(album_id, set_id)] di tutti."""
-        with self.connect() as c:
-            return [(r["id"], r["set_id"]) for r in c.execute("SELECT id, set_id FROM albums")]
-
     def ensure_album(self, chat_id: str, set_id: str) -> tuple[str, bool]:
         """L'album della persona per quella collezione; lo crea se manca. Restituisce (album_id, creato_adesso)."""
         existing = self.albums_of(chat_id).get(set_id)
@@ -207,6 +208,8 @@ class Database:
             return
         own = f"{chat_id}:{set_id}"
         with self.connect() as c:
+            if own == album_id or c.execute("SELECT 1 FROM albums WHERE id = ?", (own,)).fetchone():
+                own = f"{chat_id}:{set_id}:{int(time.time() * 1000)}"  # mai riusare (e svuotare) l'album appena lasciato
             c.execute("DELETE FROM album_members WHERE album_id = ? AND chat_id = ?", (album_id, chat_id))
             c.execute("INSERT OR IGNORE INTO albums(id, set_id, created) VALUES (?, ?, ?)", (own, set_id, time.time()))
             c.execute("INSERT OR IGNORE INTO album_members(album_id, chat_id) VALUES (?, ?)", (own, chat_id))
@@ -230,6 +233,11 @@ class Database:
 
     def wanted_for(self, chat_id: str) -> set[str]:
         return self.wanted_ids(list(self.albums_of(chat_id).values()))
+
+    def wanted_of_members(self) -> set[str]:
+        """Mancanti di chi è collegato (non degli album di chi è uscito o è stato espulso): ciò che la ricerca cerca."""
+        chats = self.chat_ids()
+        return set().union(*(self.wanted_for(c) for c in chats)) if chats else self.wanted_ids()
 
     def set_wanted(self, card_id: str, wanted: bool, album_id: str | None = None) -> None:
         self.set_wanted_bulk([card_id], wanted, album_id)
@@ -317,10 +325,25 @@ class Database:
         self.set_kv(f"prefs:{chat_id}", prefs)
 
     def settings_for(self, chat_id: str) -> dict[str, Any]:
-        """Impostazioni condivise più le preferenze personali di quella chat."""
+        """Impostazioni condivise più quelle personali di quella chat (valori predefiniti + le sue preferenze):
+        quelle personali di qualcun altro rimaste nelle impostazioni condivise non contano."""
         out = self.get_settings()
+        out.update({k: config.DEFAULT_SETTINGS[k] for k in config.PERSONAL_SETTINGS if k in config.DEFAULT_SETTINGS})
         out.update({k: v for k, v in self.user_prefs(chat_id).items() if k in config.PERSONAL_SETTINGS})
         return out
+
+    def migrate_personal_settings(self) -> None:
+        """Una volta: le impostazioni personali salvate quando il bot era di una persona sola diventano del proprietario."""
+        owner = self.owner_chat_id()
+        if not owner or self.get_kv("personal_settings_v1"):
+            return
+        legacy = {k: v for k, v in self.get_settings().items() if k in config.PERSONAL_SETTINGS
+                  and v != config.DEFAULT_SETTINGS.get(k)}
+        mine = self.user_prefs(owner)
+        self.save_user_prefs(owner, {k: v for k, v in legacy.items() if k not in mine})
+        with self.connect() as c:
+            c.executemany("DELETE FROM settings WHERE key = ?", [(k,) for k in config.PERSONAL_SETTINGS])
+        self.set_kv("personal_settings_v1", True)
 
     # ---- valori interni (chat id Telegram, offset aggiornamenti...) --------
     def get_kv(self, key: str, default: Any = None) -> Any:
@@ -349,10 +372,6 @@ class Database:
                 for sid in self.active_sets(chat or "me"):
                     if sid not in out:
                         out.append(sid)
-            legacy = self.get_kv("active_sets")
-            for sid in (legacy or []):
-                if str(sid) not in out:
-                    out.append(str(sid))
             return out
         v = self.get_kv(f"active_sets:{chat_id}")
         if v is None:
@@ -420,7 +439,6 @@ class Database:
             return False
         wl[chat_id] = {"name": name[:40], "ts": time.time(), "source": source[:20]}
         self.set_kv("waitlist", wl)
-        self.set_kv("signups_total", int(self.get_kv("signups_total", 0) or 0) + 1)
         return True
 
     def ban(self, chat_id: str) -> None:
@@ -445,11 +463,13 @@ class Database:
             self.set_kv("waitlist", wl)
         return entry
 
-    def prune(self, seen_days: int = 45, keep_found: int = 2000, keep_runs: int = 50) -> None:
-        """Mantiene il database piccolo (utile quando viene salvato su GitHub a ogni esecuzione)."""
+    def prune(self, seen_days: int = 45, found_days: int = 30, keep_found: int = 10000, keep_runs: int = 50) -> None:
+        """Mantiene il database piccolo (viene salvato su GitHub a ogni esecuzione). Gli annunci ancora in coda
+        (pausa, notte, riepilogo della Light) non si toccano."""
         with self.connect() as c:
             c.execute("DELETE FROM seen WHERE first_seen < ?", (time.time() - seen_days * 86400,))
-            c.execute("DELETE FROM found WHERE id NOT IN (SELECT id FROM found ORDER BY created_at DESC LIMIT ?)", (keep_found,))
+            c.execute("DELETE FROM found WHERE id NOT IN (SELECT found_id FROM queue) AND (created_at < ? OR id NOT IN "
+                      "(SELECT id FROM found ORDER BY created_at DESC LIMIT ?))", (time.time() - found_days * 86400, keep_found))
             c.execute("DELETE FROM runs WHERE id NOT IN (SELECT id FROM runs ORDER BY started_at DESC LIMIT ?)", (keep_runs,))
             c.execute("DELETE FROM prices WHERE ts < ?", (time.time() - 120 * 86400,))
             c.execute("DELETE FROM queue WHERE found_id NOT IN (SELECT id FROM found)")
@@ -464,6 +484,13 @@ class Database:
     def is_seen(self, listing_key: str) -> bool:
         with self.connect() as c:
             return c.execute("SELECT 1 FROM seen WHERE listing_key = ?", (listing_key,)).fetchone() is not None
+
+    def touch_seen(self, keys: list[str]) -> None:
+        """Annunci ancora online: si sposta in avanti la data (first_seen fa da "ultima volta visto"), così la pulizia
+        dopo 45 giorni non li fa tornare "nuovi" finché restano in vendita."""
+        if keys:
+            with self.connect() as c:
+                c.executemany("UPDATE seen SET first_seen = ? WHERE listing_key = ?", [(time.time(), k) for k in keys])
 
     def mark_seen(self, listing_key: str, notified: bool = False) -> None:
         with self.connect() as c:
@@ -539,6 +566,10 @@ class Database:
     def queued_chats(self) -> list[str]:
         with self.connect() as c:
             return [r["chat_id"] for r in c.execute("SELECT DISTINCT chat_id FROM queue")]
+
+    def queued_count(self, chat_id: str) -> int:
+        with self.connect() as c:
+            return c.execute("SELECT COUNT(*) FROM queue WHERE chat_id = ?", (chat_id,)).fetchone()[0]
 
     def mark_sent(self, ids: list[int], sent: bool, chat_id: str | None = None) -> None:
         """Toglie dalla coda (di una persona o di tutte) e segna come inviato se lo è stato."""

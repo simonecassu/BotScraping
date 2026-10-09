@@ -1,5 +1,5 @@
 """Pokébot dimostrativo per il video promozionale: database temporaneo con una collezione a metà,
-un inseguimento, annunci trovati e prezzi. Scrive state.json + state-1.json nella cartella indicata.
+un inseguimento, annunci trovati e prezzi. Scrive state.json + state-1.json (in chiaro) nella cartella indicata.
 
   python scripts/demo_state.py /tmp/demo
 """
@@ -91,7 +91,7 @@ def main() -> None:
     db.set_kv("last_search_ts", now - 240)
     run = db.start_run()
     db.finish_run(run, 412, 23, {}, {"vinted": 180, "wallapop": 120, "ebay": 112})
-    write_state(index, db, str(out / "state.json"))
+    write_state(index, db, str(out), seal=False)
     print(f"demo pronta in {out}: {len(missing)} mancanti, inseguimento su {chase.label}")
 
 

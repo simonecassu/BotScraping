@@ -51,13 +51,13 @@ def test_trial_reminder_end_and_light(index, monkeypatch):
     now = time.time()
     assert plans.check_trials(db, client, now) == []
     out = plans.check_trials(db, client, now + 4.5 * 86400)
-    assert out == ["2: promemoria fine prova"] and "Domani finisce" in client.sent[-1][1]
+    assert out == ["…2: promemoria fine prova"] and "Domani finisce" in client.sent[-1][1]
     assert plans.check_trials(db, client, now + 4.6 * 86400) == []
     # due inseguimenti durante la prova: alla fine ne resta uno, ogni 2 ore
     tc.handler.handle("/insegui 131 151", "2")
     assert len(db.get_kv("watches:2")) == 2
     out = plans.check_trials(db, client, now + 5.1 * 86400)
-    assert out == ["2: fine prova, passato a Light"]
+    assert out == ["…2: fine prova, passato a Light"]
     assert plans.tier(db, "2", now + 5.1 * 86400) == "light"
     text = client.sent[-1][1]
     assert "prova di 5 giorni è finita" in text and "250" in text
@@ -242,3 +242,17 @@ def test_refund_only_in_first_days(index, monkeypatch):
     assert calls == [("cancel", "2", "ch5")] and plans.tier(db, "2") == "pro" and r.sends[0][0] == "2"
     r = tc.handler.handle("/rimborsa 2 forza", "1")
     assert calls[-1] == ("refund", "2", "ch5") and plans.tier(db, "2") == "light"
+
+
+def test_expired_subscription_goes_back_to_light_limits(index, monkeypatch):
+    db, client, tc = setup(index, monkeypatch)
+    db.add_chat_id("2")
+    now = time.time()
+    tc.handle_payload({"chat_id": 2, "text": "/pagamento", "payment": {
+        "currency": "XTR", "total_amount": 250, "invoice_payload": "pro:2", "telegram_payment_charge_id": "x",
+        "subscription_expiration_date": now + 86400}})
+    db.set_kv("active_sets:2", ["me55", "me55c", "sv1", "sv2", "sv3"])
+    assert plans.check_trials(db, client, now) == []
+    assert plans.check_trials(db, client, now + 2 * 86400) == ["…2: abbonamento scaduto, passato a Light"]
+    assert plans.active_count(db, "2") == 3 and "scaduto" in client.sent[-1][1]
+    assert plans.check_trials(db, client, now + 3 * 86400) == []

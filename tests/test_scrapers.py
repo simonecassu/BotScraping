@@ -75,7 +75,6 @@ def test_ebay_api_parse():
 
 def test_vinted_fetches_cookies_then_searches(monkeypatch):
     """Senza cookie: prima GET della home e del refresh, poi la pagina di ricerca (nessun KeyError sul cookie jar vuoto)."""
-    import requests
 
     calls = []
 
