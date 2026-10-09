@@ -36,9 +36,14 @@ def test_refresh_maps_sets_and_cards(index):
             return [{"id": "30th", "name": "30th Celebration", "cardCount": {"total": 161}},
                     {"id": "30th-c", "name": "Classic Collection", "cardCount": {"total": 30}}]
         if url.endswith("/sets/30th"):
-            return {"cards": [{"id": "30th-131", "localId": "131"}, {"id": "30th-001", "localId": "001"}]}
+            return {"cards": [{"id": "30th-131", "localId": "131", "name": "Lapras"}, {"id": "30th-001", "localId": "001", "name": "Exeggcute"}]}
         if url.endswith("/sets/30th-c"):
-            return {"cards": []}
+            return {"cards": [{"id": "30th-c-001", "localId": "001", "name": "Charizard"},
+                              {"id": "30th-c-004", "localId": "004", "name": "Genesect EX"}]}
+        if url.endswith("/cards/30th-c-001"):
+            return {"pricing": {"cardmarket": {"low": 80.0, "trend": 120.0}}}
+        if url.endswith("/cards/30th-c-004"):
+            return {"pricing": {"cardmarket": {"low": 5.0, "trend": 9.0}}}
         if url.endswith("/cards/30th-131"):
             return {"pricing": {"cardmarket": {"low": 12.0, "trend": 20.5, "avg7": 19.0, "avg30": 21.0, "updated": "2026-10-08T22:00:00Z"}}}
         if url.endswith("/cards/30th-001"):
@@ -51,12 +56,28 @@ def test_refresh_maps_sets_and_cards(index):
     assert p.trend == 20.5 and p.low == 12.0 and p.updated == "2026-10-08"
     assert cmk.get(db, "me55-1").trend == 0.4  # "001" ↔ "1", prezzo holo come ripiego
     assert cmk.get(db, "me55-2").ref is None   # carta non presente su TCGdex: salvata senza prezzo
+    charizard = next(c for c in index.all_cards() if c.set_id == "me55c" and c.name == "Charizard")
+    genesect = next(c for c in index.all_cards() if c.set_id == "me55c" and c.name.startswith("Genesect"))
+    assert charizard.number == "4" and cmk.get(db, charizard.id).trend == 120.0  # per nome, non il 004 di TCGdex
+    assert cmk.get(db, genesect.id).trend == 9.0
     n = len(calls)
     assert cmk.refresh(db, index, get=fake_get) == ""  # tutto fresco: nessuna richiesta
     assert len(calls) == n
     later = time.time() + 21 * 3600
     cmk.refresh(db, index, budget=1, wanted_first={"me55-131"}, get=fake_get, now=later)
     assert calls[-1].endswith("/cards/30th-131")  # prima le mancanti
+
+
+def test_match_card_by_name_when_numbers_differ(index):
+    pika = next(c for c in index.all_cards() if c.set_id == "me55c" and c.name == "Pikachu")
+    tcg = [{"id": "x-014", "num": "14", "name": "pikachu"}, {"id": "x-008", "num": "8", "name": "pikachuzekromgx"},
+           {"id": "x-022", "num": "22", "name": "palkia"}]
+    assert cmk.match_card(pika, tcg) == "x-014"
+    palkia = next(c for c in index.all_cards() if c.set_id == "me55c" and c.name.startswith("Palkia"))
+    assert cmk.match_card(palkia, tcg) == "x-022"
+    lapras = index.by_id["me55-131"]
+    assert cmk.match_card(lapras, [{"id": "y-131", "num": "131", "name": "lapras"}, {"id": "y-132", "num": "132", "name": "lapras"}]) == "y-131"
+    assert cmk.match_card(lapras, [{"id": "y-1", "num": "1", "name": "lapras"}, {"id": "y-2", "num": "2", "name": "lapras"}]) is None
 
 
 def test_value_and_completion_prefer_cardmarket(index):

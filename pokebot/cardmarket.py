@@ -139,16 +139,36 @@ def set_map(db: Database, sets, get=_http_get) -> dict[str, str]:
     return out
 
 
-def card_map(db: Database, tcg_set: str, get=_http_get) -> dict[str, str]:
-    """Numero della carta → id TCGdex, per una collezione (ricalcolata ogni settimana)."""
-    key = f"tcgdex_cards:{tcg_set}"
+def card_map(db: Database, tcg_set: str, get=_http_get) -> list[dict]:
+    """Carte TCGdex di una collezione: [{id, num, name}] (ricalcolate ogni settimana)."""
+    key = f"tcgdex_cards2:{tcg_set}"
     cache = db.get_kv(key) or {}
-    if cache.get("map") and time.time() - float(cache.get("ts") or 0) < MAP_AGE_S:
-        return cache["map"]
+    if cache.get("cards") is not None and time.time() - float(cache.get("ts") or 0) < MAP_AGE_S:
+        return cache["cards"]
     data = get(f"{API}/sets/{tcg_set}")
-    m = {_num(c.get("localId", "")): c["id"] for c in (data.get("cards") or []) if c.get("id")}
-    db.set_kv(key, {"ts": time.time(), "map": m})
-    return m
+    cards = [{"id": c["id"], "num": _num(c.get("localId", "")), "name": _norm(c.get("name", ""))}
+             for c in (data.get("cards") or []) if c.get("id")]
+    db.set_kv(key, {"ts": time.time(), "cards": cards})
+    return cards
+
+
+def match_card(card, tcg_cards: list[dict]) -> str | None:
+    """Stesso nome e numero; se i numeri non coincidono (ristampe come la Classic Collection), il nome se è unico.
+    Prima il nome identico, poi quello simile ("Palkia LV.X" ↔ "Palkia"); senza nome, solo il numero."""
+    name, num = _norm(card.name), _num(card.number)
+    exact = [c for c in tcg_cards if c["name"] and c["name"] == name]
+    similar = [c for c in tcg_cards if c["name"] and name and c not in exact
+               and (c["name"].startswith(name) or name.startswith(c["name"]))]
+    for group in (exact, similar):
+        for c in group:
+            if c["num"] == num:
+                return c["id"]
+        if len(group) == 1:
+            return group[0]["id"]
+        if group:
+            return None  # più carte con quel nome e nessuna con quel numero: meglio nessun prezzo che uno sbagliato
+    by_num = [c for c in tcg_cards if c["num"] == num and not c["name"]]
+    return by_num[0]["id"] if len(by_num) == 1 else None
 
 
 def _parse(pricing: dict | None) -> CMPrice | None:
@@ -170,6 +190,10 @@ def refresh(db: Database, index, budget: int = 250, wanted_first: set[str] | Non
             now: float | None = None) -> str:
     """Aggiorna i prezzi delle carte più vecchie di 20 ore (prima le mancanti), al massimo `budget` richieste."""
     now = now or time.time()
+    if not db.get_kv("cm_match_v2"):  # abbinamento per nome: rifà i prezzi abbinati con il vecchio metodo
+        with db.connect() as c:
+            c.execute("DELETE FROM cm_prices")
+        db.set_kv("cm_match_v2", True)
     sets = list(index.sets)
     smap = set_map(db, sets, get)
     with db.connect() as c:
@@ -180,7 +204,7 @@ def refresh(db: Database, index, budget: int = 250, wanted_first: set[str] | Non
     todo = todo[:budget]
     if not todo:
         return ""
-    cmaps: dict[str, dict[str, str]] = {}
+    cmaps: dict[str, list[dict]] = {}
     jobs = []
     for card in todo:
         tset = smap[card.set_id]
@@ -189,8 +213,8 @@ def refresh(db: Database, index, budget: int = 250, wanted_first: set[str] | Non
                 cmaps[tset] = card_map(db, tset, get)
             except Exception as exc:  # noqa: BLE001
                 log.warning("TCGdex collezione %s: %s", tset, exc)
-                cmaps[tset] = {}
-        jobs.append((card, cmaps[tset].get(_num(card.number))))
+                cmaps[tset] = []
+        jobs.append((card, match_card(card, cmaps[tset])))
 
     def one(job):
         card, tid = job
