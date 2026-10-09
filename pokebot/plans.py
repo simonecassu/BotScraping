@@ -25,6 +25,7 @@ TRIAL_DAYS = 5
 PRICE_STARS = 250
 SUB_PERIOD_S = 30 * 86400  # Telegram accetta solo abbonamenti di 30 giorni
 DIGEST_HOUR = 19
+REFUND_DAYS = 3  # rimborso intero solo nei primi giorni: Telegram non fa rimborsi parziali
 LIGHT_MAX_WATCHES = 1
 LIGHT_WATCH_EVERY_S = 2 * 3600
 LIGHT_MAX_COLLECTIONS = 5

@@ -227,3 +227,23 @@ def test_owner_refund(index, monkeypatch):
     r = tc.handler.handle("/rimborsa 2", "1")
     assert "250" in r.text and calls == [("2", "ch9")] and plans.tier(db, "2") == "light"
     assert "Nessun pagamento" in tc.handler.handle("/rimborsa 2", "1").text
+
+
+def test_refund_only_in_first_days(index, monkeypatch):
+    db, client, tc = setup(index, monkeypatch)
+    db.add_chat_id("2")
+    calls = []
+    client.refund_stars = lambda uid, charge: (calls.append(("refund", uid, charge)) or (True, ""))
+    client.cancel_subscription = lambda uid, charge: (calls.append(("cancel", uid, charge)) or (True, ""))
+    tc.handle_payload({"chat_id": 2, "text": "/pagamento", "payment": {
+        "currency": "XTR", "total_amount": 250, "invoice_payload": "pro:2", "telegram_payment_charge_id": "ch5",
+        "subscription_expiration_date": time.time() + 86400 * 30}})
+    p = plans.get(db, "2")
+    p["payments"][-1]["ts"] = time.time() - 29 * 86400  # pagato 29 giorni fa
+    db.set_kv("plan:2", p)
+    r = tc.handler.handle("/rimborsa 2", "1")
+    assert "29 giorni" in r.text and "parziali" in r.text and calls == [] and plans.tier(db, "2") == "pro"
+    r = tc.handler.handle("/rimborsa 2 annulla", "1")
+    assert calls == [("cancel", "2", "ch5")] and plans.tier(db, "2") == "pro" and r.sends[0][0] == "2"
+    r = tc.handler.handle("/rimborsa 2 forza", "1")
+    assert calls[-1] == ("refund", "2", "ch5") and plans.tier(db, "2") == "light"

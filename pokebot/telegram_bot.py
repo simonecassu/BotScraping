@@ -164,14 +164,20 @@ class TelegramClient:
                              timeout=config.HTTP_TIMEOUT)
         return resp.status_code == 200 and bool(resp.json().get("ok"))
 
+    def cancel_subscription(self, user_id: str, charge_id: str) -> tuple[bool, str]:
+        """Ferma il rinnovo di un abbonamento in Stars (resta valido fino alla scadenza già pagata)."""
+        resp = requests.post(f"{self.base}/editUserStarSubscription", json={"user_id": int(user_id), "telegram_payment_charge_id": charge_id,
+                                                                             "is_canceled": True}, timeout=config.HTTP_TIMEOUT)
+        data = resp.json()
+        return bool(data.get("ok")), str(data.get("description", ""))
+
     def refund_stars(self, user_id: str, charge_id: str) -> tuple[bool, str]:
-        """Restituisce le Stars di un pagamento e, se era un abbonamento, ne ferma il rinnovo."""
+        """Restituisce per intero le Stars di un pagamento (Telegram non fa rimborsi parziali) e ferma il rinnovo."""
         resp = requests.post(f"{self.base}/refundStarPayment", json={"user_id": int(user_id), "telegram_payment_charge_id": charge_id},
                              timeout=config.HTTP_TIMEOUT)
         data = resp.json()
         try:
-            requests.post(f"{self.base}/editUserStarSubscription", json={"user_id": int(user_id), "telegram_payment_charge_id": charge_id,
-                                                                          "is_canceled": True}, timeout=config.HTTP_TIMEOUT)
+            self.cancel_subscription(user_id, charge_id)
         except requests.RequestException:
             pass
         return bool(data.get("ok")), str(data.get("description", ""))
@@ -782,16 +788,34 @@ class CommandHandler:
         return Reply(f"✅ {who}: {plans.describe(self.db, target)}")
 
     def _refund(self, chat_id: str, args: str) -> Reply:
-        """(proprietario) /rimborsa ID – restituisce le Stars dell'ultimo pagamento, ferma il rinnovo e torna a Light."""
+        """(proprietario) /rimborsa ID – rimborso intero entro REFUND_DAYS dal pagamento (Telegram non fa rimborsi parziali);
+        dopo: /rimborsa ID annulla ferma solo il rinnovo; /rimborsa ID forza rimborsa comunque."""
         from . import plans
         if not self._is_owner(chat_id):
             return Reply("Solo il proprietario può fare rimborsi.")
-        target = args.strip()
+        parts = args.split()
+        target = parts[0] if parts else ""
+        mode = parts[1].lower() if len(parts) > 1 else ""
         p = plans.get(self.db, target)
         pays = [x for x in (p.get("payments") or []) if x.get("charge") and not x.get("refunded")]
         if not pays:
             return Reply("Nessun pagamento da rimborsare per quell'ID (vedi /utenti).")
         last = pays[-1]
+        who = html.escape(self.db.user_name(target))
+        used = (time.time() - float(last.get("ts") or 0)) / 86400
+        used_txt = f"{used:.0f} giorn{'o' if round(used) == 1 else 'i'}" if used >= 1 else "meno di un giorno"
+        if mode in ("annulla", "stop", "disdici"):
+            ok, err = TelegramClient().cancel_subscription(target, last["charge"])
+            if not ok:
+                return Reply(f"⚠️ Non riesco a fermare il rinnovo: {html.escape(err or 'errore Telegram')}")
+            return Reply(f"⏹ Rinnovo fermato per {who}: resta completo fino al {plans._date(p.get('pro_until'))}, poi passa a Light.",
+                         sends=[(target, f"⏹ Il tuo abbonamento non si rinnoverà: hai tutto fino al {plans._date(p.get('pro_until'))}, "
+                                         "poi passi alla versione Light.", None)])
+        if used > plans.REFUND_DAYS and mode != "forza":
+            return Reply(f"⛔ {who} ha pagato {used_txt} fa: il rimborso intero vale solo nei primi {plans.REFUND_DAYS} giorni "
+                         "e Telegram non permette rimborsi parziali.\n"
+                         f"• <code>/rimborsa {target} annulla</code> – ferma il rinnovo, resta completo fino al {plans._date(p.get('pro_until'))}\n"
+                         f"• <code>/rimborsa {target} forza</code> – rimborsa comunque tutte le {last.get('stars', 0)} ⭐")
         ok, err = TelegramClient().refund_stars(target, last["charge"])
         if not ok:
             return Reply(f"⚠️ Rimborso non riuscito: {html.escape(err or 'errore Telegram')}")
@@ -800,7 +824,6 @@ class CommandHandler:
                 x["refunded"] = True
         self.db.set_kv(f"plan:{target}", p)
         plans.set_light(self.db, target)
-        who = html.escape(self.db.user_name(target))
         return Reply(f"↩️ Rimborsate {last.get('stars', 0)} ⭐ a {who}: rinnovo fermato, ora è su Light.",
                      sends=[(target, f"↩️ Ti ho rimborsato {last.get('stars', 0)} ⭐ e fermato l'abbonamento. Resti sulla versione Light.", None)])
 
