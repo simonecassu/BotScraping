@@ -3,7 +3,8 @@
   python scripts/build_card_index.py deploy/app/cards.json
 
 Formato: {"built": <epoch>, "rarities": ["Common", ...], "sets": {"sv8": [["7", "Pikachu ex", <indice rarità>], ...], ...},
-"names_it": {"sv8": "Scintille Folgoranti", ...}}.
+"img": {"sv8": "https://images.pokemontcg.io/sv8/{n}.png", ...} (indirizzo delle immagini, {n} = numero; le carte con un
+indirizzo diverso da quello della loro espansione lo portano come quarto campo), "names_it": {"sv8": "Scintille Folgoranti", ...}}.
 I nomi italiani vengono da TCGdex (abbinamento per nome inglese, come cardmarket.set_map). Lo genera ponte.yml a ogni deploy.
 """
 from __future__ import annotations
@@ -13,6 +14,7 @@ import re
 import sys
 import time
 import urllib.request
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
 RAW = "https://raw.githubusercontent.com/PokemonTCG/pokemon-tcg-data/master"
@@ -37,19 +39,24 @@ def main() -> None:
         except Exception as exc:  # noqa: BLE001 - un set mancante non ferma l'indice
             print(f"  {s['id']}: {exc}", file=sys.stderr)
             return s["id"], []
-        return s["id"], [[str(c["number"]), c["name"], c.get("rarity") or ""] for c in cards]
+        return s["id"], [[str(c["number"]), c["name"], c.get("rarity") or "", (c.get("images") or {}).get("small") or ""] for c in cards]
 
     with ThreadPoolExecutor(max_workers=8) as ex:
         index = dict(ex.map(one, sets))
     n = sum(len(v) for v in index.values())
-    rarities = sorted({r for v in index.values() for _, _, r in v if r})  # le rarità come indice: file più piccolo
+    rarities = sorted({r for v in index.values() for _, _, r, _ in v if r})  # le rarità come indice: file più piccolo
     rid = {r: i for i, r in enumerate(rarities)}
-    for v in index.values():
+    img = {}  # schema dell'indirizzo delle immagini per espansione (due server diversi: pokemontcg.io e scrydex)
+    for sid, v in index.items():
+        patterns = Counter(c[3].replace(f"/{c[0]}.", "/{n}.").replace(f"-{c[0]}/", "-{n}/") for c in v if c[3])
+        img[sid] = patterns.most_common(1)[0][0] if patterns else ""
         for c in v:
             c[2] = rid.get(c[2], -1)
+            if not c[3] or img[sid].replace("{n}", c[0]) == c[3]:
+                del c[3]  # come l'espansione: niente da dire
     names_it = italian_names(sets)
     with open(out, "w", encoding="utf-8") as f:
-        json.dump({"built": int(time.time()), "rarities": rarities, "sets": index, "names_it": names_it}, f,
+        json.dump({"built": int(time.time()), "rarities": rarities, "sets": index, "img": img, "names_it": names_it}, f,
                   ensure_ascii=False, separators=(",", ":"))
     print(f"{n} carte in {len(index)} collezioni, {len(names_it)} nomi italiani → {out}")
 

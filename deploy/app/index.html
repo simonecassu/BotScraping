@@ -435,12 +435,12 @@ async function loadCatalog() {
   } catch (e) { catalog = []; }
 }
 /* ---------- ricerca delle carte in tutte le espansioni (indice cards.json, generato dal deploy) ---------- */
-let cardIndex = null, cardIndexLoading = null, rarityNames = [], hitRarity = "";
+let cardIndex = null, cardIndexLoading = null, rarityNames = [], hitRarity = "", imgPattern = {};
 const fold = (t) => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 function loadCardIndex() {
   if (cardIndex || cardIndexLoading) return cardIndexLoading;
   cardIndexLoading = fetch("/app/cards.json").then((r) => r.ok ? r.json() : { sets: {} }).catch(() => ({ sets: {} }))
-    .then((d) => { cardIndex = d.sets || {}; rarityNames = d.rarities || []; namesIt = d.names_it || {}; renderAll(); });
+    .then((d) => { cardIndex = d.sets || {}; rarityNames = d.rarities || []; imgPattern = d.img || {}; namesIt = d.names_it || {}; renderAll(); });
   return cardIndexLoading;
 }
 function cardHits(q) {
@@ -456,8 +456,9 @@ function cardHits(q) {
   for (const sid of order) {
     if (HOME_SETS.includes(sid)) continue;
     const e = extra[sid], known = e && e.mine && e.loaded;
-    const found = ((cardIndex || {})[sid] || []).filter(([n, nm]) => hit(n, nm)).map(([number, name, r]) =>
-      ({ number, name, rarity: rarityNames[r] || "", image: `https://images.pokemontcg.io/${sid}/${number}.png`, own: known ? e.owned.has(number) : null }));
+    const pat = imgPattern[sid] || `https://images.pokemontcg.io/${sid}/{n}.png`;
+    const found = ((cardIndex || {})[sid] || []).filter(([n, nm]) => hit(n, nm)).map(([number, name, r, url]) =>
+      ({ number, name, rarity: rarityNames[r] || "", image: url || pat.replace("{n}", number), own: known ? e.owned.has(number) : null }));
     if (found.length) groups.push({ id: sid, name: setName(sid, ((catalog || []).find((s) => s.id === sid) || {}).name || sid), cards: found });
   }
   return groups;
