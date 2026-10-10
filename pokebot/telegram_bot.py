@@ -1,4 +1,4 @@
-"""Comandi Telegram: ogni persona collegata gestisce dalla chat il suo Pokébot (album, notifiche, inseguimenti).
+"""Comandi Telegram: ogni persona collegata gestisce dalla chat il suo Pescacarte (album, notifiche, inseguimenti).
 
 Il primo /start in assoluto rende quella chat il proprietario; gli altri entrano dalla lista d'attesa (/approva)
 o con un codice d'invito. Ogni messaggio può contenere più comandi, uno per riga.
@@ -56,7 +56,7 @@ HELP = """<b>Comandi</b>
 /pausa · /riprendi – sospendi o riattiva le notifiche · /notte 23 8 – ore silenziose
 /prezzo 100 – prezzo massimo · /lingua ita | tutte · /soglia 50 – % minima di carte mancanti nei lotti
 /max 5 – annunci per carta in ogni messaggio · /immagini on | off · /esporta – file Excel
-/segnala testo – un problema o un'idea per migliorare Pokébot (una al giorno)
+/segnala testo – un problema o un'idea per migliorare Pescacarte (una al giorno)
 /abbonati – il tuo piano; da abbonato: ferma o riattiva il rinnovo, chiedi il rimborso · /voto 1-5 · /recensione testo
 Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
@@ -78,14 +78,14 @@ CERCA_EVERY_FULL_S = 5 * 60
 CERCA_EVERY_LIGHT_S = 15 * 60
 
 # Presentazione del bot: la descrizione compare nella chat vuota prima di "Avvia", la breve nel profilo e nei link
-BOT_DESCRIPTION = ("🃏 Pokébot trova le carte Pokémon che mancano alla tua collezione.\n\n"
+BOT_DESCRIPTION = ("🎣 Pescacarte trova le carte Pokémon che mancano alla tua collezione.\n\n"
                    "✅ Segni nell'app le carte che hai: le altre le cerco io su Vinted, Wallapop ed eBay\n"
                    "🔔 Ti avviso appena spunta un annuncio, con prezzo e foto\n"
                    "🔥 Affari sotto il valore Cardmarket, lista della spesa, doppioni da scambiare\n"
                    "👥 Album condivisi con gli amici\n\n"
                    "Premi Avvia per chiedere l'accesso: {trial} giorni di prova con tutto, poi gratis in versione Light.")
 BOT_SHORT_DESCRIPTION = "Cerca su Vinted, Wallapop ed eBay le carte Pokémon che ti mancano e ti avvisa appena spuntano."
-PROFILE_VERSION = 4  # la presentazione del bot dice i giorni di prova: cambia con TRIAL_DAYS
+PROFILE_VERSION = 5  # presentazione del bot: nome, giorni di prova
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot); il proprietario ne ha uno suo
 MENU_VERSION = 20
@@ -754,7 +754,7 @@ class CommandHandler:
         return Reply("👥 Codice invito (vale 48 ore, una persona):\n"
                      f"<code>/start {code}</code>\n\n"
                      f"Chi lo riceve apre il bot e incolla quel comando: entra subito, senza lista d'attesa, con il suo "
-                     f"Pokébot personale e {plans.TRIAL_DAYS} giorni di prova.")
+                     f"Pescacarte personale e {plans.TRIAL_DAYS} giorni di prova.")
 
     def _users(self, chat_id: str) -> Reply:
         if not self._is_owner(chat_id):
@@ -797,7 +797,7 @@ class CommandHandler:
         """Qualcuno senza invito ha scritto /start: va in lista d'attesa e il proprietario viene avvisato."""
         chat_id = str(chat_id)
         if self.db.is_banned(chat_id):
-            return Reply("Pokébot non è disponibile per questo account.")
+            return Reply("Pescacarte non è disponibile per questo account.")
         if not self.db.add_to_waitlist(chat_id, name, source):
             pos = list(self.db.waitlist()).index(chat_id) + 1 if chat_id in self.db.waitlist() else 0
             return Reply("⏳ Sei già in lista d'attesa" + (f" (posizione {pos})" if pos else "") +
@@ -814,8 +814,8 @@ class CommandHandler:
                           f"In attesa: {pos}\n"
                           f"/approva {chat_id} · /rifiuta {chat_id} · /attesa per la lista",
                           [[("✅ Approva", f"/approva {chat_id}"), ("❌ Rifiuta", f"/rifiuta {chat_id}")]]))
-        return Reply("👋 Benvenuto su <b>Pokébot</b>!\n\n"
-                     "Pokébot cerca su Wallapop, Vinted ed eBay le carte che mancano alla tua collezione e ti avvisa "
+        return Reply("👋 Benvenuto su <b>Pescacarte</b>!\n\n"
+                     "Pescacarte cerca su Wallapop, Vinted ed eBay le carte che mancano alla tua collezione e ti avvisa "
                      "appena spuntano, con prezzi, affari 🔥, lista della spesa e album da condividere con gli amici.\n\n"
                      f"⏳ Per ora l'accesso è su invito: sei in lista d'attesa (posizione {pos}). "
                      f"Ti scrivo io qui appena viene attivato, non devi fare altro: da quel momento hai {plans.TRIAL_DAYS} giorni "
@@ -884,7 +884,7 @@ class CommandHandler:
         if t == "pro":
             return Reply(head)  # per sempre, o acceso dal proprietario: nulla da gestire
         link = plans.invoice_link(self.db, TelegramClient(), self.chat)
-        text = (f"{head}\n\n⭐ <b>Pokébot completo · {plans.PRICE_STARS} Stars al mese</b>\n"
+        text = (f"{head}\n\n⭐ <b>Pescacarte completo · {plans.PRICE_STARS} Stars al mese</b>\n"
                 "• avvisi nel momento in cui esce l'annuncio, non una volta al giorno\n"
                 "• affari 🔥 sotto il valore Cardmarket\n"
                 f"• inseguimenti ogni {watch.fmt_duration(watch.EVERY_S)}, fino a {watch.MAX_WATCHES} carte insieme\n"
@@ -1084,7 +1084,7 @@ class CommandHandler:
         owner_id = self.db.owner_chat_id()
         note = (f"💬 <b>Segnalazione</b> di {html.escape(r['name'])}:\n{html.escape(r['text'])}\n"
                 "Tutte con /segnalazioni o nella Mini App.")
-        return Reply("🙏 Grazie, la leggo di sicuro: è così che Pokébot migliora.",
+        return Reply("🙏 Grazie, la leggo di sicuro: è così che Pescacarte migliora.",
                      sends=[(owner_id, note, None)] if owner_id and not owner else None)
 
     def _reports(self, chat_id: str) -> Reply:
@@ -1137,7 +1137,7 @@ class CommandHandler:
             return Reply(f"📣 Canale affari: <code>{html.escape(a)}</code>. Ti mando subito un messaggio di prova lì: "
                          "se non arriva, controlla che il bot sia amministratore del canale.\n"
                          f"Ogni giorno alle {hour}:00 pubblico le 3 migliori occasioni, con il prezzo confrontato con Cardmarket.",
-                         sends=[(a, "✅ Pokébot collegato a questo canale: da qui in poi pubblico gli affari del giorno.", None)])
+                         sends=[(a, "✅ Pescacarte collegato a questo canale: da qui in poi pubblico gli affari del giorno.", None)])
         return Reply("Usa <code>/canale @nomecanale</code>, <code>/canale ora</code>, <code>/canale 20</code> o <code>/canale off</code>.")
 
     def _collection(self, args: str) -> Reply:
@@ -1245,7 +1245,7 @@ class CommandHandler:
             return Reply("🤝 Il tuo codice amico:\n"
                          f"<code>/amico {code}</code>\n\nChi lo scrive al bot diventa tuo amico: potrete condividere album con /condividi. "
                          f"Se lo scrive una persona nuova (entro un mese dal suo ingresso) ricevi {plans.REFERRAL_DAYS} giorni di "
-                         "Pokébot completo in regalo 🎁. Lo trovi sempre anche nella sezione Amici dell'app.")
+                         "Pescacarte completo in regalo 🎁. Lo trovi sempre anche nella sezione Amici dell'app.")
         verb, _, rest = a.partition(" ")
         if verb.lower() in ("togli", "rimuovi"):
             target = self._friend_by_name(rest)
@@ -1271,8 +1271,8 @@ class CommandHandler:
             return Reply(text)
         me = html.escape(self.db.user_name(self.chat) or "Un nuovo amico")
         if gift:
-            note = f"🎁 {me} è entrato con il tuo codice amico: un mese di Pokébot completo in regalo, fino al {plans._date(gift)}."
-            text += f"\n🎁 Grazie a te, {other_name} ha ricevuto un mese di Pokébot completo."
+            note = f"🎁 {me} è entrato con il tuo codice amico: un mese di Pescacarte completo in regalo, fino al {plans._date(gift)}."
+            text += f"\n🎁 Grazie a te, {other_name} ha ricevuto un mese di Pescacarte completo."
         else:
             note = f"🤝 {me} è entrato con il tuo codice amico."
         return Reply(text, sends=[(other, note, None)])
@@ -1948,7 +1948,7 @@ class TelegramCommands:
         renewal = bool(pay.get("is_recurring")) and not pay.get("is_first_recurring")
         log.info("Pagamento Stars registrato (%s stelle, rinnovo: %s)", pay.get("total_amount"), renewal)
         self._deliver(chat_id, Reply(
-            ("🔁 Abbonamento rinnovato, grazie!" if renewal else "🎉 <b>Grazie!</b> Ora hai Pokébot completo: avvisi immediati, affari 🔥, "
+            ("🔁 Abbonamento rinnovato, grazie!" if renewal else "🎉 <b>Grazie!</b> Ora hai Pescacarte completo: avvisi immediati, affari 🔥, "
              "inseguimenti ogni 5 minuti e collezioni illimitate.") + f"\n{plans.describe(self.db, chat_id)}"))
         if owner and owner != chat_id:
             self._deliver(owner, Reply(f"💰 {'Rinnovo' if renewal else 'Nuovo abbonamento'}: {html.escape(self.db.user_name(chat_id))} "

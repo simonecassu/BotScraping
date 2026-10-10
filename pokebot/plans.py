@@ -242,9 +242,9 @@ def apply_light_limits(db: Database, chat: str) -> None:
 
 # ---- primi passi: notifiche spente finché l'album non è pronto ----------------------
 def welcome_message() -> tuple[str, list]:
-    text = ("🎉 <b>Il tuo Pokébot è attivo!</b>\n"
+    text = ("🎉 <b>Il tuo Pescacarte è attivo!</b>\n"
             f"Hai {TRIAL_DAYS} giorni di prova con tutte le funzioni.\n\n"
-            "Pokébot cerca per te su Vinted, Wallapop ed eBay le carte che mancano alla tua collezione "
+            "Pescacarte cerca per te su Vinted, Wallapop ed eBay le carte che mancano alla tua collezione "
             "e ti scrive appena ne spunta una, con foto e prezzo.\n\n"
             "<b>Due consigli per partire bene:</b>\n"
             "1️⃣ <b>Prima riempi l'album.</b> Apri l'app dal pulsante <b>App</b>, scegli la collezione e tocca "
@@ -277,7 +277,7 @@ def invoice_link(db: Database, client, chat: str) -> str:
         return cached_invoice(db, chat)  # un link con un prezzo vecchio si rifà
     try:
         link = client.create_invoice_link(
-            title="Pokébot completo",
+            title="Pescacarte completo",
             description=("Avvisi immediati sulle carte che ti mancano, affari 🔥, inseguimenti ogni 5 minuti "
                          "e collezioni illimitate. Si rinnova ogni mese, disdici quando vuoi da Telegram."),
             payload=f"pro:{chat}", amount=PRICE_STARS, period=SUB_PERIOD_S)
@@ -297,7 +297,7 @@ def channel_url(db: Database) -> str:
 def end_of_trial_message(db: Database, client, chat: str) -> tuple[str, list]:
     name = html.escape(db.user_name(chat)) if db.user_name(chat) != chat else ""
     text = (f"⏰ <b>{'Ciao ' + name + ', l' if name else 'L'}a tua prova di {TRIAL_DAYS} giorni è finita.</b>\n\n"
-            "Pokébot è un progetto appena nato, fatto da un collezionista per i collezionisti: "
+            "Pescacarte è un progetto appena nato, fatto da un collezionista per i collezionisti: "
             "ogni giorno cerca su Vinted, Wallapop ed eBay le carte che ti mancano, così non devi farlo tu.\n\n"
             "Da adesso sei sulla versione <b>Light</b>, gratis per sempre:\n"
             "• un riepilogo al giorno, alle 19, con gli annunci delle tue carte\n"

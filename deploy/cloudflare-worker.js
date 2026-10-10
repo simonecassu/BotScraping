@@ -406,7 +406,7 @@ export default {
       if (!isStart || !strangerAllowed(chatId, text, Date.now())) {
         await telegram(env, "sendMessage", { chat_id: chatId, text: isStart
           ? "👋 Richiesta ricevuta: ti avviso io appena l'accesso viene attivato."
-          : "👋 Pokébot è su invito. Scrivi /start per metterti in lista d'attesa: ti avviso io appena l'accesso viene attivato." });
+          : "👋 Pescacarte è su invito. Scrivi /start per metterti in lista d'attesa: ti avviso io appena l'accesso viene attivato." });
         return new Response("ok");
       }
     }

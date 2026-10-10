@@ -343,7 +343,7 @@ def test_referral_month_for_whoever_brings_a_new_person(index, monkeypatch):
     plans.start_trial(db, "3")  # appena entrato
     r = tc.handler.handle(f"/amico {code}", "3")
     assert "siete amici" in r.text and "ha ricevuto un mese" in r.text
-    assert r.sends[0][0] == "2" and "un mese di Pokébot completo" in r.sends[0][1]
+    assert r.sends[0][0] == "2" and "un mese di Pescacarte completo" in r.sends[0][1]
     assert plans.tier(db, "2") == "pro" and abs(plans.get(db, "2")["pro_until"] - (now + 30 * 86400)) < 120
     assert plans.get(db, "3")["referred_by"] == "2"
     # la stessa persona nuova non regala due volte

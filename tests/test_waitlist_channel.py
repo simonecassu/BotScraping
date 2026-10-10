@@ -113,7 +113,7 @@ def test_url_button_and_channel_post(index, monkeypatch):
     assert "📌 Vicino al valore" in text and "120% del valore Cardmarket" in text
     assert "40% del valore Cardmarket" in text
     assert "Affari Pokémon" in channel.format_post(deals[:1], "fakebot")[0]
-    assert buttons == [[("🤖 Attiva Pokébot", "https://t.me/fakebot?start=canale")]]
+    assert buttons == [[("🎣 Attiva Pescacarte", "https://t.me/fakebot?start=canale")]]
     # /canale ora pubblica subito
     r = h.handle("/canale ora", "1")
     assert r.sends and r.sends[0][0] == "@affaripoke" and "Pokémon del" in r.sends[0][1]
@@ -129,7 +129,7 @@ def test_url_button_and_channel_post(index, monkeypatch):
     assert "https://w/deal" not in client.sent[-1][1]  # già uscito con /canale ora: non si ripubblica
     assert db.get_kv("bot_username") == "fakebot"
     assert any(c == "@affaripoke" and "Pokémon del" in t for c, t in client.sent)
-    assert client.last_buttons == [[("🤖 Attiva Pokébot", "https://t.me/fakebot?start=canale")]]
+    assert client.last_buttons == [[("🎣 Attiva Pescacarte", "https://t.me/fakebot?start=canale")]]
     assert not channel.due(db, at_hour + 600) and channel.post_daily(db, index, client, at_hour + 600) == ""
     assert "20:00" in h.handle("/canale 20", "1").text
     h.handle("/canale off", "1")

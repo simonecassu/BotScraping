@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Pescacarte">
+  <!-- l'amo: tira su una carta dall'angolo -->
+  <path d="M72 10v38a16 16 0 0 1-32 0v-8" fill="none" stroke="#f4f6fb" stroke-width="7" stroke-linecap="round"/>
+  <path d="M40 40l-9 8" fill="none" stroke="#f4f6fb" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="72" cy="9" r="5.5" fill="#ffb703" stroke="#0b1630" stroke-width="2"/>
+  <!-- la carta -->
+  <g transform="rotate(14 72 84)">
+    <rect x="52" y="54" width="40" height="56" rx="6" fill="#f4f6fb" stroke="#0b1630" stroke-width="4"/>
+    <rect x="58" y="61" width="28" height="20" rx="3" fill="#e3350d"/>
+    <rect x="58" y="87" width="20" height="4" rx="2" fill="#9fb0d0"/>
+    <rect x="58" y="95" width="14" height="4" rx="2" fill="#9fb0d0"/>
+  </g>
+</svg>

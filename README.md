@@ -1,8 +1,11 @@
-# Pokébot
+# Pescacarte
 
 Bot Telegram (con Mini App) che cerca su **Wallapop, Vinted ed eBay.it** le carte Pokémon che mancano alla tua
 collezione e ti avvisa appena spunta un annuncio, con prezzo, foto e confronto con il valore **Cardmarket**.
 Parte con la *30th Celebration* (più la *Classic Collection*) e segue qualsiasi altra collezione del catalogo pubblico.
+
+Pescacarte è un progetto indipendente: non è affiliato a The Pokémon Company, Nintendo o ai marketplace citati; la
+parola «Pokémon» compare solo per dire cosa cerca. (Il pacchetto Python e il worker si chiamano ancora `pokebot`.)
 
 Gira gratis su **GitHub Actions** e risponde subito grazie a un piccolo **ponte su Cloudflare Workers**: niente PC acceso.
 

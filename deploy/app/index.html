@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Pokébot</title>
+<title>Pescacarte</title>
 <script src="/app/telegram-web-app.js"></script><!-- copia dello script ufficiale di Telegram, scaricata a ogni deploy (ponte.yml) -->
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@600;800;900&display=swap');
 :root{
-  --red:#e3350d;--red2:#b5240a;--yel:#ffcb05;--yel2:#c7a008;--blue:#2a75bb;--navy:#0f1f3d;--navy2:#162a52;
+  --red:#e3350d;--red2:#b5240a;--yel:#ffb703;--yel2:#c98f00;--blue:#3b7dd8;--navy:#0f1f3d;--navy2:#162a52;
   --bg:#0b1630;--sec:#152648;--card:#1b3160;--txt:#f4f6fb;--hint:#9fb0d0;--line:rgba(255,255,255,.1);
   --ok:#4cd964;--warn:#ffa41b;--bad:#ff5a5f;--link:#7fc4ff;--btn:var(--red);--btnt:#fff;
 }
@@ -18,8 +18,7 @@ body{background:
   radial-gradient(circle at -10% 110%, rgba(227,53,13,.22), transparent 42%), var(--bg)}
 header{position:sticky;top:0;z-index:5;background:linear-gradient(180deg,var(--red) 0,var(--red) 52%,#111 52%,#111 56%,var(--navy) 56%);padding:10px 12px 0;box-shadow:0 4px 16px rgba(0,0,0,.4)}
 .title{display:flex;align-items:center;gap:10px;font-weight:900;font-size:19px;color:#fff;text-shadow:0 2px 0 rgba(0,0,0,.35);padding-bottom:12px}
-.title .ball{width:30px;height:30px;border-radius:50%;background:linear-gradient(180deg,#fff 0,#fff 46%,#111 46%,#111 54%,#e3350d 54%);position:relative;flex:none;border:3px solid #111}
-.title .ball::after{content:"";position:absolute;left:50%;top:50%;width:9px;height:9px;border:3px solid #111;border-radius:50%;background:#fff;transform:translate(-50%,-50%)}
+.title .logo{width:34px;height:34px;flex:none;filter:drop-shadow(0 2px 0 rgba(0,0,0,.35))}
 .title small{color:#ffe9a8;font-weight:700;font-size:12px;margin-left:auto}
 main{padding:12px;padding-bottom:40px}.hidden{display:none!important}
 .card-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
@@ -107,7 +106,7 @@ textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
 </head>
 <body>
 <header>
-  <div class="title"><button id="back" class="back hidden" aria-label="Indietro">‹</button><span class="ball"></span><span id="ttl">Pokébot</span><small id="upd">…</small></div>
+  <div class="title"><button id="back" class="back hidden" aria-label="Indietro">‹</button><img class="logo" src="/app/logo.svg" alt=""><span id="ttl">Pescacarte</span><small id="upd">…</small></div>
 </header>
 <main>
   <section id="tab-home">
@@ -183,11 +182,11 @@ textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
       <div class="card-row" style="justify-content:center;margin:0"><button class="btn" id="fc-share">📤 Invia a un amico</button><button class="btn sec" id="fc-copy">📋 Copia</button></div>
     </div>
     <div class="gift">
-      <b>🎁 Porta un amico: un mese di Pokébot completo in regalo</b>
+      <b>🎁 Porta un amico: un mese di Pescacarte completo in regalo</b>
       <ol>
         <li>Il tuo amico apre il bot e preme <b>Avvia</b>: entra appena viene accettato.</li>
         <li>Appena dentro, scrive il tuo codice qui in <b>Amici</b> (o <code>/amico CODICE</code> in chat), entro un mese.</li>
-        <li>Tu ricevi <b>30 giorni</b> di Pokébot completo, sommati alla prova o all'abbonamento che hai. Vale per ogni amico nuovo.</li>
+        <li>Tu ricevi <b>30 giorni</b> di Pescacarte completo, sommati alla prova o all'abbonamento che hai. Vale per ogni amico nuovo.</li>
       </ol>
       <small id="gift-note" class="hint"></small>
     </div>
@@ -204,7 +203,7 @@ textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
   <section id="tab-reports" class="hidden">
     <h2 style="margin-top:4px">Segnala qualcosa</h2>
     <div id="rep-form">
-      <p class="hint" id="rep-intro">Hai trovato un problema o vorresti qualcosa di diverso? Scrivilo qui: lo legge direttamente chi ha creato Pokébot. Una segnalazione al giorno.</p>
+      <p class="hint" id="rep-intro">Hai trovato un problema o vorresti qualcosa di diverso? Scrivilo qui: lo legge direttamente chi ha creato Pescacarte. Una segnalazione al giorno.</p>
       <textarea id="rep-text" maxlength="1000" placeholder="Es. oggi non mi è arrivato l'avviso della 151; vorrei poter filtrare per condizione della carta…"></textarea>
       <div class="card-row" style="margin-top:8px"><button class="btn" id="rep-send">📨 Invia</button><span class="hint" id="rep-count">0/1000</span></div>
     </div>
@@ -402,7 +401,7 @@ function renderFriends() {
   $("#t-fr").textContent = fr.length ? `${fr.length} ${fr.length === 1 ? "amico" : "amici"}` : "aggiungi i tuoi amici";
   $("#fcode").textContent = code || "······";
   $("#gift-note").textContent = isOwner() ? "Tu hai già tutto: ti arriva solo l'avviso. Il regalo vale per gli altri utenti."
-    : (state.plan || {}).lifetime ? "Hai Pokébot completo per sempre: ti arriva solo l'avviso." : "Il mese si aggiunge in automatico, ti avviso io in chat.";
+    : (state.plan || {}).lifetime ? "Hai Pescacarte completo per sempre: ti arriva solo l'avviso." : "Il mese si aggiunge in automatico, ti avviso io in chat.";
   const mySets = [["me55", "30th Celebration"], ...Object.values(extra).filter((e) => e.mine).map((e) => [e.meta.id, e.meta.name])];
   $("#friend-list").innerHTML = fr.length ? fr.map((f) => {
     const shared = (f.shared || []).filter((sid) => sid !== "me55c").map(setName);
@@ -427,7 +426,7 @@ $("#fc-copy").onclick = async () => {
 };
 $("#fc-share").onclick = () => {
   const code = (state || {}).friend_code, bot = (state || {}).bot_username; if (!code) return;
-  const text = `Vieni su Pokébot: ti avvisa appena spunta una carta che ti manca. Apri il bot, premi Avvia e, appena sei dentro, scrivi /amico ${code} così diventiamo amici.`;
+  const text = `Vieni su Pescacarte: ti avvisa appena spunta una carta che ti manca. Apri il bot, premi Avvia e, appena sei dentro, scrivi /amico ${code} così diventiamo amici.`;
   const url = bot ? `https://t.me/share/url?url=${encodeURIComponent("https://t.me/" + bot)}&text=${encodeURIComponent(text)}`
     : `https://t.me/share/url?url=${encodeURIComponent(text)}`;
   if (tg && tg.openTelegramLink) tg.openTelegramLink(url); else window.open(url, "_blank");
@@ -1069,7 +1068,7 @@ document.addEventListener("touchend", (e) => {
 }, { passive: true });
 
 /* ---------- navigazione ---------- */
-const TITLES = { home: "Pokébot", coll: "Collezioni", settings: "Impostazioni", friends: "Amici", reports: "Segnalazioni", admin: "Utenti" };
+const TITLES = { home: "Pescacarte", coll: "Collezioni", settings: "Impostazioni", friends: "Amici", reports: "Segnalazioni", admin: "Utenti" };
 function showCseg(name) {
   document.querySelectorAll("#cseg button").forEach((b) => b.classList.toggle("on", b.dataset.cseg === name));
   ["check", "chase", "found"].forEach((t) => $("#cseg-" + t).classList.toggle("hidden", t !== name));

@@ -1,4 +1,4 @@
-"""Pokébot dimostrativo per il video promozionale: database temporaneo con una collezione a metà,
+"""Pescacarte dimostrativo per il video promozionale: database temporaneo con una collezione a metà,
 un inseguimento, annunci trovati e prezzi. Scrive state.json + state-1.json (in chiaro) nella cartella indicata.
 
   python scripts/demo_state.py /tmp/demo
