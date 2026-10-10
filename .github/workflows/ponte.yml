@@ -86,6 +86,7 @@ jobs:
             if echo "$out" | grep -q "Ponte attivo"; then
               echo "$out" | sed 's/<[^>]*>//g' | grep -v '^\s*$'
               echo "Diagnosi (lettura dello stato da GitHub): $(curl -sS -H "X-Pokebot-Key: $key" "$url/diag")"
+              echo "Pagine della Mini App (HTTP): /app $(curl -s -o /dev/null -w "%{http_code}" "$url/app") · /app/scan $(curl -s -o /dev/null -w "%{http_code}" "$url/app/scan") · script Telegram $(curl -s -o /dev/null -w "%{http_code}" "$url/app/telegram-web-app.js")"
               echo "::notice::Ponte attivo su $url — ogni messaggio al bot avvia subito la ricerca"
               exit 0
             fi

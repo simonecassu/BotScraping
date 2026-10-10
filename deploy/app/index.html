@@ -68,6 +68,8 @@ a{color:var(--link);text-decoration:none}
 .planbar .acts{display:flex;gap:8px;flex-wrap:wrap}
 .fcode{background:var(--sec);border:3px solid var(--yel);box-shadow:0 4px 0 var(--yel2);border-radius:18px;padding:16px;text-align:center;margin:6px 0 10px}
 .fcode small{display:block;color:var(--hint);font-weight:800;font-size:12px}.fcode b{display:block;font-size:38px;font-weight:900;letter-spacing:6px;color:var(--yel);margin:4px 0 12px}
+.gift{background:var(--sec);border:2px solid var(--yel);border-radius:14px;padding:12px 14px;margin:0 0 10px;font-size:13px;font-weight:700}
+.gift>b{display:block;font-weight:900;font-size:14px;margin-bottom:6px}.gift ol{margin:0;padding-left:20px;line-height:1.4}.gift li{margin:4px 0}.gift small{display:block;margin-top:8px}
 .friend{background:var(--sec);border:2px solid var(--line);border-radius:14px;padding:12px;margin-bottom:9px}
 .friend .top{display:flex;align-items:center;gap:10px}.friend .av,.usr .av{width:42px;height:42px;border-radius:50%;background:var(--red);color:#fff;font-weight:900;font-size:19px;display:flex;align-items:center;justify-content:center;flex:none}
 .friend .top div{flex:1;min-width:0}.friend small{display:block;color:var(--hint);font-weight:700;font-size:12px}
@@ -112,7 +114,7 @@ textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
     <div class="tiles">
       <div class="tile red" data-go="coll"><span class="ic">📚</span><div><b>Collezioni</b><small id="t-coll">…</small></div></div>
       <div class="tile" data-go="settings"><span class="ic">⚙️</span><div><b>Impostazioni</b><small id="t-set">…</small></div></div>
-      <div class="tile yel" id="tile-ai"><span class="ic">🧠</span><div><b>Analisi IA</b><small>in arrivo</small></div></div>
+      <div class="tile yel" id="tile-ai"><span class="ic">📐</span><div><b>Valuta carta</b><small>centratura e bordi dalla foto</small></div></div>
       <div class="tile" data-go="friends"><span class="ic">👥</span><div><b>Amici</b><small id="t-fr">…</small></div></div>
       <div class="tile wide hidden" data-go="admin" id="tile-admin"><span class="ic">👑</span><div><b>Utenti</b><small id="t-adm">lista d'attesa, piani, abbonamenti</small></div><span class="new hidden" id="adm-new"></span></div>
       <div class="tile wide" data-go="reports"><span class="ic">💬</span><div><b>Segnalazioni</b><small id="t-rep">un problema o un'idea</small></div><span class="new hidden" id="rep-new"></span></div>
@@ -179,7 +181,15 @@ textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
       <small>Il tuo codice amico</small>
       <b id="fcode">······</b>
       <div class="card-row" style="justify-content:center;margin:0"><button class="btn" id="fc-share">📤 Invia a un amico</button><button class="btn sec" id="fc-copy">📋 Copia</button></div>
-      <small style="margin-top:10px">🎁 Se una persona nuova scrive il tuo codice entro un mese dal suo ingresso, ricevi un mese di Pokébot completo.</small>
+    </div>
+    <div class="gift">
+      <b>🎁 Porta un amico: un mese di Pokébot completo in regalo</b>
+      <ol>
+        <li>Il tuo amico apre il bot e preme <b>Avvia</b>: entra appena viene accettato.</li>
+        <li>Appena dentro, scrive il tuo codice qui in <b>Amici</b> (o <code>/amico CODICE</code> in chat), entro un mese.</li>
+        <li>Tu ricevi <b>30 giorni</b> di Pokébot completo, sommati alla prova o all'abbonamento che hai. Vale per ogni amico nuovo.</li>
+      </ol>
+      <small id="gift-note" class="hint"></small>
     </div>
     <p class="hint">Chi usa il tuo codice diventa tuo amico. Poi potete condividere un album: le carte si spuntano una volta sola e valgono per tutti e due, mentre notifiche e impostazioni restano di ognuno.</p>
     <h2>Aggiungi un amico</h2>
@@ -391,6 +401,8 @@ function renderFriends() {
   const fr = state.friends || [], code = state.friend_code || "";
   $("#t-fr").textContent = fr.length ? `${fr.length} ${fr.length === 1 ? "amico" : "amici"}` : "aggiungi i tuoi amici";
   $("#fcode").textContent = code || "······";
+  $("#gift-note").textContent = isOwner() ? "Tu hai già tutto: ti arriva solo l'avviso. Il regalo vale per gli altri utenti."
+    : (state.plan || {}).lifetime ? "Hai Pokébot completo per sempre: ti arriva solo l'avviso." : "Il mese si aggiunge in automatico, ti avviso io in chat.";
   const mySets = [["me55", "30th Celebration"], ...Object.values(extra).filter((e) => e.mine).map((e) => [e.meta.id, e.meta.name])];
   $("#friend-list").innerHTML = fr.length ? fr.map((f) => {
     const shared = (f.shared || []).filter((sid) => sid !== "me55c").map(setName);
@@ -415,7 +427,7 @@ $("#fc-copy").onclick = async () => {
 };
 $("#fc-share").onclick = () => {
   const code = (state || {}).friend_code, bot = (state || {}).bot_username; if (!code) return;
-  const text = `Aggiungimi su Pokébot! Apri il bot e scrivi /amico ${code}`;
+  const text = `Vieni su Pokébot: ti avvisa appena spunta una carta che ti manca. Apri il bot, premi Avvia e, appena sei dentro, scrivi /amico ${code} così diventiamo amici.`;
   const url = bot ? `https://t.me/share/url?url=${encodeURIComponent("https://t.me/" + bot)}&text=${encodeURIComponent(text)}`
     : `https://t.me/share/url?url=${encodeURIComponent(text)}`;
   if (tg && tg.openTelegramLink) tg.openTelegramLink(url); else window.open(url, "_blank");
@@ -544,7 +556,7 @@ function renderHome() {
   $("#home-hint").textContent = lr ? `Ultimo giro ${new Date(lr.started_at * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}: ${lr.listings_seen} annunci letti, ${lr.matches} segnalati.` : "";
 }
 document.querySelectorAll(".tile[data-go]").forEach((t) => t.onclick = () => showTab(t.dataset.go));
-$("#tile-ai").onclick = () => toast("🧠 Analisi IA: in arrivo");
+$("#tile-ai").onclick = () => { location.href = "/app/scan"; };  // pagina a sé (deploy/app/scan.html): foto, centratura, bordi, voto stimato
 
 /* ---------- Collezioni ---------- */
 async function loadCatalog() {

@@ -33,7 +33,9 @@ funziona per gli altri, e nessuno vede le richieste di accesso tranne il proprie
 
 Il pulsante **App** accanto alla chat apre: **Collezioni** (checklist con le carte possedute accese e le mancanti
 al buio, inseguimenti, annunci trovati, prezzi e lista della spesa), **Amici** (codice amico, album in comune),
-**Impostazioni**, **Segnalazioni** e **Analisi IA** (in arrivo). Ogni tocco diventa un comando per il bot: il ponte
+**Impostazioni**, **Segnalazioni** e **Valuta carta** (`deploy/app/scan.html`: foto fronte e retro, ritaglio, centratura
+e bordi misurati nel telefono, voto stimato 1-10, storico locale; livella con i sensori di Telegram quando ci sono).
+Ogni tocco diventa un comando per il bot: il ponte
 conferma subito in chat («📲 Ricevuto dalla Mini App»), il bot lo esegue e pubblica lo stato prima della ricerca, così
 l'app si aggiorna da sola in circa mezzo minuto e in chat arriva il risultato.
 La casella di ricerca in Collezioni trova anche le carte in tutte le espansioni (indice `deploy/app/cards.json`,

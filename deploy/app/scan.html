@@ -1,0 +1,900 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Valuta carta · Pokébot</title>
+<script src="/app/telegram-web-app.js"></script>
+<style>*{box-sizing:border-box}[hidden]:not([hidden=until-found i]){display:none!important}</style>
+</head>
+<body>
+<style>
+/* Layout: una colonna da telefono, scheda in alto, strumenti sotto; tutto il calcolo avviene nel browser */
+:root{
+  --bg:#f3f1ec; --paper:#ffffff; --ink:#1d1b17; --muted:#6c675d; --line:#dcd7cd;
+  --accent:#1f5f8b; --accent-ink:#ffffff; --ok:#2f7d4f; --warn:#b26a00; --bad:#b2322d;
+  --font-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#17181b; --paper:#202228; --ink:#eceae4; --muted:#9c978c; --line:#34363d;
+  --accent:#6fb0dc; --accent-ink:#0f1a22; --ok:#5fbf85; --warn:#e3a23a; --bad:#e5706b; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#17181b; --paper:#202228; --ink:#eceae4; --muted:#9c978c; --line:#34363d;
+  --accent:#6fb0dc; --accent-ink:#0f1a22; --ok:#5fbf85; --warn:#e3a23a; --bad:#e5706b; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-body);margin:0;padding-block:0 32px;padding-inline:16px;line-height:1.45}
+h1,h2,h3{text-wrap:balance;margin:0}
+.wrap{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+header{padding-block:18px 4px;display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+header h1{font-size:1.35rem;letter-spacing:-.01em}
+header small{color:var(--muted);font-family:var(--font-mono);font-size:.72rem}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:14px}
+.label{font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.shots{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px}
+.shot{border:1px dashed var(--line);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.shot .thumb{aspect-ratio:63/88;max-width:100%;width:100%;border-radius:6px;background:var(--bg);display:grid;place-items:center;color:var(--muted);font-size:.8rem;overflow:hidden;position:relative}
+.shot .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.shot .thumb .q{position:absolute;left:6px;bottom:6px;font-family:var(--font-mono);font-size:.68rem;background:var(--paper);padding:2px 6px;border-radius:4px;border:1px solid var(--line)}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap}
+button{font:inherit;border-radius:8px;border:1px solid var(--line);background:var(--paper);color:var(--ink);padding:9px 12px;cursor:pointer;min-height:40px}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+button:disabled{opacity:.45;cursor:default}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.full{width:100%}
+.level{display:flex;align-items:center;gap:12px;margin-top:10px}
+.bubble{position:relative;width:64px;height:64px;border-radius:50%;border:2px solid var(--line);flex:none}
+.bubble::before{content:"";position:absolute;inset:50% auto auto 50%;width:14px;height:14px;border:1px dashed var(--muted);border-radius:50%;transform:translate(-50%,-50%)}
+.bubble i{position:absolute;left:50%;top:50%;width:12px;height:12px;border-radius:50%;background:var(--bad);transform:translate(-50%,-50%);transition:transform .08s linear,background .2s}
+.bubble.ok i{background:var(--ok)}
+.levtxt{font-family:var(--font-mono);font-size:.8rem;color:var(--muted)}
+.levtxt b{color:var(--ink)}
+.note{color:var(--muted);font-size:.85rem;margin:8px 0 0}
+/* fotocamera */
+#cam{position:fixed;inset:0;background:#000;z-index:10;display:flex;flex-direction:column}
+#cam video{flex:1;width:100%;object-fit:cover;background:#000}
+#cam .overlay{position:absolute;inset:0;pointer-events:none}
+#cam .guide{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(72vw,52vh*0.716);aspect-ratio:63/88;border:2px solid rgba(255,255,255,.85);border-radius:3% / 2.2%;box-shadow:0 0 0 2000px rgba(0,0,0,.25)}
+#cam .hud{position:absolute;top:calc(env(safe-area-inset-top,0px) + 12px);left:12px;right:12px;display:flex;justify-content:space-between;color:#fff;font-family:var(--font-mono);font-size:.78rem}
+#cam .hud span{background:rgba(0,0,0,.5);padding:4px 8px;border-radius:6px}
+#cam .bar{padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 16px);display:flex;align-items:center;justify-content:space-between;gap:12px;background:#000}
+#cam .bar button{background:#1b1b1b;color:#fff;border-color:#333}
+#cam .shutter{width:68px;height:68px;border-radius:50%;background:#fff !important;border:4px solid #888 !important;padding:0}
+#cam .shutter.ready{border-color:var(--ok) !important}
+/* ritaglio manuale */
+#crop,#frame{position:fixed;inset:0;background:var(--bg);z-index:11;display:flex;flex-direction:column}
+#crop .crop-head,#frame .crop-head{padding:calc(env(safe-area-inset-top,0px) + 12px) 16px 8px;display:flex;flex-direction:column;gap:2px;font-size:.85rem;color:var(--muted)}
+#crop .crop-head b,#frame .crop-head b{color:var(--ink);font-size:1rem}
+#crop .crop-body,#frame .crop-body{flex:1;display:grid;place-items:center;padding:8px;min-height:0;overflow:hidden}
+#crop canvas,#frame canvas{max-width:100%;max-height:100%;touch-action:none;border-radius:6px;background:#000}
+#crop .bar,#frame .bar{padding:12px 16px calc(env(safe-area-inset-bottom,0px) + 16px);display:flex;gap:10px}
+#crop .bar button,#frame .bar button{flex:1}
+.warn{margin-top:6px;padding:8px 10px;border-radius:8px;border:1px solid var(--warn);color:var(--ink);background:color-mix(in srgb, var(--warn) 14%, transparent);font-size:.8rem}
+.chk{display:flex;align-items:center;gap:6px;font-size:.8rem;color:var(--ink);margin-top:4px}
+.chk input{width:18px;height:18px;accent-color:var(--accent)}
+/* risultati */
+.grade{display:flex;align-items:baseline;gap:14px;margin-top:6px}
+.grade .big{font-size:3rem;font-weight:700;font-family:var(--font-mono);line-height:1}
+.grade .cap{color:var(--muted);font-size:.85rem}
+.rows{display:grid;gap:8px;margin-top:12px}
+.row{display:grid;grid-template-columns:1fr auto;gap:6px 12px;padding:10px 0;border-top:1px solid var(--line);align-items:center}
+.row .k{font-weight:600}
+.row .v{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:.9rem;text-align:right}
+.row .d{grid-column:1/-1;color:var(--muted);font-size:.82rem}
+.hist{display:grid;gap:8px}
+.hist .it{display:grid;grid-template-columns:52px 1fr auto;gap:10px;align-items:center;padding:8px;border:1px solid var(--line);border-radius:10px;background:var(--bg);cursor:pointer}
+.hist .it img{width:52px;aspect-ratio:63/88;object-fit:cover;border-radius:4px;display:block}
+.hist .it .nm{font-weight:600}.hist .it .dt{color:var(--muted);font-size:.8rem}.hist .it .gr{font-size:1.4rem;font-weight:700;font-family:var(--font-mono)}
+.hist .det{grid-column:1/-1;font-size:.82rem;color:var(--muted);display:none}.hist .it.open .det{display:block}
+.saverow{display:flex;gap:8px;margin-top:12px}.saverow input{flex:1;font:inherit;padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);min-width:0}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.72rem;font-family:var(--font-mono);border:1px solid var(--line);margin-left:6px;vertical-align:middle}
+.pill.ok{color:var(--ok);border-color:var(--ok)} .pill.warn{color:var(--warn);border-color:var(--warn)} .pill.bad{color:var(--bad);border-color:var(--bad)}
+.warped{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+.warped figure{margin:0;min-width:0}
+.warped canvas{width:100%;height:auto;border-radius:6px;border:1px solid var(--line);display:block}
+.warped figcaption{font-size:.72rem;color:var(--muted);margin-top:4px;font-family:var(--font-mono)}
+details{margin-top:12px;color:var(--muted);font-size:.85rem}
+summary{cursor:pointer;color:var(--ink)}
+.err{color:var(--bad);font-size:.85rem;margin-top:8px}
+@media (prefers-reduced-motion:reduce){*{transition:none !important}}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+
+<div class="wrap">
+  <header>
+    <div><a href="/app" id="back-app" style="color:var(--accent);text-decoration:none;font-size:.85rem;font-weight:600">‹ Pokébot</a><h1>Valuta carta</h1></div>
+    <small>63 × 88 mm · 10 px/mm</small>
+  </header>
+
+  <section class="card" id="capture">
+    <div class="label">1 · Acquisizione</div>
+    <div class="shots">
+      <div class="shot" data-side="front">
+        <div class="thumb" id="thumb-front">Fronte</div>
+        <div class="btnrow">
+          <button class="snap" data-side="front">📷 Scatta</button>
+          <label><button type="button" class="pick" data-side="front">Carica</button><input type="file" accept="image/*" id="file-front" multiple hidden><input type="file" accept="image/*" capture="environment" id="snap-front" hidden></label>
+        </div>
+      </div>
+      <div class="shot" data-side="back">
+        <div class="thumb" id="thumb-back">Retro</div>
+        <div class="btnrow">
+          <button class="snap" data-side="back">📷 Scatta</button>
+          <label><button type="button" class="pick" data-side="back">Carica</button><input type="file" accept="image/*" id="file-back" multiple hidden><input type="file" accept="image/*" capture="environment" id="snap-back" hidden></label>
+        </div>
+      </div>
+    </div>
+    <div class="level">
+      <div class="bubble" id="bubble"><i></i></div>
+      <div class="levtxt" id="levtxt"><b>Livella</b><br>tocca “Attiva livella”</div>
+      <button id="lev-btn">Attiva livella</button>
+    </div>
+    <p class="note">Fotografa la carta su un foglio bianco. Con “Carica” puoi selezionare <b>più foto della stessa faccia</b> (10–20 scatti, muovendo un po’ il telefono): la carta viene trovata in ognuna e la centratura è la mediana di tutte, così le foto dove un bordo prende un riflesso non pesano.</p>
+    <div class="btnrow" style="margin-top:12px">
+      <button class="primary full" id="analyze" disabled>Analizza</button>
+    </div>
+    <div class="err" id="err" hidden></div>
+  </section>
+
+  <section class="card" id="results" hidden>
+    <div class="label">2 · Risultato</div>
+    <div class="grade"><div class="big" id="g-big">–</div><div class="cap" id="g-cap">stima su scala 1–10</div></div>
+    <div class="rows" id="rows"></div>
+    <div class="warped">
+      <figure><canvas id="w-front" width="630" height="880"></canvas><figcaption>fronte raddrizzato, cornice tratteggiata</figcaption><button class="full" id="fr-front" style="margin-top:6px" hidden>Regola cornice</button></figure>
+      <figure><canvas id="w-back" width="630" height="880"></canvas><figcaption>retro raddrizzato</figcaption><button class="full" id="fr-back" style="margin-top:6px" hidden>Regola cornice</button></figure>
+    </div>
+    <p class="note">Sulle carte full-art (senza bordo colorato) la cornice automatica non è affidabile: tocca “Regola cornice” e porta le 4 maniglie sul filo interno della cornice stampata.</p>
+    <details><summary>Come viene calcolato</summary>
+      <p><b>Ritaglio.</b> L’app cerca le linee rette dei bordi (a colori, non solo in bianco e nero), sceglie il rettangolo con proporzioni 63:88 e poi affina ogni lato: tra le linee candidate prende quella più esterna in cui il colore appena dentro al taglio è lo stesso sui quattro lati, cioè il bordo stampato. La carta viene raddrizzata a 10 px per millimetro.</p>
+      <p><b>Centratura.</b> Per ogni lato calcola il colore medio di tutta la striscia a ogni distanza dal taglio (la media su centinaia di pixel annulla glitter e trama) e prende il primo salto netto entro 6 mm: quella è la cornice. Un lato in cui il salto è debole (riflesso che scurisce il bordo) viene scartato. Con più foto la cornice è la mediana dei lati validi di tutti gli scatti; il risultato mostra quante foto hanno contribuito per lato e la dispersione. L’ombra dello spessore della carta sul foglio viene riconosciuta e non sposta il taglio. Soglie PSA (fronte 55/45 per il 10, retro 75/25).</p>
+      <p><b>Angoli e bordi.</b> Conta il bianco della carta esposta, cioè pixel chiari e poco saturi, solo se collegato al taglio: le scritte bianche stampate non contano. Sulle carte con bordo argento o senza bordo non è misurabile per colore.</p>
+      <p><b>Superficie</b> (graffi, linee di stampa): non ancora analizzata.</p>
+    </details>
+    <div class="saverow"><input id="save-name" placeholder="Nome carta (es. Magikarp 203/193)" maxlength="60"><button class="primary" id="save-btn">Salva nello storico</button></div>
+    <div class="note" id="save-note" hidden></div>
+    <div class="btnrow" style="margin-top:12px"><button class="full" id="again">Nuova carta</button></div>
+  </section>
+
+  <section class="card" id="history">
+    <div class="label">3 · Storico</div>
+    <p class="note" id="hist-note">Le analisi salvate restano qui anche dopo aver chiuso la pagina. Tocca una carta per i dettagli.</p>
+    <div class="hist" id="hist"></div>
+  </section>
+</div>
+
+<div id="crop" hidden>
+  <div class="crop-head"><b id="crop-title">Ritaglio fronte</b><span>I cerchi si posizionano da soli sui bordi. Se uno è fuori, trascinalo vicino: si aggancia al bordo reale.</span>
+    <label class="chk"><input type="checkbox" id="snap" checked> aggancio automatico ai bordi</label>
+    <div class="warn" id="crop-warn" hidden></div></div>
+  <div class="crop-body"><canvas id="cropc"></canvas></div>
+  <div class="bar"><button id="crop-cancel">Annulla</button><button id="crop-redo">Rileva di nuovo</button><button class="primary" id="crop-ok">Conferma</button></div>
+</div>
+
+<div id="frame" class="editor" hidden>
+  <div class="crop-head"><b id="frame-title">Cornice fronte</b><span>Trascina le 4 maniglie sul filo interno della cornice stampata. <span id="frame-vals" style="font-family:var(--font-mono)"></span></span></div>
+  <div class="crop-body"><canvas id="framec"></canvas></div>
+  <div class="bar"><button id="frame-cancel">Annulla</button><button class="primary" id="frame-ok">Conferma cornice</button></div>
+</div>
+
+<div id="cam" hidden>
+  <video id="video" autoplay playsinline muted></video>
+  <div class="overlay">
+    <div class="guide"></div>
+    <div class="hud"><span id="hud-side">Fronte</span><span id="hud-tilt">livella –</span></div>
+  </div>
+  <div class="bar">
+    <button id="cam-cancel">Annulla</button>
+    <button class="shutter" id="shutter" aria-label="Scatta"></button>
+    <span style="width:70px"></span>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const state = { front:null, back:null, tilt:null, side:'front', stream:null };
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg){ tg.ready(); tg.expand(); if (tg.colorScheme) document.documentElement.dataset.theme = tg.colorScheme;
+  if (tg.BackButton){ tg.BackButton.show(); tg.BackButton.onClick(() => { location.href = '/app'; }); } }
+
+/* ---------- livella ---------- */
+let levelOn = false;
+function onOrient(e){
+  if (e.beta == null) return;
+  const b = e.beta, g = e.gamma;             // telefono piatto: beta≈0, gamma≈0
+  const tilt = Math.hypot(b, g);
+  state.tilt = tilt;
+  const ok = tilt <= 2;
+  const bub = $('#bubble'); bub.classList.toggle('ok', ok);
+  const k = 24 / 15;                           // 15° = raggio della bolla
+  const dx = Math.max(-24, Math.min(24, g * k)), dy = Math.max(-24, Math.min(24, b * k));
+  bub.querySelector('i').style.transform = `translate(calc(-50% + ${dx}px),calc(-50% + ${dy}px))`;
+  $('#levtxt').innerHTML = `<b>${tilt.toFixed(1)}°</b> di inclinazione<br>${ok ? 'telefono in piano' : 'raddrizza il telefono (≤ 2°)'}`;
+  $('#hud-tilt').textContent = `livella ${tilt.toFixed(1)}°`;
+  $('#shutter').classList.toggle('ready', ok);
+}
+const levelRow = document.querySelector('.level');
+function levelOff(){ levelRow.hidden = true; $('#hud-tilt').textContent = ''; $('#shutter').classList.add('ready'); }
+async function enableLevel(){
+  if (levelOn) return; levelOn = true;
+  $('#lev-btn').hidden = true; $('#levtxt').innerHTML = '<b>Livella attiva</b><br>in attesa di dati…';
+  const tgo = tg && tg.DeviceOrientation;
+  if (tgo && typeof tgo.start === 'function'){  // dentro Telegram i sensori passano dall'app (angoli in radianti)
+    tg.onEvent('deviceOrientationChanged', () => onOrient({ beta: tgo.beta * 180 / Math.PI, gamma: tgo.gamma * 180 / Math.PI }));
+    tg.onEvent('deviceOrientationFailed', levelOff);
+    tgo.start({ refresh_rate: 100 });
+  } else {
+    try{
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+        const r = await DeviceOrientationEvent.requestPermission();
+        if (r !== 'granted') throw new Error('negato');
+      }
+      window.addEventListener('deviceorientation', onOrient);
+    }catch(e){ levelOff(); return; }
+  }
+  setTimeout(() => { if (state.tilt == null) levelOff(); }, 2500);  // senza dati la livella sparisce: si scatta lo stesso
+}
+if (!(tg && tg.DeviceOrientation) && typeof DeviceOrientationEvent === 'undefined') levelOff();
+$('#lev-btn').addEventListener('click', enableLevel);
+
+/* ---------- fotocamera ---------- */
+async function openCam(side){
+  state.side = side; $('#hud-side').textContent = side === 'front' ? 'Fronte' : 'Retro';
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ return snapFile(side); }
+  try{
+    state.stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment', width:{ideal:3840}, height:{ideal:2160} }, audio:false });
+    $('#video').srcObject = state.stream;
+    $('#cam').hidden = false;
+    if (!levelOn) enableLevel();
+  }catch(e){ snapFile(side); }
+}
+function closeCam(){
+  if (state.stream){ state.stream.getTracks().forEach(t => t.stop()); state.stream = null; }
+  $('#cam').hidden = true;
+}
+$('#cam-cancel').addEventListener('click', closeCam);
+$('#shutter').addEventListener('click', () => {
+  const v = $('#video'); if (!v.videoWidth) return;
+  const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v, 0, 0);
+  closeCam();
+  acceptImage(state.side, c);
+});
+function pickFile(side){ $('#file-' + side).click(); }
+function snapFile(side){ $('#snap-' + side).click(); }
+['front','back'].forEach(side => $('#snap-' + side).addEventListener('change', async e => {
+  const f = (e.target.files || [])[0]; e.target.value = ''; if (!f) return; const c = await loadFile(f); if (c) acceptImage(side, c); }));
+document.querySelectorAll('.snap').forEach(b => b.addEventListener('click', () => openCam(b.dataset.side)));
+document.querySelectorAll('.pick').forEach(b => b.addEventListener('click', () => pickFile(b.dataset.side)));
+function loadFile(f){ return new Promise(res => { const img = new Image(); img.onload = () => {
+    const c = document.createElement('canvas'); const s = Math.min(1, 2400 / Math.max(img.width, img.height));
+    c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(img.src); res(c); };
+  img.onerror = () => res(null); img.src = URL.createObjectURL(f); }); }
+['front','back'].forEach(side => $('#file-' + side).addEventListener('change', async e => {
+  const files = Array.from(e.target.files || []); e.target.value = ''; if (!files.length) return;
+  if (files.length === 1){ const c = await loadFile(files[0]); if (c) acceptImage(side, c); return; }
+  // più scatti della stessa faccia: ognuno viene controllato e ritagliato da solo; il migliore fa da riferimento
+  const err = $('#err'); err.hidden = false; err.textContent = `Carico ${files.length} foto…`;
+  const shots = [], rejected = [];
+  for (let i = 0; i < files.length; i++){
+    err.textContent = `Foto ${i + 1} di ${files.length}…`; await new Promise(r => setTimeout(r, 0));
+    const c = await loadFile(files[i]); if (!c){ rejected.push('file non leggibile'); continue; }
+    const gray = toGray(c, 640); const sh = sharpness(gray), ex = exposure(gray);
+    if (sh < 60 || ex.bright > 0.04 || ex.dark > 0.9){ rejected.push(sh < 60 ? 'sfocata' : ex.bright > 0.04 ? 'riflessi' : 'scura'); continue; }
+    const a = autoQuad(c); if (!a.quad){ rejected.push('carta non trovata'); continue; }
+    const st = a.stats; const conf = (st && Math.min(...st.map(x => x.n)) >= 0.75 && Math.min(...st.map(x => x.contrast)) >= 30) ? 1 : 0.5;
+    shots.push({ canvas: c, sharp: sh, quad: orderQuad(a.quad), conf });
+  }
+  if (!shots.length){ err.textContent = `Nessuna foto utilizzabile (${rejected.join(', ')}).`; return; }
+  shots.sort((p, q) => (q.conf - p.conf) || (q.sharp - p.sharp));
+  const best = shots[0];
+  state[side] = { canvas: best.canvas, sharp: best.sharp, quad: null, shots: shots.slice(1) };
+  err.hidden = rejected.length === 0; err.textContent = rejected.length ? `${rejected.length} foto scartate (${rejected.join(', ')}); ${shots.length} usate.` : '';
+  const t = $('#thumb-' + side); t.innerHTML = '';
+  const im = new Image(); im.src = best.canvas.toDataURL('image/jpeg', .6); t.appendChild(im);
+  const q = document.createElement('span'); q.className = 'q'; q.textContent = `${shots.length} foto · tocca per il ritaglio`; t.appendChild(q);
+  openCrop(side);
+}));
+
+/* ---------- controllo qualità scatto ---------- */
+function toGray(canvas, maxW){
+  const s = Math.min(1, maxW / canvas.width);
+  const w = Math.round(canvas.width * s), h = Math.round(canvas.height * s);
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently:true }); ctx.drawImage(canvas, 0, 0, w, h);
+  const d = ctx.getImageData(0, 0, w, h).data, g = new Float32Array(w * h);
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) g[j] = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
+  return { g, w, h, data:d };
+}
+function sharpness(gray){            // varianza del Laplaciano
+  const { g, w, h } = gray; let sum = 0, sum2 = 0, n = 0;
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++){
+    const i = y * w + x, l = 4 * g[i] - g[i-1] - g[i+1] - g[i-w] - g[i+w];
+    sum += l; sum2 += l * l; n++;
+  }
+  const m = sum / n; return sum2 / n - m * m;
+}
+function exposure(gray){
+  const { g } = gray; let dark = 0, bright = 0;
+  for (let i = 0; i < g.length; i++){ if (g[i] < 15) dark++; else if (g[i] > 250) bright++; }
+  return { dark: dark / g.length, bright: bright / g.length };
+}
+function acceptImage(side, canvas){
+  const gray = toGray(canvas, 640);
+  const sh = sharpness(gray), ex = exposure(gray);
+  const probs = [];
+  if (sh < 60) probs.push(`sfocata (nitidezza ${sh.toFixed(0)}, minimo 60)`);
+  if (ex.bright > 0.04) probs.push('riflessi o sovraesposizione');
+  if (ex.dark > 0.9) probs.push('troppo scura');
+  const err = $('#err'); err.hidden = probs.length === 0;
+  err.textContent = probs.length ? `${side === 'front' ? 'Fronte' : 'Retro'}: foto rifiutata, ${probs.join(', ')}. Rifai lo scatto.` : '';
+  if (probs.length) return;
+  state[side] = { canvas, sharp: sh, quad:null };
+  const t = $('#thumb-' + side); t.innerHTML = '';
+  const im = new Image(); im.src = canvas.toDataURL('image/jpeg', .6); t.appendChild(im);
+  const q = document.createElement('span'); q.className = 'q'; q.textContent = `nitidezza ${sh.toFixed(0)} · tocca per ritagliare`; t.appendChild(q);
+  openCrop(side);
+}
+['front','back'].forEach(side => $('#thumb-' + side).addEventListener('click', () => { if (state[side]) openCrop(side); }));
+
+/* ---------- ritaglio manuale con 4 maniglie ---------- */
+const crop = { side:null, quad:null, scale:1, drag:-1 }; window.__crop = crop;
+function orderQuad(q){ const cx = q.reduce((s,p) => s + p[0], 0) / 4, cy = q.reduce((s,p) => s + p[1], 0) / 4;
+  return q.slice().sort((a, b) => Math.atan2(a[1]-cy, a[0]-cx) - Math.atan2(b[1]-cy, b[0]-cx)); }
+function openCrop(side){
+  const src = state[side].canvas; crop.side = side; let conf = 1;
+  let q = state[side].quad; if (!q){ const a = autoQuad(src); q = a.quad; const st = a.stats;
+    conf = !q ? 0 : (st && Math.min(...st.map(x => x.n)) >= 0.75 && Math.min(...st.map(x => x.contrast)) >= 30) ? 1 : 0.5; }
+  if (!q){ const h = src.height * 0.7, w = h * 63 / 88, x0 = (src.width - w) / 2, y0 = (src.height - h) / 2; q = [[x0,y0],[x0+w,y0],[x0+w,y0+h],[x0,y0+h]]; conf = 0; }
+  crop.quad = orderQuad(q).map(p => [Math.max(0, Math.min(src.width - 1, p[0])), Math.max(0, Math.min(src.height - 1, p[1]))]);
+  $('#crop-title').textContent = (side === 'front' ? 'Ritaglio fronte' : 'Ritaglio retro') + (state[side].quad ? '' : conf >= 0.75 ? ' · rilevata automaticamente' : conf > 0 ? ' · controlla i 4 angoli' : ' · carta non trovata, posiziona i cerchi');
+  const wn = $('#crop-warn'); wn.hidden = !!state[side].quad || conf >= 0.75;
+  wn.textContent = conf > 0 ? 'Il bordo della carta si distingue poco dallo sfondo: verifica che i cerchi siano sugli angoli. Per una misura affidabile fotografa la carta su uno sfondo scuro e uniforme.' : 'Carta non trovata. Posiziona i cerchi a mano, oppure rifai la foto su uno sfondo scuro e uniforme.';
+  $('#crop').hidden = false;
+  try{
+    const c = $('#cropc'); const body = $('#crop .crop-body').getBoundingClientRect();
+    const maxW = Math.max(200, Math.min((body.width || window.innerWidth || 360) - 16, 560));
+    const maxH = Math.max(240, (body.height || (window.innerHeight || 700) - 190) - 16);
+    crop.scale = Math.min(maxW / src.width, maxH / src.height);
+    if (!(crop.scale > 0)) crop.scale = 320 / src.width;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    c.style.width = Math.round(src.width * crop.scale) + 'px'; c.style.height = Math.round(src.height * crop.scale) + 'px';
+    c.width = Math.max(1, Math.round(src.width * crop.scale * dpr)); c.height = Math.max(1, Math.round(src.height * crop.scale * dpr));
+    drawCrop();
+  }catch(e){ showErr('Ritaglio: ' + (e && e.message || e)); }
+}
+function showErr(msg){ const el = $('#err'); el.hidden = false; el.textContent = msg; const t = $('#crop-title'); if (t && !$('#crop').hidden) t.textContent = msg; }
+window.addEventListener('error', e => showErr('Errore: ' + (e.message || 'sconosciuto') + (e.lineno ? ' (riga ' + e.lineno + ')' : '')));
+function drawCrop(){
+  const c = $('#cropc'), ctx = c.getContext('2d'), src = state[crop.side].canvas, dpr = c.width / (src.width * crop.scale), s = crop.scale * dpr;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height);
+  ctx.drawImage(src, 0, 0, c.width, c.height);
+  const q = crop.quad;
+  ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.beginPath(); ctx.rect(0, 0, c.width, c.height);
+  ctx.moveTo(q[0][0]*s, q[0][1]*s); for (let i = 3; i >= 1; i--) ctx.lineTo(q[i][0]*s, q[i][1]*s); ctx.closePath(); ctx.fill('evenodd');
+  ctx.strokeStyle = '#30d158'; ctx.lineWidth = 2 * dpr; ctx.beginPath(); q.forEach((p, i) => i ? ctx.lineTo(p[0]*s, p[1]*s) : ctx.moveTo(p[0]*s, p[1]*s)); ctx.closePath(); ctx.stroke();
+  q.forEach((p, i) => { ctx.beginPath(); ctx.arc(p[0]*s, p[1]*s, 16 * dpr, 0, Math.PI * 2); ctx.fillStyle = i === crop.drag ? '#30d158' : 'rgba(255,255,255,.9)'; ctx.fill(); ctx.lineWidth = 2 * dpr; ctx.strokeStyle = '#111'; ctx.stroke(); });
+  if (crop.drag >= 0){ // lente 3× in alto, lato opposto alla maniglia
+    const p = q[crop.drag], L = 120 * dpr, Z = 3; const lx = p[0]*s < c.width / 2 ? c.width - L - 8*dpr : 8*dpr, ly = 8*dpr;
+    ctx.save(); ctx.beginPath(); ctx.rect(lx, ly, L, L); ctx.clip();
+    ctx.drawImage(src, p[0] - L/(2*Z*s), p[1] - L/(2*Z*s), L/(Z*s), L/(Z*s), lx, ly, L, L); ctx.restore();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2 * dpr; ctx.strokeRect(lx, ly, L, L);
+    ctx.strokeStyle = '#30d158'; ctx.beginPath(); ctx.moveTo(lx + L/2, ly); ctx.lineTo(lx + L/2, ly + L); ctx.moveTo(lx, ly + L/2); ctx.lineTo(lx + L, ly + L/2); ctx.stroke(); }
+}
+function cropPos(e){ const r = $('#cropc').getBoundingClientRect(); return [(e.clientX - r.left) / crop.scale, (e.clientY - r.top) / crop.scale]; }
+$('#cropc').addEventListener('pointerdown', e => { const [x, y] = cropPos(e); let bi = -1, bd = 44 / crop.scale;
+  crop.quad.forEach((p, i) => { const d = Math.hypot(p[0]-x, p[1]-y); if (d < bd){ bd = d; bi = i; } });
+  crop.drag = bi; if (bi >= 0){ e.target.setPointerCapture(e.pointerId); drawCrop(); } });
+$('#cropc').addEventListener('pointermove', e => { if (crop.drag < 0) return; const src = state[crop.side].canvas; const [x, y] = cropPos(e);
+  crop.quad[crop.drag] = [Math.max(0, Math.min(src.width - 1, x)), Math.max(0, Math.min(src.height - 1, y))]; drawCrop(); });
+const endDrag = () => { if (crop.drag >= 0){ const i = crop.drag; crop.drag = -1;
+  if ($('#snap').checked){ try{ const r = refineQuad(state[crop.side].canvas, crop.quad, 80, 0.035); crop.quad[i] = r[i]; }catch(e){} } drawCrop(); } };
+$('#cropc').addEventListener('pointerup', endDrag); $('#cropc').addEventListener('pointercancel', endDrag);
+$('#crop-cancel').addEventListener('click', () => { $('#crop').hidden = true; });
+$('#crop-redo').addEventListener('click', () => { state[crop.side].quad = null; openCrop(crop.side); });
+function uprightQuad(q){ // lato lungo verticale: se la carta è di traverso, ruota l'ordine degli angoli
+  const wa = (Math.hypot(q[1][0]-q[0][0], q[1][1]-q[0][1]) + Math.hypot(q[2][0]-q[3][0], q[2][1]-q[3][1])) / 2;
+  const ha = (Math.hypot(q[2][0]-q[1][0], q[2][1]-q[1][1]) + Math.hypot(q[3][0]-q[0][0], q[3][1]-q[0][1])) / 2;
+  return wa > ha ? [q[1], q[2], q[3], q[0]] : q; }
+$('#crop-ok').addEventListener('click', () => { state[crop.side].quad = uprightQuad(orderQuad(crop.quad)); state[crop.side].frame = null; $('#crop').hidden = true;
+  const t = $('#thumb-' + crop.side).querySelector('.q'); if (t) t.textContent = `nitidezza ${state[crop.side].sharp.toFixed(0)} · ritaglio ok`;
+  $('#analyze').disabled = !(state.front && state.front.quad); });
+
+/* ---------- rilevamento carta: bordi a colori + Hough ---------- */
+function toColor(canvas, maxW){ // 3 canali: luminanza e due canali di colore opposto (giallo/blu, rosso/verde)
+  const s = Math.min(1, maxW / canvas.width); const w = Math.round(canvas.width * s), h = Math.round(canvas.height * s);
+  const c = document.createElement('canvas'); c.width = w; c.height = h; const ctx = c.getContext('2d', { willReadFrequently:true }); ctx.drawImage(canvas, 0, 0, w, h);
+  const d = ctx.getImageData(0, 0, w, h).data; const L = new Float32Array(w * h), A = new Float32Array(w * h), B = new Float32Array(w * h);
+  for (let i = 0, j = 0; j < w * h; i += 4, j++){ const r = d[i], g = d[i+1], b = d[i+2]; L[j] = 0.299 * r + 0.587 * g + 0.114 * b; A[j] = 0.8 * (r - g); B[j] = 0.8 * ((r + g) / 2 - b); }
+  return { ch:[L, A, B], w, h, data:d }; }
+function blur3(src, w, h){ const tmp = new Float32Array(w * h), out = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 1; x < w - 1; x++){ const i = y * w + x; tmp[i] = (src[i-1] + src[i] + src[i+1]) / 3; }
+  for (let y = 1; y < h - 1; y++) for (let x = 0; x < w; x++){ const i = y * w + x; out[i] = (tmp[i-w] + tmp[i] + tmp[i+w]) / 3; } return out; }
+function gradients(col){ const { ch, w, h } = col; const gx = new Float32Array(w * h), gy = new Float32Array(w * h), mag = new Float32Array(w * h);
+  for (const C of ch){ const b = blur3(C, w, h);
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++){ const i = y * w + x;
+      const sx = -b[i-w-1] + b[i-w+1] - 2*b[i-1] + 2*b[i+1] - b[i+w-1] + b[i+w+1], sy = -b[i-w-1] - 2*b[i-w] - b[i-w+1] + b[i+w-1] + 2*b[i+w] + b[i+w+1];
+      const m = Math.hypot(sx, sy); if (m > mag[i]){ mag[i] = m; gx[i] = sx; gy[i] = sy; } } }
+  return { gx, gy, mag, w, h }; }
+function percentile(arr, p){ const hist = new Int32Array(1025); let n = 0; for (let i = 0; i < arr.length; i++){ const v = Math.min(1024, arr[i] | 0); hist[v]++; n++; }
+  let acc = 0; for (let v = 0; v < 1025; v++){ acc += hist[v]; if (acc >= n * p) return v; } return 1024; }
+function lineIntersect(a, b){ // rette in forma normale: x cosθ + y sinθ = ρ
+  const c1 = Math.cos(a.t), s1 = Math.sin(a.t), c2 = Math.cos(b.t), s2 = Math.sin(b.t); const den = c1 * s2 - s1 * c2; if (Math.abs(den) < 1e-6) return null;
+  return [(a.r * s2 - b.r * s1) / den, (c1 * b.r - c2 * a.r) / den]; }
+const angDiff = (a, b) => { let d = Math.abs(a - b) % Math.PI; return Math.min(d, Math.PI - d); };
+function findQuadHough(canvas){
+  const colImg = toColor(canvas, 520); const G = gradients(colImg); G.col = colImg; const { gx, gy, mag, w, h } = G;
+  const thr = Math.max(20, percentile(mag, 0.90)); const D = Math.ceil(Math.hypot(w, h)); const NT = 180, NR = 2 * D + 1;
+  const acc = new Float32Array(NT * NR);
+  for (let y = 2; y < h - 2; y++) for (let x = 2; x < w - 2; x++){ const i = y * w + x; if (mag[i] < thr) continue;
+    let t0 = Math.atan2(gy[i], gx[i]); if (t0 < 0) t0 += Math.PI; const td = Math.round(t0 * 180 / Math.PI);
+    const wv = Math.min(mag[i], thr * 4); // limita il peso dei bordi molto contrastati del disegno
+    for (let k = -4; k <= 4; k++){ const t = (td + k + 180) % 180; const th = t * Math.PI / 180; const r = Math.round(x * Math.cos(th) + y * Math.sin(th)) + D; acc[t * NR + r] += wv * (1 - Math.abs(k) / 6); } }
+  const peaks = [];
+  for (let t = 0; t < NT; t++) for (let r = 4; r < NR - 4; r++){ const v = acc[t * NR + r]; if (v < thr * 10) continue; let isMax = true;
+    for (let dt = -2; dt <= 2 && isMax; dt++) for (let dr = -3; dr <= 3; dr++){ if (!dt && !dr) continue; const tt = (t + dt + NT) % NT; const rr = dt && (t + dt < 0 || t + dt >= NT) ? NR - 1 - (r + dr) : r + dr; if (acc[tt * NR + rr] > v){ isMax = false; break; } }
+    if (isMax) peaks.push({ t: t * Math.PI / 180, r: r - D, v }); }
+  peaks.sort((a, b) => b.v - a.v); const lines = peaks.slice(0, 60);
+  // supporto orientato: lungo il lato, quanti punti hanno un bordo vero con direzione perpendicolare al lato
+  const support = (A, B) => { const vx = B[0]-A[0], vy = B[1]-A[1], L = Math.hypot(vx, vy) || 1; const nx = -vy / L, ny = vx / L; let ok = 0, n = 0;
+    for (let k = 1; k < 48; k++){ const t = k / 48; let hit = false;
+      for (let o = -2; o <= 2 && !hit; o++){ const x = Math.round(A[0] + vx * t + nx * o), y = Math.round(A[1] + vy * t + ny * o); if (x < 1 || y < 1 || x >= w - 1 || y >= h - 1) continue;
+        const i = y * w + x; if (mag[i] < thr * 0.5) continue; const c = Math.abs(gx[i] * nx + gy[i] * ny) / mag[i]; if (c > 0.9) hit = true; }
+      n++; if (hit) ok++; }
+    return ok / n; };
+  const minSep = 0.15 * Math.min(w, h); const sepOf = (p, q) => Math.abs(p.r - (Math.abs(p.t - q.t) > Math.PI / 2 ? -q.r : q.r));
+  const pairs = [];
+  for (let i = 0; i < lines.length; i++) for (let j = i + 1; j < lines.length; j++){ const a = lines[i], b = lines[j]; if (angDiff(a.t, b.t) > 0.21 || sepOf(a, b) < minSep) continue; pairs.push([a, b]); }
+  const cands = []; const supCache = new Map(); const sup = (A, B) => { const k = A.join() + '|' + B.join(); if (!supCache.has(k)) supCache.set(k, support(A, B)); return supCache.get(k); };
+  for (let i = 0; i < pairs.length; i++) for (let j = i + 1; j < pairs.length; j++){ const [a, b] = pairs[i], [c, d] = pairs[j];
+    if (angDiff(a.t, c.t) < Math.PI / 2 - 0.35) continue; if (a === c || a === d || b === c || b === d) continue;
+    const P = [lineIntersect(a, c), lineIntersect(a, d), lineIntersect(b, d), lineIntersect(b, c)]; if (P.some(p => !p)) continue;
+    if (P.some(p => p[0] < -w * .03 || p[1] < -h * .03 || p[0] > w * 1.03 || p[1] > h * 1.03)) continue;
+    const q = orderQuad(P); const s01 = Math.hypot(q[1][0]-q[0][0], q[1][1]-q[0][1]), s12 = Math.hypot(q[2][0]-q[1][0], q[2][1]-q[1][1]), s23 = Math.hypot(q[3][0]-q[2][0], q[3][1]-q[2][1]), s30 = Math.hypot(q[0][0]-q[3][0], q[0][1]-q[3][1]);
+    const wa = (s01 + s23) / 2, ha = (s12 + s30) / 2; const ratio = Math.min(wa, ha) / Math.max(wa, ha); if (ratio < 0.6 || ratio > 0.84) continue;
+    if (Math.min(s01, s23) / Math.max(s01, s23) < 0.75 || Math.min(s12, s30) / Math.max(s12, s30) < 0.75) continue; // prospettiva plausibile
+    let area = 0; for (let m = 0; m < 4; m++){ const p = q[m], n = q[(m+1) % 4]; area += p[0] * n[1] - n[0] * p[1]; } area = Math.abs(area) / 2; if (area < 0.06 * w * h || area > 0.97 * w * h) continue;
+    const ss = [sup(q[0], q[1]), sup(q[1], q[2]), sup(q[2], q[3]), sup(q[3], q[0])]; const smin = Math.min(...ss); if (smin < 0.4) continue;
+    const smean = (ss[0] + ss[1] + ss[2] + ss[3]) / 4;
+    const cx = (q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4 / w - .5, cy = (q[0][1] + q[1][1] + q[2][1] + q[3][1]) / 4 / h - .5;
+    const score = smean * smean * smin * Math.sqrt(area / (w * h)) * (1 - 0.6 * Math.hypot(cx, cy)) * (1 - 2.5 * Math.abs(ratio - 0.716));
+    cands.push({ q, score, sup: smean, smin, area }); }
+  if (!cands.length) return null;
+  cands.sort((x, y) => y.score - x.score); let pick = cands[0];
+  // un rettangolo che contiene il migliore ed è quasi altrettanto ben sostenuto è la carta intera (il migliore era un riquadro interno)
+  const inside = (p, Q) => { let s = 0; for (let m = 0; m < 4; m++){ const A = Q[m], B = Q[(m+1) % 4]; const c = (B[0]-A[0]) * (p[1]-A[1]) - (B[1]-A[1]) * (p[0]-A[0]); if (c !== 0){ if (s && Math.sign(c) !== s) return false; s = Math.sign(c); } } return true; };
+  // ...ma solo se la fascia tra i due rettangoli è cartoncino (colore uniforme lungo ogni lato) e diversa dallo sfondo fuori dal rettangolo grande
+  const { ch, data } = G.col; const colAt = (x, y) => { const i = Math.max(0, Math.min(h - 1, Math.round(y))) * w + Math.max(0, Math.min(w - 1, Math.round(x))); return [ch[0][i], ch[1][i], ch[2][i]]; };
+  const bandIsCard = (inner, outer) => { for (let s = 0; s < 4; s++){ const A = inner[s], B = inner[(s+1) % 4], Ao = outer[s], Bo = outer[(s+1) % 4];
+      const gap = Math.hypot((Ao[0]+Bo[0])/2 - (A[0]+B[0])/2, (Ao[1]+Bo[1])/2 - (A[1]+B[1])/2); if (gap < 2.5) continue; // lato praticamente uguale
+      const mid = [], out = [];
+      for (let k = 1; k < 12; k++){ const t = k / 12; const xi = A[0] + (B[0]-A[0]) * t, yi = A[1] + (B[1]-A[1]) * t, xo = Ao[0] + (Bo[0]-Ao[0]) * t, yo = Ao[1] + (Bo[1]-Ao[1]) * t;
+        mid.push(colAt((xi + xo) / 2, (yi + yo) / 2)); const dx = xo - xi, dy = yo - yi, L = Math.hypot(dx, dy) || 1; out.push(colAt(xo + dx / L * 6, yo + dy / L * 6)); }
+      const mean = a => [0, 1, 2].map(c => a.reduce((s, v) => s + v[c], 0) / a.length); const mm = mean(mid), mo = mean(out);
+      const spread = Math.sqrt(mid.reduce((s, v) => s + (v[0]-mm[0])**2 + (v[1]-mm[1])**2 + (v[2]-mm[2])**2, 0) / mid.length);
+      if (spread > 75) return false; // la fascia non è un bordo stampato uniforme
+      if (Math.hypot(mm[0]-mo[0], mm[1]-mo[1], mm[2]-mo[2]) < 25) return false; } // la fascia ha il colore dello sfondo: è sfondo
+    return true; };
+  for (const c of cands) if (c.area > pick.area * 1.04 && c.smin >= 0.6 && c.sup >= 0.72 * pick.sup && pick.q.every(p => inside(p, c.q.map((v, k) => { const g = [(c.q[0][0]+c.q[2][0])/2, (c.q[0][1]+c.q[2][1])/2]; return [v[0] + (v[0]-g[0]) * .02, v[1] + (v[1]-g[1]) * .02]; }))) && bandIsCard(pick.q, c.q)) pick = c;
+  const sc = canvas.width / w; return { quad: pick.q.map(p => [p[0] * sc, p[1] * sc]), sup: pick.sup }; }
+function refineQuad(canvas, quad, maxShift, radius){
+  // affina i 4 lati: linee continue (RANSAC) tra i bordi a colori; nella prima passata sceglie la combinazione di 4 linee
+  // in cui il colore appena dentro al taglio (il bordo stampato) è uniforme e uguale sui 4 lati
+  if (!quad || quad.length !== 4 || quad.some(p => !p)) return quad;
+  const S = toColor(canvas, 1400); const { ch, w, h } = S; const sc = w / canvas.width; const q0 = quad.map(p => [p[0] * sc, p[1] * sc]);
+  const samp = (g, x, y) => { const xi = Math.max(0, Math.min(w - 2, Math.floor(x))), yi = Math.max(0, Math.min(h - 2, Math.floor(y))); const fx = x - xi, fy = y - yi; const i = yi * w + xi;
+    return g[i] * (1-fx) * (1-fy) + g[i+1] * fx * (1-fy) + g[i+w] * (1-fx) * fy + g[i+w+1] * fx * fy; };
+  const col = (x, y) => [samp(ch[0], x, y), samp(ch[1], x, y), samp(ch[2], x, y)];
+  const edge = (x1, y1, x2, y2) => Math.max(Math.abs(samp(ch[0], x1, y1) - samp(ch[0], x2, y2)), Math.abs(samp(ch[1], x1, y1) - samp(ch[1], x2, y2)), Math.abs(samp(ch[2], x1, y1) - samp(ch[2], x2, y2)));
+  let seed = 12345; const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const inter = (L1, L2) => { const den = L1.dx * L2.dy - L1.dy * L2.dx; if (Math.abs(den) < 1e-6) return null; const t = ((L2.x - L1.x) * L2.dy - (L2.y - L1.y) * L2.dx) / den; return [L1.x + t * L1.dx, L1.y + t * L1.dy]; };
+  const N = 56;
+  function sideCands(q, s, Ri, Ro){
+    const cx = (q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4, cy = (q[0][1] + q[1][1] + q[2][1] + q[3][1]) / 4;
+    const A = q[s], B = q[(s+1) % 4]; const vx = B[0]-A[0], vy = B[1]-A[1], L = Math.hypot(vx, vy) || 1; let nx = -vy / L, ny = vx / L;
+    if ((A[0] + vx / 2 - cx) * nx + (A[1] + vy / 2 - cy) * ny < 0){ nx = -nx; ny = -ny; }
+    const cand = [];
+    for (let k = 0; k < N; k++){ const t = 0.1 + 0.8 * k / (N - 1); const px0 = A[0] + vx * t, py0 = A[1] + vy * t; const prof = new Float32Array(Ri + Ro + 1); let maxV = 0;
+      for (let o = -Ri; o <= Ro; o++){ const v = edge(px0 + nx * (o + 1.2), py0 + ny * (o + 1.2), px0 + nx * (o - 1.2), py0 + ny * (o - 1.2)); prof[o + Ri] = v; if (v > maxV) maxV = v; }
+      const srt = Array.from(prof).sort((a, b) => a - b); const noise = srt[srt.length >> 1] || 1;
+      for (let o = -Ri + 1; o < Ro; o++){ const ia = o + Ri, v = prof[ia]; if (v < 7 || v < 2.8 * noise || v < 0.1 * maxV || v < prof[ia-1] || v < prof[ia+1]) continue;
+        const a = prof[ia-1], c = prof[ia+1], den = a - 2 * v + c; const off = den < 0 ? o + 0.5 * (a - c) / den : o;
+        cand.push({ k, o: off, v, x: px0 + nx * off, y: py0 + ny * off }); } }
+    if (cand.length < 10) return [];
+    const found = [];
+    for (let it = 0; it < 420; it++){ const p1 = cand[(rnd() * cand.length) | 0], p2 = cand[(rnd() * cand.length) | 0]; if (Math.abs(p1.k - p2.k) < N / 4) continue;
+      const dx = p2.x - p1.x, dy = p2.y - p1.y, l = Math.hypot(dx, dy); if (!l) continue; const ux = dx / l, uy = dy / l; if (Math.abs(ux * vx / L + uy * vy / L) < 0.996) continue;
+      const best = new Map(); for (const p of cand){ const r = Math.abs((p.x - p1.x) * uy - (p.y - p1.y) * ux); if (r <= 1.2){ const o = best.get(p.k); if (!o || p.v > o.v) best.set(p.k, p); } }
+      if (best.size < N * 0.5) continue; const inl = [...best.values()];
+      let mx = 0, my = 0, ws = 0; for (const p of inl){ mx += p.x * p.v; my += p.y * p.v; ws += p.v; } mx /= ws; my /= ws; let sxx = 0, sxy = 0, syy = 0; for (const p of inl){ const ddx = p.x - mx, ddy = p.y - my; sxx += p.v * ddx * ddx; sxy += p.v * ddx * ddy; syy += p.v * ddy * ddy; }
+      const th = 0.5 * Math.atan2(2 * sxy, sxx - syy); const line = { x:mx, y:my, dx:Math.cos(th), dy:Math.sin(th) };
+      const off = (mx - (A[0] + vx / 2)) * nx + (my - (A[1] + vy / 2)) * ny;
+      if (found.some(f => Math.abs(f.off - off) < 2)) { const f = found.find(f => Math.abs(f.off - off) < 2); if (inl.length > f.n){ Object.assign(f, { line, n: inl.length, off }); } continue; }
+      found.push({ line, n: inl.length, off, nx, ny }); }
+    // colore appena dentro e appena fuori dalla linea
+    for (const f of found){ const ins = [], outs = []; const { line } = f;
+      for (let k = 0; k < 24; k++){ const t = (k / 23 - 0.5) * L * 0.7; const bx = line.x + line.dx * t, by = line.y + line.dy * t;
+        for (const d of [3, 5, 7]){ ins.push(col(bx - f.nx * d, by - f.ny * d)); outs.push(col(bx + f.nx * d, by + f.ny * d)); } }
+      const mean = a => [0, 1, 2].map(c => a.reduce((s, v) => s + v[c], 0) / a.length);
+      f.cin = mean(ins); f.cout = mean(outs);
+      f.std = Math.sqrt(ins.reduce((s, v) => s + (v[0]-f.cin[0])**2 + (v[1]-f.cin[1])**2 + (v[2]-f.cin[2])**2, 0) / ins.length);
+      f.contrast = Math.hypot(f.cin[0]-f.cout[0], f.cin[1]-f.cout[1], f.cin[2]-f.cout[2]);
+      // ombra dello spessore della carta: appena dentro la linea c'è una fascia scura e grigia, più dentro il colore vero.
+      // Una linea così è il bordo esterno dell'ombra, non il taglio della carta.
+      { const far = []; for (let k = 0; k < 24; k++){ const t = (k / 23 - 0.5) * L * 0.7; const bx = line.x + line.dx * t, by = line.y + line.dy * t;
+          for (const d of [9, 11, 13]) far.push(col(bx - f.nx * d, by - f.ny * d)); }
+        const c2 = mean(far); const chroma = c => Math.hypot(c[1], c[2]); // colori in spazio L/A/B: una fascia grigia e uniforme appena dentro, poi il colore vero
+        f.cin2 = c2; f.shadow = f.std < 20 && Math.abs(f.cin[0]-c2[0]) + Math.abs(f.cin[1]-c2[1]) + Math.abs(f.cin[2]-c2[2]) > 30 && chroma(f.cin) < chroma(c2) - 12; } }
+    return found.sort((a, b) => b.n - a.n).slice(0, 6); }
+  function quadFrom(lines, q){ return q.map((p, i) => { const La = lines[(i + 3) % 4], Lb = lines[i]; if (!La || !Lb) return p; const r = inter(La, Lb); if (!r) return p;
+    return Math.hypot(r[0]-p[0], r[1]-p[1]) <= (maxShift || 1e9) * sc ? r : p; }); }
+  const R = Math.max(4, Math.round((radius || 0.006) * Math.max(w, h)));
+  // passata 1: ricerca ampia (soprattutto verso l'esterno) e scelta per coerenza del colore del bordo
+  const C = [0, 1, 2, 3].map(s => sideCands(q0, s, Math.max(3, Math.round(R * 0.6)), Math.round(R * 1.8)));
+  // Bordo stampato della stessa larghezza sui 4 lati: se su 3 lati c'è una linea esterna con colore interno uniforme e della stessa
+  // tinta (il taglio della carta), al quarto lato si aggiunge una linea imposta alla stessa distanza (es. bordo blu scuro su panno nero).
+  { const cx = (q0[0][0]+q0[1][0]+q0[2][0]+q0[3][0]) / 4, cy = (q0[0][1]+q0[1][1]+q0[2][1]+q0[3][1]) / 4;
+    // ricerca dedicata, più lontana verso l'esterno (fino a 2.8R): il taglio può stare oltre la portata della ricerca normale
+    const Cw = [0, 1, 2, 3].map(s => sideCands(q0, s, 3, Math.round(R * 2.8)));
+    const outer = Cw.map(c => c.filter(f => f.off > 10 && f.std < 20 && f.n >= N * 0.45 && f.contrast >= 22 && !f.shadow).sort((a, b) => b.n - a.n)[0] || null);
+    const have = outer.filter(Boolean);
+    if (have.length >= 3){ const offs = have.map(f => f.off).sort((a, b) => a - b); const mo = offs[offs.length >> 1];
+      const agree = have.filter(f => Math.abs(f.off - mo) < 8);
+      const medc = [1, 2].map(k => { const v = agree.map(f => f.cin[k]).sort((a, b) => a - b); return v[v.length >> 1]; });
+      const sameHue = agree.every(f => Math.hypot(f.cin[1]-medc[0], f.cin[2]-medc[1]) < 18);
+      if (agree.length >= 3 && sameHue) for (let s = 0; s < 4; s++){ if (outer[s] && Math.abs(outer[s].off - mo) < 8){ outer[s].forced = true; C[s] = [outer[s]]; continue; }
+        const A = q0[s], B = q0[(s+1) % 4]; const vx = B[0]-A[0], vy = B[1]-A[1], L = Math.hypot(vx, vy) || 1; let nx = -vy / L, ny = vx / L;
+        if ((A[0] + vx/2 - cx) * nx + (A[1] + vy/2 - cy) * ny < 0){ nx = -nx; ny = -ny; }
+        // distanza del quarto lato: dalle proporzioni 63:88, usando i 3 lati trovati (più robusto della larghezza comune del bordo)
+        let mo2 = mo; { const opp = (s + 2) % 4; const prev = (s + 3) % 4, next = (s + 1) % 4;
+          const offOf = k => (outer[k] && Math.abs(outer[k].off - mo) < 8) ? outer[k].off : null;
+          if (offOf(opp) !== null && offOf(prev) !== null && offOf(next) !== null){
+            // larghezza attuale del rettangolo nella direzione perpendicolare a questo lato e a quello opposto
+            const Ao = q0[opp], Bo = q0[(opp+1) % 4]; const midS = [(A[0]+B[0])/2, (A[1]+B[1])/2], midO = [(Ao[0]+Bo[0])/2, (Ao[1]+Bo[1])/2];
+            const across = Math.abs((midS[0]-midO[0]) * nx + (midS[1]-midO[1]) * ny) + offOf(opp);
+            const P = q0[prev], Pn = q0[(prev+1) % 4], Nx = q0[next], Nn = q0[(next+1) % 4];
+            const midP = [(P[0]+Pn[0])/2, (P[1]+Pn[1])/2], midN = [(Nx[0]+Nn[0])/2, (Nx[1]+Nn[1])/2];
+            const along = Math.hypot(midP[0]-midN[0], midP[1]-midN[1]) + offOf(prev) + offOf(next);
+            const isLong = along > across; const target = isLong ? along * 63 / 88 : along * 88 / 63; // dimensione totale attesa nella direzione perpendicolare
+            const want = target - across; if (want > 0 && want < R * 3.5) mo2 = want; } }
+        const qq = q0.map(p => p.slice()); qq[s] = [A[0] + nx * mo2, A[1] + ny * mo2]; qq[(s+1) % 4] = [B[0] + nx * mo2, B[1] + ny * mo2];
+        let extra = sideCands(qq, s, 14, 14).filter(f => f.n >= N * 0.3 && f.contrast >= 12).sort((a, b) => (b.n * Math.min(b.contrast, 60)) - (a.n * Math.min(a.contrast, 60)))[0];
+        if (!extra){ const mx = (qq[s][0] + qq[(s+1) % 4][0]) / 2, my = (qq[s][1] + qq[(s+1) % 4][1]) / 2;
+          extra = { line: { x: mx, y: my, dx: vx / L, dy: vy / L }, n: N, off: 0, nx, ny, cin: agree[0].cin.slice(), cout: agree[0].cout.slice(), std: 0, contrast: 30 }; }
+        extra.off += mo2; extra.forced = true; C[s] = [extra]; // su questo lato vale solo la linea imposta
+      } } }
+  let lines = [null, null, null, null];
+  const pools = C.map(c => c.length ? c : [null]); let bestScore = -1e9;
+  for (const a of pools[0]) for (const b of pools[1]) for (const c of pools[2]) for (const d of pools[3]){
+    const L4 = [a, b, c, d]; const real = L4.filter(Boolean); if (!real.length) continue;
+    const med = [0, 1, 2].map(k => { const v = real.map(f => f.cin[k]).sort((x, y) => x - y); return v[v.length >> 1]; });
+    let sc4 = 0; for (const f of L4){ if (!f){ sc4 -= 0.6; continue; }
+      const disp = Math.hypot(f.cin[0]-med[0], f.cin[1]-med[1], f.cin[2]-med[2]);
+      sc4 += f.n / N + 0.4 * Math.min(f.contrast, 50) / 50 - 0.5 * Math.min(f.std, 40) / 40 - 0.9 * Math.min(disp, 50) / 50 + 0.15 * Math.max(0, Math.min(f.off, 40)) / 40 - (f.shadow ? 0.8 : 0); }
+    if (sc4 > bestScore){ bestScore = sc4; lines = L4.map(f => f && f.line); } }
+  // un lato lascia la posizione di partenza solo con una linea ben sostenuta (≥ 60% delle sezioni) o imposta dalla propagazione
+  for (let s = 0; s < 4; s++){ const f = C[s].find(f => f.line === lines[s]); if (f && !f.forced && f.n < N * 0.6 && Math.abs(f.off) > 2) lines[s] = null; }
+  let cur = quadFrom(lines, q0);
+  // passate 2-3: rifinitura locale, piccola e simmetrica
+  let fin = [null, null, null, null];
+  for (const Rf of [0.22, 0.1]){ const r = Math.max(3, Math.round(R * Rf)); fin = [0, 1, 2, 3].map(s => { let c = sideCands(cur, s, r, r).filter(f => !f.shadow); if (!c.length) return null; c.sort((x, y) => (y.n - x.n) || (Math.abs(x.off) - Math.abs(y.off))); return c[0]; }); cur = quadFrom(fin.map(f => f && f.line), cur); }
+  // passata finale: il taglio è il punto in cui il colore medio del lato passa a metà tra l'interno (carta) e l'esterno (sfondo).
+  // Si usa la cromaticità quando distingue carta e sfondo (l'ombra dello spessore della carta è grigia: così non la si scambia per il taglio).
+  { const cx = (cur[0][0]+cur[1][0]+cur[2][0]+cur[3][0]) / 4, cy = (cur[0][1]+cur[1][1]+cur[2][1]+cur[3][1]) / 4; const nq = cur.map(p => p.slice());
+    const shifts = [0, 0, 0, 0];
+    for (let s = 0; s < 4; s++){ const A = cur[s], B = cur[(s+1) % 4]; const vx = B[0]-A[0], vy = B[1]-A[1], L = Math.hypot(vx, vy) || 1; let nx = -vy / L, ny = vx / L;
+      if ((A[0] + vx/2 - cx) * nx + (A[1] + vy/2 - cy) * ny < 0){ nx = -nx; ny = -ny; }
+      const prof = []; for (let o = -14; o <= 14; o++){ let a = 0, b = 0, c = 0, n = 0; for (let k = 0; k < 40; k++){ const t = 0.1 + 0.8 * k / 39; const p = col(A[0] + vx * t - nx * o, A[1] + vy * t - ny * o); a += p[0]; b += p[1]; c += p[2]; n++; } prof.push([a / n, b / n, c / n]); }
+      const at = o => prof[o + 14]; const avg = (o1, o2) => { let a = 0, b = 0, c = 0, n = 0; for (let o = o1; o <= o2; o++){ const p = at(o); a += p[0]; b += p[1]; c += p[2]; n++; } return [a / n, b / n, c / n]; };
+      const pin = avg(9, 14), pout = avg(-14, -9); const chroma = p => Math.hypot(p[1], p[2]); 
+      const useC = Math.abs(chroma(pin) - chroma(pout)) > 15; const val = p => useC ? chroma(p) : p[0];
+      const vi = val(pin), vo = val(pout); if (Math.abs(vi - vo) < 12) continue; const mid = (vi + vo) / 2;
+      let found = null; for (let o = 8; o > -9; o--){ const a = val(at(o)) - mid, b = val(at(o - 1)) - mid; if ((a <= 0 && b > 0) || (a >= 0 && b < 0) || (a === 0)){ found = o - (b !== a ? a / (a - b) : 0); break; } } // dall'interno verso l'esterno: o > 0 è dentro la carta
+      if (found === null || Math.abs(found) > 12 || Math.abs(found) < 2.5) continue; shifts[s] = found; } // sotto 2,5 px vale la linea del gradiente (più precisa senza ombra)
+    for (let s = 0; s < 4; s++){ if (!shifts[s]) continue; const A = cur[s], B = cur[(s+1) % 4]; const vx = B[0]-A[0], vy = B[1]-A[1], L = Math.hypot(vx, vy) || 1; let nx = -vy / L, ny = vx / L;
+      if ((A[0] + vx/2 - cx) * nx + (A[1] + vy/2 - cy) * ny < 0){ nx = -nx; ny = -ny; }
+      // sposta i due vertici del lato lungo la normale (verso l'esterno se found > 0: il profilo è campionato con o positivo verso l'interno)
+      const d = -shifts[s]; nq[s] = [nq[s][0] + nx * d, nq[s][1] + ny * d]; nq[(s+1) % 4] = [nq[(s+1) % 4][0] + nx * d, nq[(s+1) % 4][1] + ny * d]; }
+    cur = nq; }
+  // fiducia: ogni lato deve avere un bordo continuo, contrastato, con lo stesso colore di bordo degli altri lati
+  const real = fin.filter(Boolean);
+  if (real.length === 4){ const med = [0, 1, 2].map(k => { const v = real.map(f => f.cin[k]).sort((x, y) => x - y); return (v[1] + v[2]) / 2; });
+    refineQuad.stats = fin.map(f => ({ n: f.n / N, contrast: f.contrast, std: f.std, disp: Math.hypot(f.cin[0]-med[0], f.cin[1]-med[1], f.cin[2]-med[2]) })); }
+  else refineQuad.stats = null;
+  return cur.map(p => [p[0] / sc, p[1] / sc]); }
+function autoQuad(canvas){
+  const hq = findQuadHough(canvas); let q = hq ? hq.quad : detectQuad(canvas);
+  if (!q || q.length !== 4 || q.some(p => !p || !isFinite(p[0]) || !isFinite(p[1]))) return { quad:null, conf:0 };
+  q = refineQuad(canvas, q, 220, 0.03); return { quad:q, conf: hq ? hq.sup : 0.3, stats: refineQuad.stats }; }
+
+/* ---------- rilevamento carta (ripiego per colore) ---------- */
+function detectQuad(canvas){
+  const small = toGray(canvas, 320); const { w, h, data } = small;
+  // colore di sfondo: mediana del bordo esterno (3%)
+  const m = Math.max(2, Math.round(Math.min(w, h) * 0.03)); const rs = [], gs = [], bs = [];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (x < m || y < m || x >= w - m || y >= h - m){ const i = (y * w + x) * 4; rs.push(data[i]); gs.push(data[i+1]); bs.push(data[i+2]); }
+  const med = a => { a.sort((p, q) => p - q); return a[a.length >> 1]; };
+  const bg = [med(rs), med(gs), med(bs)];
+  const mask = new Uint8Array(w * h);
+  for (let i = 0, j = 0; j < w * h; i += 4, j++){
+    const d = Math.abs(data[i] - bg[0]) + Math.abs(data[i+1] - bg[1]) + Math.abs(data[i+2] - bg[2]);
+    mask[j] = d > 70 ? 1 : 0;
+  }
+  // componente connesso più grande
+  const lab = new Int32Array(w * h).fill(-1); let best = -1, bestN = 0, nl = 0; const stack = [];
+  for (let s = 0; s < w * h; s++){
+    if (!mask[s] || lab[s] >= 0) continue;
+    let n = 0; stack.push(s); lab[s] = nl;
+    while (stack.length){ const p = stack.pop(); n++; const x = p % w, y = (p / w) | 0;
+      const nb = [p-1, p+1, p-w, p+w]; if (x === 0) nb[0] = -1; if (x === w-1) nb[1] = -1;
+      for (const q of nb){ if (q >= 0 && q < w * h && mask[q] && lab[q] < 0){ lab[q] = nl; stack.push(q); } } }
+    if (n > bestN){ bestN = n; best = nl; } nl++;
+  }
+  if (bestN < w * h * 0.08) return null;
+  // punti di bordo del componente
+  const pts = [];
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++){ const p = y * w + x; if (lab[p] !== best) continue;
+    if (lab[p-1] !== best || lab[p+1] !== best || lab[p-w] !== best || lab[p+w] !== best) pts.push([x + 0.5, y + 0.5]); }
+  if (pts.length < 40) return null;
+  // angoli approssimati
+  let tl, tr, br, bl, a = 1e9, b = -1e9, c = -1e9, d = 1e9;
+  for (const [x, y] of pts){ if (x + y < a){ a = x + y; tl = [x, y]; } if (x - y > b){ b = x - y; tr = [x, y]; } if (x + y > c){ c = x + y; br = [x, y]; } if (x - y < d){ d = x - y; bl = [x, y]; } }
+  // affinamento: fit di rette sui 4 lati
+  const corners = [tl, tr, br, bl]; const sides = [[], [], [], []];
+  for (const p of pts){ let bi = 0, bd = 1e9, bt = 0;
+    for (let k = 0; k < 4; k++){ const A = corners[k], B = corners[(k+1) % 4]; const vx = B[0]-A[0], vy = B[1]-A[1]; const L2 = vx*vx+vy*vy || 1;
+      let t = ((p[0]-A[0])*vx + (p[1]-A[1])*vy) / L2; t = Math.max(0, Math.min(1, t));
+      const dd = Math.hypot(p[0]-A[0]-t*vx, p[1]-A[1]-t*vy); if (dd < bd){ bd = dd; bi = k; bt = t; } }
+    if (bd < 4 && bt > 0.12 && bt < 0.88) sides[bi].push(p); }
+  const lines = sides.map(S => {
+    if (S.length < 8) return null; let mx = 0, my = 0; for (const p of S){ mx += p[0]; my += p[1]; } mx /= S.length; my /= S.length;
+    let sxx = 0, sxy = 0, syy = 0; for (const p of S){ const dx = p[0]-mx, dy = p[1]-my; sxx += dx*dx; sxy += dx*dy; syy += dy*dy; }
+    const th = 0.5 * Math.atan2(2 * sxy, sxx - syy); return { x:mx, y:my, dx:Math.cos(th), dy:Math.sin(th) }; });
+  // sposta ogni retta di mezzo pixel verso l'esterno (i punti di bordo stanno al centro dei pixel della carta)
+  const gx = corners.reduce((s, p) => s + p[0], 0) / 4, gy = corners.reduce((s, p) => s + p[1], 0) / 4;
+  lines.forEach(L => { if (!L) return; let nx = -L.dy, ny = L.dx; if ((L.x - gx) * nx + (L.y - gy) * ny < 0){ nx = -nx; ny = -ny; } L.x += 0.5 * nx; L.y += 0.5 * ny; });
+  const inter = (L1, L2) => { const den = L1.dx * L2.dy - L1.dy * L2.dx; if (Math.abs(den) < 1e-6) return null;
+    const t = ((L2.x - L1.x) * L2.dy - (L2.y - L1.y) * L2.dx) / den; return [L1.x + t * L1.dx, L1.y + t * L1.dy]; };
+  let refined = [];
+  if (lines.every(Boolean)){ refined = [inter(lines[3], lines[0]), inter(lines[0], lines[1]), inter(lines[1], lines[2]), inter(lines[2], lines[3])]; }
+  if (refined.some(p => !p)) refined = corners;
+  const sc = canvas.width / w;
+  return refined.map(p => [p[0] * sc, p[1] * sc]);
+}
+
+/* ---------- omografia e raddrizzamento ---------- */
+function solve(A, b){ const n = b.length; for (let i = 0; i < n; i++){ let p = i; for (let r = i + 1; r < n; r++) if (Math.abs(A[r][i]) > Math.abs(A[p][i])) p = r;
+  [A[i], A[p]] = [A[p], A[i]]; [b[i], b[p]] = [b[p], b[i]]; for (let r = i + 1; r < n; r++){ const f = A[r][i] / A[i][i]; for (let k = i; k < n; k++) A[r][k] -= f * A[i][k]; b[r] -= f * b[i]; } }
+  const x = new Array(n); for (let i = n - 1; i >= 0; i--){ let s = b[i]; for (let k = i + 1; k < n; k++) s -= A[i][k] * x[k]; x[i] = s / A[i][i]; } return x; }
+function homography(src, dst){ // mappa src -> dst
+  const A = [], b = []; for (let i = 0; i < 4; i++){ const [x, y] = src[i], [u, v] = dst[i];
+    A.push([x, y, 1, 0, 0, 0, -u*x, -u*y]); b.push(u); A.push([0, 0, 0, x, y, 1, -v*x, -v*y]); b.push(v); }
+  const h = solve(A, b); return [...h, 1]; }
+const W = 630, H = 880;
+function warp(canvas, quad, out){
+  const dst = [[0,0],[W,0],[W,H],[0,H]]; const Hm = homography(dst, quad); // dst -> src
+  const sctx = canvas.getContext('2d', { willReadFrequently:true }); const sd = sctx.getImageData(0, 0, canvas.width, canvas.height); const sw = canvas.width, shh = canvas.height;
+  const od = out.getContext('2d').createImageData(W, H); const o = od.data, s = sd.data;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++){
+    const den = Hm[6]*x + Hm[7]*y + 1; const sx = (Hm[0]*x + Hm[1]*y + Hm[2]) / den, sy = (Hm[3]*x + Hm[4]*y + Hm[5]) / den;
+    const x0 = Math.floor(sx), y0 = Math.floor(sy); const oi = (y * W + x) * 4;
+    if (x0 < 0 || y0 < 0 || x0 >= sw - 1 || y0 >= shh - 1){ o[oi+3] = 255; continue; }
+    const fx = sx - x0, fy = sy - y0; const i00 = (y0*sw + x0)*4, i10 = i00 + 4, i01 = i00 + sw*4, i11 = i01 + 4;
+    for (let ch = 0; ch < 3; ch++) o[oi+ch] = s[i00+ch]*(1-fx)*(1-fy) + s[i10+ch]*fx*(1-fy) + s[i01+ch]*(1-fx)*fy + s[i11+ch]*fx*fy;
+    o[oi+3] = 255; }
+  out.getContext('2d').putImageData(od, 0, 0); return od; }
+
+/* ---------- misure ---------- */
+const px = (d, x, y) => { const i = (y * W + x) * 4; return [d[i], d[i+1], d[i+2]]; };
+const dist = (a, b) => Math.abs(a[0]-b[0]) + Math.abs(a[1]-b[1]) + Math.abs(a[2]-b[2]);
+const median = a => { a = a.slice().sort((p, q) => p - q); return a[a.length >> 1]; };
+function borderColor(d){ // colore del bordo stampato: mediana di una fascia 0,4–0,8 mm dal taglio sui 4 lati (zone centrali)
+  const r = [], g = [], b = [];
+  for (let t = 0.2; t <= 0.8; t += 0.01){ const x = Math.round(t * W), y = Math.round(t * H);
+    for (let o = 4; o <= 8; o += 2){ for (const p of [px(d, o, y), px(d, W - 1 - o, y), px(d, x, o), px(d, x, H - 1 - o)]){ r.push(p[0]); g.push(p[1]); b.push(p[2]); } } }
+  const c = [median(r), median(g), median(b)];
+  const dev = []; for (let i = 0; i < r.length; i++) dev.push(Math.abs(r[i]-c[0]) + Math.abs(g[i]-c[1]) + Math.abs(b[i]-c[2]));
+  return { c, noise: median(dev) }; }
+function borderWidth(d, side){
+  // Profilo del colore medio lungo la striscia (8–92% del lato) per ogni distanza dal taglio: la media su centinaia
+  // di pixel annulla glitter e trama. La cornice è il primo salto netto del profilo entro 6 mm dal taglio
+  // (almeno metà del salto più forte in quella fascia); un salto debole = cornice non visibile su questo lato.
+  const len = (side === 'L' || side === 'R') ? H : W; const MAXO = 70, K = 5;
+  const at = (o, t) => side === 'L' ? px(d, o, t) : side === 'R' ? px(d, W - 1 - o, t) : side === 'T' ? px(d, t, o) : px(d, t, H - 1 - o);
+  const t0 = Math.round(len * 0.08), t1 = Math.round(len * 0.92);
+  const m = []; for (let o = 0; o < MAXO; o++){ let r = 0, g = 0, b = 0, n = 0; for (let t = t0; t < t1; t++){ const p = at(o, t); r += p[0]; g += p[1]; b += p[2]; n++; } m.push([r / n, g / n, b / n]); }
+  const D = new Float32Array(MAXO);
+  for (let o = K + 4; o < MAXO - K; o++){ let s = 0; for (let ch = 0; ch < 3; ch++){ let a = 0, b = 0; for (let j = 1; j <= K; j++){ a += m[o + j][ch]; b += m[o - j][ch]; } s += Math.abs(a - b) / K; } D[o] = s; }
+  const lo = 10, hi = 60; let M = 0; for (let i = lo; i < hi; i++) M = Math.max(M, D[i]);
+  if (M < 40) return null;
+  let p = -1; for (let i = lo; i < hi; i++){ if (D[i] >= 0.5 * M && D[i] >= D[i-1] && D[i] >= D[i+1]){ p = i; break; } }
+  if (p < 0) return null;
+  const den = D[p-1] + D[p+1] - 2 * D[p]; const sub = p + (den !== 0 ? 0.5 * (D[p-1] - D[p+1]) / den : 0);
+  return { w: sub + 0.5, jump: D[p], dom: D[p] / M }; }
+function medianOf(a){ const s = a.slice().sort((x, y) => x - y); const n = s.length; return n ? (n % 2 ? s[n >> 1] : (s[n/2 - 1] + s[n/2]) / 2) : null; }
+const lum = p => 0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2];
+const sat = p => Math.max(p[0], p[1], p[2]) - Math.min(p[0], p[1], p[2]);
+function wearMeasure(d, bc, frame){
+  // sbiancatura = carta bianca esposta: pixel quasi bianchi, poco saturi e molto più chiari del colore del bordo,
+  // cercati solo dentro la fascia del bordo stampato. Se il bordo è già chiaro/argento non è misurabile per colore.
+  const bl = lum(bc.c); if (bl > 175 && sat(bc.c) < 60) return null; if (bc.noise > 40 || !frame) return null; // bordo assente o non uniforme
+  const bs = sat(bc.c);
+  // bianco esposto: chiaro e poco saturo, e diverso dal bordo per saturazione (bordi gialli) o per luminosità (bordi grigi/scuri)
+  const isWear = p => lum(p) > 170 && sat(p) < 45 && (bs - sat(p) > 70 || lum(p) - bl > 35);
+  const band = frame ? Math.max(8, Math.min(22, Math.min(frame.L, frame.R, frame.T, frame.B) - 4)) : 15;
+  // si conta solo il bianco collegato al taglio: l'usura parte dal bordo esterno, una scritta stampata no
+  const R = 30, S = 42, corners = [];
+  for (const [cx, cy, sx, sy] of [[0,0,1,1],[W-1,0,-1,1],[W-1,H-1,-1,-1],[0,H-1,1,-1]]){
+    const inReg = (i, j) => i >= 3 && j >= 3 && i < S && j < S && !(i >= band && j >= band) && Math.hypot(Math.max(0, R - i), Math.max(0, R - j)) <= R - 3;
+    const outer = (i, j) => i <= 5 || j <= 5 || Math.hypot(Math.max(0, R - i), Math.max(0, R - j)) > R - 6;
+    const wm = new Uint8Array(S * S); let n = 0;
+    for (let j = 3; j < S; j++) for (let i = 3; i < S; i++){ if (!inReg(i, j)) continue; n++; if (isWear(px(d, cx + sx * i, cy + sy * j))) wm[j * S + i] = 1; }
+    const seen = new Uint8Array(S * S), st = []; let wh = 0;
+    for (let j = 3; j < S; j++) for (let i = 3; i < S; i++) if (wm[j * S + i] && outer(i, j)){ seen[j * S + i] = 1; st.push(j * S + i); }
+    while (st.length){ const k = st.pop(); wh++; const i = k % S, j = (k / S) | 0;
+      for (const [di, dj] of [[1,0],[-1,0],[0,1],[0,-1]]){ const a = i + di, b = j + dj; if (a < 0 || b < 0 || a >= S || b >= S) continue; const q = b * S + a; if (wm[q] && !seen[q]){ seen[q] = 1; st.push(q); } } }
+    corners.push(100 * wh / Math.max(1, n)); }
+  const edges = []; // % della lunghezza del lato con bianco che parte dal taglio
+  for (const side of ['T','R','B','L']){ let n = 0, hit = 0; const len = (side === 'T' || side === 'B') ? W : H;
+    for (let t = 45; t < len - 45; t++){ n++; let run = 0;
+      for (let i = 2; i < 8; i++){ const p = side === 'T' ? px(d, t, i) : side === 'B' ? px(d, t, H-1-i) : side === 'L' ? px(d, i, t) : px(d, W-1-i, t); if (isWear(p)) run++; else break; }
+      if (run >= 1) hit++; }
+    edges.push(100 * hit / Math.max(1, n)); }
+  return { corners, edges }; }
+function centeringScore(L, R, T, B, back){
+  if ([L,R,T,B].some(v => v == null)) return null;
+  const dev = Math.max(Math.abs(L-R)/(L+R), Math.abs(T-B)/(T+B)); // 0 = perfetta, 0.10 = 55/45
+  const th = back ? [0.5, 0.6, 0.7, 0.8] : [0.10, 0.20, 0.30, 0.40];
+  const g = dev <= th[0] ? 10 : dev <= th[1] ? 9 : dev <= th[2] ? 8 : dev <= th[3] ? 7 : 6; return { dev, g }; }
+const wearScore = m => m < 2 ? 10 : m < 6 ? 9 : m < 12 ? 8 : m < 20 ? 7 : 6;
+const ratio = (a, b) => `${Math.round(100*a/(a+b))}/${Math.round(100*b/(a+b))}`;
+const pill = g => `<span class="pill ${g >= 9 ? 'ok' : g >= 7 ? 'warn' : 'bad'}">${g}</span>`;
+
+function analyzeSide(side, back){
+  const src = state[side]; if (!src) return null;
+  const quad = src.quad; if (!quad) return { fail:'ritaglio non confermato: tocca la foto e posiziona i 4 angoli' };
+  const out = $('#w-' + side); const img = warp(src.canvas, quad, out); const d = img.data;
+  const bc = borderColor(d);
+  const bw = { L: borderWidth(d,'L'), R: borderWidth(d,'R'), T: borderWidth(d,'T'), B: borderWidth(d,'B') };
+  // altri scatti della stessa faccia: stessa misura su ognuno, poi mediana per lato
+  const vals = { L: [], R: [], T: [], B: [] }; const addShot = w => { for (const k in vals) if (w[k] && w[k].jump >= 30) vals[k].push(w[k].w); };
+  addShot(bw);
+  const shots = src.shots || []; if (shots.length){ const off = document.createElement('canvas'); off.width = W; off.height = H;
+    // ogni scatto viene orientato come il riferimento (la carta può essere capovolta di 180° in una foto)
+    const thumb = dd => { const t = new Float32Array(63 * 88); for (let y = 0; y < 88; y++) for (let x = 0; x < 63; x++){ let s = 0; for (let j = 0; j < 10; j += 3) for (let i = 0; i < 10; i += 3){ const k = ((y * 10 + j) * W + x * 10 + i) * 4; s += dd[k] + dd[k+1] + dd[k+2]; } t[y * 63 + x] = s / 48; } return t; };
+    const ref = thumb(d);
+    for (const s of shots){ let q = uprightQuad(orderQuad(s.quad)); let im = warp(s.canvas, q, off); const t = thumb(im.data);
+      let d0 = 0, d1 = 0; for (let i = 0; i < t.length; i++){ d0 += Math.abs(t[i] - ref[i]); d1 += Math.abs(t[t.length - 1 - i] - ref[i]); }
+      if (d1 < d0){ q = [q[2], q[3], q[0], q[1]]; im = warp(s.canvas, q, off); }
+      s.quad = q; const dd = im.data; addShot({ L: borderWidth(dd,'L'), R: borderWidth(dd,'R'), T: borderWidth(dd,'T'), B: borderWidth(dd,'B') }); } }
+  const n = 1 + shots.length;
+  const ok = Object.values(vals).every(a => a.length >= (n >= 5 ? 3 : 1));
+  const frameAuto = ok ? { L: medianOf(vals.L), R: medianOf(vals.R), T: medianOf(vals.T), B: medianOf(vals.B) } : null;
+  // dispersione tra gli scatti (scarto assoluto mediano, in px) e lati con poche misure valide
+  const spread = ok ? Math.max(...Object.keys(vals).map(k => medianOf(vals[k].map(v => Math.abs(v - frameAuto[k]))) || 0)) : 99;
+  const weakSide = ok && n > 1 && Object.values(vals).some(a => a.length < n / 2);
+  const unsure = !ok || (n === 1 && Object.values(bw).some(v => !v || v.jump < 60)) || (n > 1 && (spread > 4 || weakSide)) || Object.values(frameAuto || {}).some(v => v < 10 || v > 60);
+  const frame = src.frame || frameAuto;
+  const wear = wearMeasure(d, bc, frame); const corners = wear ? wear.corners : null, edges = wear ? wear.edges : null;
+  const res = { quad, img, frame, auto: !src.frame, unsure, back, corners, edges, sharp: src.sharp, bw, bc, n, vals, spread };
+  src.res = res; drawWarp(side); return res; }
+function drawWarp(side){ const r = state[side] && state[side].res; if (!r) return; const out = $('#w-' + side), ctx = out.getContext('2d');
+  ctx.putImageData(r.img, 0, 0); if (r.frame){ ctx.strokeStyle = r.unsure && r.auto ? '#ff9f0a' : '#ff3b30'; ctx.lineWidth = 3; ctx.setLineDash([10, 8]);
+    ctx.strokeRect(r.frame.L, r.frame.T, W - r.frame.L - r.frame.R, H - r.frame.T - r.frame.B); } }
+function centRow(label, r){
+  const f = r.frame; if (!f) return `<div class="row"><span class="k">${label}</span><span class="v">—</span><span class="d">cornice interna non rilevata: usa “Regola cornice”</span></div>`;
+  const c = centeringScore(f.L, f.R, f.T, f.B, r.back); r.cent = c;
+  const warn = r.unsure && r.auto ? ' <span class="pill warn">verifica</span>' : (!r.auto ? ' <span class="pill">manuale</span>' : '');
+  const note = r.unsure && r.auto ? (r.n > 1 ? ' · le foto non concordano o un lato è poco visibile: controlla la cornice tratteggiata' : ' · cornice poco netta: controlla la cornice tratteggiata e regolala, o carica più foto') : '';
+  const multi = r.n > 1 && r.auto ? ` · mediana di ${r.n} foto (${Object.keys(r.vals).map(k => r.vals[k].length).join('/')} lati validi S/D/A/B, dispersione ±${(r.spread/10).toFixed(2)} mm)` : '';
+  return `<div class="row"><span class="k">${label} ${pill(c.g)}${warn}</span><span class="v">${ratio(f.L,f.R)} · ${ratio(f.T,f.B)}</span><span class="d">bordi S/D ${(f.L/10).toFixed(2)}/${(f.R/10).toFixed(2)} mm, A/B ${(f.T/10).toFixed(2)}/${(f.B/10).toFixed(2)} mm · scostamento ${(100*c.dev).toFixed(1)}%${multi}${r.back ? ' · soglia PSA 10 per il retro 75/25' : ''}${note}</span></div>`; }
+
+$('#analyze').addEventListener('click', () => {
+  const btn = $('#analyze'); btn.disabled = true; btn.textContent = 'Analisi in corso…';
+  setTimeout(() => { analyzeSide('front', false); if (state.back) analyzeSide('back', true); renderResults();
+    $('#results').scrollIntoView({ behavior:'smooth' }); btn.disabled = false; btn.textContent = 'Analizza'; }, 30);
+});
+function renderResults(){
+    const f = state.front && state.front.res, b = state.back && state.back.res;
+    const rows = []; let grades = [];
+    if (!f || f.fail){ rows.push(`<div class="row"><span class="k">Fronte</span><span class="v">—</span><span class="d">${f ? f.fail : 'manca il fronte'}</span></div>`); }
+    else {
+      rows.push(centRow('Centratura fronte', f)); if (f.cent) grades.push(f.cent.g);
+      if (f.corners){
+        const cm = Math.max(...f.corners), cg = wearScore(cm); grades.push(cg);
+        rows.push(`<div class="row"><span class="k">Angoli ${pill(cg)}</span><span class="v">max ${cm.toFixed(1)}%</span><span class="d">sbiancatura per angolo: ${f.corners.map(v => v.toFixed(1) + '%').join(' · ')} (AS, AD, BD, BS)</span></div>`);
+        const em = Math.max(...f.edges), eg = wearScore(em); grades.push(eg);
+        rows.push(`<div class="row"><span class="k">Bordi ${pill(eg)}</span><span class="v">max ${em.toFixed(1)}%</span><span class="d">lunghezza con bianco dal taglio: ${f.edges.map(v => v.toFixed(1) + '%').join(' · ')} (alto, destro, basso, sinistro)</span></div>`);
+      } else rows.push(`<div class="row"><span class="k">Angoli e bordi</span><span class="v">n/d</span><span class="d">il bordo di questa carta è argento, chiaro o assente (disegno fino al taglio): la sbiancatura non si distingue per colore. Controlla gli angoli a occhio con luce radente.</span></div>`);
+    }
+    if (b){ if (b.fail) rows.push(`<div class="row"><span class="k">Retro</span><span class="v">—</span><span class="d">${b.fail}</span></div>`);
+      else { rows.push(centRow('Centratura retro', b)); if (b.cent) grades.push(b.cent.g); } }
+    else rows.push(`<div class="row"><span class="k">Retro</span><span class="v">non fornito</span><span class="d">aggiungi il retro per una stima completa</span></div>`);
+    rows.push(`<div class="row"><span class="k">Superficie</span><span class="v">n/d</span><span class="d">graffi e linee di stampa non ancora analizzati · nitidezza foto fronte ${f && f.sharp ? f.sharp.toFixed(0) : '—'}</span></div>`);
+    $('#rows').innerHTML = rows.join('');
+    let overall = '–';
+    if (grades.length){ const mn = Math.min(...grades); const atMin = grades.filter(g => g === mn).length; overall = atMin >= 2 && mn > 1 ? (mn - 0.5).toFixed(1) : String(mn); }
+    $('#g-big').textContent = overall;
+    $('#g-cap').textContent = grades.length ? `stima su scala 1–10 · ${b && !b.fail ? 'fronte + retro' : 'solo fronte'} · superficie esclusa` : 'analisi non riuscita';
+    $('#fr-front').hidden = !(f && f.frame !== undefined && !f.fail); $('#fr-back').hidden = !(b && !b.fail);
+    $('#results').hidden = false;
+}
+
+/* ---------- regolazione manuale della cornice interna ---------- */
+const fr = { side:null, f:null, scale:1, drag:null };
+function openFrame(side){ const r = state[side].res; if (!r) return; fr.side = side; fr.f = Object.assign({ L:25, R:25, T:25, B:25 }, r.frame || {});
+  $('#frame-title').textContent = side === 'front' ? 'Cornice fronte' : 'Cornice retro'; $('#frame').hidden = false;
+  const c = $('#framec'), body = $('#frame .crop-body').getBoundingClientRect();
+  const maxW = Math.max(200, Math.min((body.width || 360) - 16, 560)), maxH = Math.max(240, (body.height || 500) - 16);
+  fr.scale = Math.min(maxW / W, maxH / H); const dpr = Math.min(2, window.devicePixelRatio || 1);
+  c.style.width = Math.round(W * fr.scale) + 'px'; c.style.height = Math.round(H * fr.scale) + 'px'; c.width = Math.round(W * fr.scale * dpr); c.height = Math.round(H * fr.scale * dpr); drawFrame(); }
+function frameHandles(){ const f = fr.f; return { L:[f.L, H/2], R:[W - f.R, H/2], T:[W/2, f.T], B:[W/2, H - f.B] }; }
+function drawFrame(){ const c = $('#framec'), ctx = c.getContext('2d'), s = c.width / W, dpr = s / fr.scale, f = fr.f;
+  const r = state[fr.side].res; if (!r.clean){ r.clean = document.createElement('canvas'); r.clean.width = W; r.clean.height = H; r.clean.getContext('2d').putImageData(r.img, 0, 0); }
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(r.clean, 0, 0, c.width, c.height);
+  ctx.strokeStyle = '#ff3b30'; ctx.lineWidth = 2 * dpr; ctx.setLineDash([8 * dpr, 6 * dpr]); ctx.strokeRect(f.L * s, f.T * s, (W - f.L - f.R) * s, (H - f.T - f.B) * s); ctx.setLineDash([]);
+  const hs = frameHandles();
+  for (const k in hs){ const [x, y] = hs[k]; ctx.beginPath(); ctx.arc(x * s, y * s, 16 * dpr, 0, Math.PI * 2); ctx.fillStyle = fr.drag === k ? '#30d158' : 'rgba(255,255,255,.9)'; ctx.fill(); ctx.strokeStyle = '#111'; ctx.lineWidth = 2 * dpr; ctx.stroke(); }
+  if (fr.drag){ const [x, y] = hs[fr.drag], L = 120 * dpr, Z = 4, reg = L / (Z * s); const lx = x * s < c.width / 2 ? c.width - L - 8 * dpr : 8 * dpr, ly = y * s < c.height / 2 ? c.height - L - 8 * dpr : 8 * dpr;
+    ctx.save(); ctx.beginPath(); ctx.rect(lx, ly, L, L); ctx.clip(); ctx.drawImage(r.clean, x - reg / 2, y - reg / 2, reg, reg, lx, ly, L, L); ctx.restore();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2 * dpr; ctx.strokeRect(lx, ly, L, L); ctx.strokeStyle = '#ff3b30'; ctx.beginPath(); ctx.moveTo(lx + L/2, ly); ctx.lineTo(lx + L/2, ly + L); ctx.moveTo(lx, ly + L/2); ctx.lineTo(lx + L, ly + L/2); ctx.stroke(); }
+  $('#frame-vals').textContent = `S ${(f.L/10).toFixed(1)} · D ${(f.R/10).toFixed(1)} · A ${(f.T/10).toFixed(1)} · B ${(f.B/10).toFixed(1)} mm → ${ratio(f.L, f.R)} · ${ratio(f.T, f.B)}`; }
+function framePos(e){ const r = $('#framec').getBoundingClientRect(); return [(e.clientX - r.left) / fr.scale, (e.clientY - r.top) / fr.scale]; }
+$('#framec').addEventListener('pointerdown', e => { const [x, y] = framePos(e), hs = frameHandles(); let bk = null, bd = 44 / fr.scale;
+  for (const k in hs){ const d = Math.hypot(hs[k][0] - x, hs[k][1] - y); if (d < bd){ bd = d; bk = k; } } fr.drag = bk; if (bk){ e.target.setPointerCapture(e.pointerId); drawFrame(); } });
+$('#framec').addEventListener('pointermove', e => { if (!fr.drag) return; const [x, y] = framePos(e); const cl = (v, lo, hi) => Math.round(Math.max(lo, Math.min(hi, v)));
+  if (fr.drag === 'L') fr.f.L = cl(x, 1, 200); if (fr.drag === 'R') fr.f.R = cl(W - x, 1, 200); if (fr.drag === 'T') fr.f.T = cl(y, 1, 200); if (fr.drag === 'B') fr.f.B = cl(H - y, 1, 200); drawFrame(); });
+const endFrame = () => { if (fr.drag){ fr.drag = null; drawFrame(); } };
+$('#framec').addEventListener('pointerup', endFrame); $('#framec').addEventListener('pointercancel', endFrame);
+$('#frame-cancel').addEventListener('click', () => { $('#frame').hidden = true; });
+$('#frame-ok').addEventListener('click', () => { const st = state[fr.side]; st.frame = Object.assign({}, fr.f); st.res.frame = st.frame; st.res.auto = false; $('#frame').hidden = true; drawWarp(fr.side); renderResults(); });
+$('#fr-front').addEventListener('click', () => openFrame('front')); $('#fr-back').addEventListener('click', () => openFrame('back'));
+/* ---------- storico: nella memoria del telefono ---------- */
+const hist = { items: [] };
+function thumbOf(canvasId){ try { const src = $(canvasId); const c = document.createElement('canvas'); c.width = 126; c.height = 176; c.getContext('2d').drawImage(src, 0, 0, 126, 176); return c.toDataURL('image/jpeg', .55); } catch (e) { return null; } }
+function snapshotResult(){
+  const f = state.front && state.front.res, b = state.back && state.back.res; if (!f || f.fail) return null;
+  const side = r => r && !r.fail ? { cent: r.cent ? { lr: ratio(r.frame.L, r.frame.R), tb: ratio(r.frame.T, r.frame.B), g: r.cent.g, dev: +(100 * r.cent.dev).toFixed(1) } : null,
+    frame: r.frame ? { L: +r.frame.L.toFixed(1), R: +r.frame.R.toFixed(1), T: +r.frame.T.toFixed(1), B: +r.frame.B.toFixed(1) } : null, n: r.n || 1, unsure: !!r.unsure,
+    corners: r.corners ? r.corners.map(v => +v.toFixed(1)) : null, edges: r.edges ? r.edges.map(v => +v.toFixed(1)) : null } : null;
+  return { name: ($('#save-name').value || '').trim() || 'Carta senza nome', ts: Date.now(), grade: $('#g-big').textContent, front: side(f), back: side(b), thumb: thumbOf('#w-front'), thumbBack: b && !b.fail ? thumbOf('#w-back') : null };
+}
+function lsRead(){ try { return JSON.parse(localStorage.getItem('cardscan.hist') || '[]'); } catch (e) { return []; } }
+function lsWrite(a){ try { localStorage.setItem('cardscan.hist', JSON.stringify(a.slice(0, 100))); } catch (e) {} }
+function renderHist(){
+  const el = $('#hist'); const items = hist.items;
+  if (!items.length){ el.innerHTML = '<div class="note">Nessuna carta salvata.</div>'; return; }
+  el.innerHTML = items.map(it => { const d = new Date(it.ts); const fr = it.front || {}, bk = it.back;
+    const line = r => r && r.cent ? `${r.cent.lr} · ${r.cent.tb} (${r.n} foto${r.unsure ? ', verifica' : ''})` : 'cornice non rilevata';
+    return `<div class="it" data-id="${it.id}"><img src="${it.thumb || ''}" alt=""><div><div class="nm"></div><div class="dt">${d.toLocaleDateString('it-IT')} ${d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}</div></div><div class="gr">${it.grade || '–'}</div>
+      <div class="det">Centratura fronte ${line(fr)}${fr.corners ? ` · angoli max ${Math.max(...fr.corners)}% · bordi max ${Math.max(...fr.edges)}%` : ''}<br>Retro: ${bk ? 'centratura ' + line(bk) : 'non analizzato'}<br><button class="hist-del" data-id="${it.id}" style="margin-top:8px">Elimina</button></div></div>`; }).join('');
+  el.querySelectorAll('.it').forEach((n, i) => { n.querySelector('.nm').textContent = items[i].name; n.addEventListener('click', e => { if (e.target.classList.contains('hist-del')) return; n.classList.toggle('open'); }); });
+  el.querySelectorAll('.hist-del').forEach(b => b.addEventListener('click', async e => { e.stopPropagation(); const id = b.dataset.id; if (!confirm('Eliminare questa carta dallo storico?')) return;
+    hist.items = hist.items.filter(x => x.id !== id); lsWrite(hist.items); renderHist(); }));
+}
+function showNote(t){ const n = $('#save-note'); n.hidden = false; n.textContent = t; }
+function initHist(){ hist.items = lsRead(); $('#hist-note').textContent = 'Le carte salvate restano su questo telefono. Tocca una carta per i dettagli.'; renderHist(); }
+$('#save-btn').addEventListener('click', () => {
+  const rec = snapshotResult(); if (!rec){ showNote('Niente da salvare: analizza prima una carta.'); return; }
+  const btn = $('#save-btn'); btn.disabled = true;
+  try {
+    rec.id = 'l' + rec.ts; hist.items = [rec].concat(hist.items); lsWrite(hist.items); renderHist();
+    showNote(`Salvata “${rec.name}” nello storico.`);
+  } catch (err) { showNote('Salvataggio non riuscito: ' + (err && (err.code + ' ' + err.message) || err)); }
+  btn.disabled = false;
+});
+initHist();
+
+$('#again').addEventListener('click', () => {
+  state.front = state.back = null; $('#results').hidden = true; $('#fr-front').hidden = $('#fr-back').hidden = true; $('#analyze').disabled = true;
+  $('#thumb-front').textContent = 'Fronte'; $('#thumb-back').textContent = 'Retro'; $('#err').hidden = true; $('#save-note').hidden = true; $('#save-name').value = '';
+  window.scrollTo({ top:0, behavior:'smooth' });
+});
+})();
+</script>
+
+
+</body></html>
