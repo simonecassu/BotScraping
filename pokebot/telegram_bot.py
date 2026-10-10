@@ -85,7 +85,7 @@ BOT_DESCRIPTION = ("🃏 Pokébot trova le carte Pokémon che mancano alla tua c
                    "👥 Album condivisi con gli amici\n\n"
                    "Premi Avvia per chiedere l'accesso: {trial} giorni di prova con tutto, poi gratis in versione Light.")
 BOT_SHORT_DESCRIPTION = "Cerca su Vinted, Wallapop ed eBay le carte Pokémon che ti mancano e ti avvisa appena spuntano."
-PROFILE_VERSION = 3
+PROFILE_VERSION = 4  # la presentazione del bot dice i giorni di prova: cambia con TRIAL_DAYS
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot); il proprietario ne ha uno suo
 MENU_VERSION = 20
@@ -1244,7 +1244,8 @@ class CommandHandler:
             code = self.db.friend_code(self.chat)
             return Reply("🤝 Il tuo codice amico:\n"
                          f"<code>/amico {code}</code>\n\nChi lo scrive al bot diventa tuo amico: potrete condividere album con /condividi. "
-                         "Lo trovi sempre anche nella sezione Amici dell'app.")
+                         f"Se lo scrive una persona nuova (entro un mese dal suo ingresso) ricevi {plans.REFERRAL_DAYS} giorni di "
+                         "Pokébot completo in regalo 🎁. Lo trovi sempre anche nella sezione Amici dell'app.")
         verb, _, rest = a.partition(" ")
         if verb.lower() in ("togli", "rimuovi"):
             target = self._friend_by_name(rest)
@@ -1263,8 +1264,18 @@ class CommandHandler:
         if other in self.db.friends(self.chat):
             return Reply(f"Tu e <b>{html.escape(self.db.user_name(other))}</b> siete già amici.")
         self.db.add_friend(self.chat, other)
-        return Reply(f"🤝 Ora tu e <b>{html.escape(self.db.user_name(other))}</b> siete amici. "
-                     f"Condividi un album con <code>/condividi me55 {html.escape(self.db.user_name(other))}</code>.")
+        other_name = html.escape(self.db.user_name(other))
+        text = f"🤝 Ora tu e <b>{other_name}</b> siete amici. Condividi un album con <code>/condividi me55 {other_name}</code>."
+        gift = plans.referral_bonus(self.db, other, self.chat)  # chi porta una persona nuova: un mese di Completo
+        if gift is None:
+            return Reply(text)
+        me = html.escape(self.db.user_name(self.chat) or "Un nuovo amico")
+        if gift:
+            note = f"🎁 {me} è entrato con il tuo codice amico: un mese di Pokébot completo in regalo, fino al {plans._date(gift)}."
+            text += f"\n🎁 Grazie a te, {other_name} ha ricevuto un mese di Pokébot completo."
+        else:
+            note = f"🤝 {me} è entrato con il tuo codice amico."
+        return Reply(text, sends=[(other, note, None)])
 
     def _friend_by_name(self, name: str) -> str | None:
         name = name.strip().lower()
@@ -1930,6 +1941,7 @@ class TelegramCommands:
         if chat_id not in self.db.chat_ids():  # ha pagato prima di essere approvato (link girato da altri): entra subito
             self.db.remove_from_waitlist(chat_id)
             self.db.add_chat_id(chat_id)
+            plans.mark_joined(self.db, chat_id)
             plans.set_onboarding(self.db, chat_id, True)  # come chi viene approvato: prima l'album, poi le notifiche
             text, buttons = plans.welcome_message()
             self._deliver(chat_id, Reply(text, buttons=buttons))

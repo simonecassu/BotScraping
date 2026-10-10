@@ -3,7 +3,7 @@ import os
 import tempfile
 
 from pokebot import collections as coll
-from pokebot import vault, watch
+from pokebot import plans, vault, watch
 from pokebot.db import Database
 from pokebot.webapp_export import build_state, build_summary, write_state
 
@@ -76,7 +76,7 @@ def test_admin_panel_only_for_owner(index, monkeypatch):
     owner, user = build_state(index, db, chat_id="1"), build_state(index, db, chat_id="2")
     assert user["admin"] is None
     assert [w["id"] for w in owner["admin"]["waitlist"]] == ["9"] and [u["id"] for u in owner["admin"]["users"]] == ["1", "2"]
-    assert owner["admin"]["users"][1]["tier"] in ("light", "trial", "pro") and owner["admin"]["trial_days"] == 5
+    assert owner["admin"]["users"][1]["tier"] in ("light", "trial", "pro") and owner["admin"]["trial_days"] == plans.TRIAL_DAYS
 
 
 def test_owner_sees_users_collections(index, monkeypatch):

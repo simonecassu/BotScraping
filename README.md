@@ -10,7 +10,9 @@ Gira gratis su **GitHub Actions** e risponde subito grazie a un piccolo **ponte 
 
 1. Apre il bot e preme **Avvia**: finisce in lista d'attesa; il proprietario la accetta con `/approva`.
 2. Una breve introduzione: prima segna nell'app le carte che ha, poi accende le notifiche.
-3. **5 giorni di prova** con tutto; poi gratis in versione **Light** oppure l'abbonamento completo in **Telegram Stars**.
+3. **14 giorni di prova** con tutto; poi gratis in versione **Light** oppure l'abbonamento completo in **Telegram Stars**.
+   Chi porta una persona nuova (lei scrive `/amico` con il suo codice entro un mese dall'ingresso) riceve **un mese di
+   Completo** in regalo, che si somma a prova o abbonamento in corso.
 
 | | Completo (prova e abbonamento) | Light (gratis) |
 |---|---|---|

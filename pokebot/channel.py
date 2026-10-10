@@ -11,7 +11,7 @@ import logging
 import time
 from zoneinfo import ZoneInfo
 
-from . import config
+from . import plans, config
 from . import cardmarket
 from .cards import CardIndex
 from .db import Database
@@ -83,7 +83,7 @@ def format_post(deals: list[dict], bot_username: str, day: dt.date | None = None
                      f"{pct}% del valore Cardmarket ({d['trend']:.2f} €{low})\n"
                      f'<a href="{esc(d["url"], quote=True)}">{esc(d["title"][:70])}</a>\n')
     lines.append("Prezzi confrontati con Cardmarket. Trovati da Pokébot, che cerca su Wallapop, Vinted ed eBay le carte "
-                 "che mancano alla tua collezione e ti avvisa appena spuntano. 5 giorni di prova con tutto, poi gratis in versione Light.")
+                 f"che mancano alla tua collezione e ti avvisa appena spuntano. {plans.TRIAL_DAYS} giorni di prova con tutto, poi gratis in versione Light.")
     url = f"https://t.me/{bot_username}?start=canale" if bot_username else ""
     buttons = [[("🤖 Attiva Pokébot", url)]] if url else []
     return "\n".join(lines), buttons

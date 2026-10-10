@@ -1,4 +1,4 @@
-"""Piani: prova di 5 giorni con tutto, poi Light gratis per sempre oppure abbonamento in Telegram Stars.
+"""Piani: prova di TRIAL_DAYS giorni con tutto, poi Light gratis per sempre oppure abbonamento in Telegram Stars.
 
   owner  – il proprietario: tutto, sempre
   pro    – abbonato (fino alla scadenza pagata) o regalato dal proprietario ("sempre")
@@ -21,7 +21,9 @@ from .db import Database, masked
 
 log = logging.getLogger(__name__)
 
-TRIAL_DAYS = 5
+TRIAL_DAYS = 14
+REFERRAL_DAYS = 30  # un mese di Completo in regalo a chi porta una persona nuova (col suo codice amico)
+REFERRAL_WINDOW_S = 30 * 86400  # la persona è "nuova" se è entrata da meno di un mese
 PRICE_STARS = 250
 SUB_PERIOD_S = 30 * 86400  # Telegram accetta solo abbonamenti di 30 giorni
 DIGEST_HOUR = 19
@@ -77,8 +79,37 @@ def start_trial(db: Database, chat: str, days: int = TRIAL_DAYS, now: float | No
     now = now or time.time()
     p = get(db, chat)
     p.update({"trial_until": now + days * 86400, "reminded": False, "ended": False})
+    p.setdefault("joined", now)  # da quando è dentro: serve al regalo di chi l'ha portata
     save(db, chat, p)
     return p
+
+
+def mark_joined(db: Database, chat: str, now: float | None = None) -> None:
+    """Da quando la persona è dentro (per chi entra pagando, senza prova)."""
+    p = get(db, chat)
+    if not p.get("joined"):
+        p["joined"] = now or time.time()
+        save(db, chat, p)
+
+
+def referral_bonus(db: Database, referrer: str, newcomer: str, now: float | None = None) -> float | None:
+    """`newcomer` ha scritto il codice amico di `referrer`. Se è una persona nuova (dentro da meno di un mese) e non ha
+    ancora fatto un regalo, `referrer` riceve REFERRAL_DAYS giorni di Completo, sommati a prova o abbonamento in corso.
+    Restituisce la nuova scadenza; 0 per chi ha già tutto (proprietario, per sempre); None se il regalo non spetta."""
+    now = now or time.time()
+    n = get(db, newcomer)
+    joined = float(n.get("joined") or 0)
+    if referrer == newcomer or not joined or now - joined > REFERRAL_WINDOW_S or n.get("referred_by"):
+        return None
+    n["referred_by"] = referrer
+    save(db, newcomer, n)
+    p = get(db, referrer)
+    if tier(db, referrer, now) == "owner" or p.get("lifetime"):
+        return 0.0
+    base = max(now, float(p.get("pro_until") or 0), float(p.get("trial_until") or 0))
+    p.update({"pro_until": base + REFERRAL_DAYS * 86400, "ended": True, "pro_ended": False})
+    save(db, referrer, p)
+    return p["pro_until"]
 
 
 def set_pro(db: Database, chat: str, until: float | None = None, lifetime: bool = False) -> dict:

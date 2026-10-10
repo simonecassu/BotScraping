@@ -50,24 +50,24 @@ def test_trial_reminder_end_and_light(index, monkeypatch):
     db.set_kv("deals_channel", "@affari")
     now = time.time()
     assert plans.check_trials(db, client, now) == []
-    out = plans.check_trials(db, client, now + 4.5 * 86400)
+    out = plans.check_trials(db, client, now + (plans.TRIAL_DAYS - 0.5) * 86400)
     assert out == ["…2: promemoria fine prova"] and "Domani finisce" in client.sent[-1][1]
-    assert plans.check_trials(db, client, now + 4.6 * 86400) == []
+    assert plans.check_trials(db, client, now + (plans.TRIAL_DAYS - 0.4) * 86400) == []
     # due inseguimenti durante la prova: alla fine ne resta uno, ogni 2 ore
     tc.handler.handle("/insegui 131 151", "2")
     assert len(db.get_kv("watches:2")) == 2
-    out = plans.check_trials(db, client, now + 5.1 * 86400)
+    out = plans.check_trials(db, client, now + (plans.TRIAL_DAYS + 0.1) * 86400)
     assert out == ["…2: fine prova, passato a Light"]
-    assert plans.tier(db, "2", now + 5.1 * 86400) == "light"
+    assert plans.tier(db, "2", now + (plans.TRIAL_DAYS + 0.1) * 86400) == "light"
     text = client.sent[-1][1]
-    assert "prova di 5 giorni è finita" in text and "250" in text
+    assert f"prova di {plans.TRIAL_DAYS} giorni è finita" in text and "250" in text
     rows = client.last_buttons
     assert [b[1] for b in rows[0]] == [f"/voto {n}" for n in range(1, 6)]
     assert rows[1][0][1] == "https://t.me/$inv_pro:2" and client.invoice == ("pro:2", 250, 30 * 86400)
     assert rows[2][0][1] == "https://t.me/affari"
     w = db.get_kv("watches:2")
     assert len(w) == 1 and list(w.values())[0]["every"] == 7200
-    assert plans.check_trials(db, client, now + 6 * 86400) == []  # una volta sola
+    assert plans.check_trials(db, client, now + (plans.TRIAL_DAYS + 1) * 86400) == []  # una volta sola
 
 
 def test_light_limits_and_vote(index, monkeypatch):
@@ -328,3 +328,52 @@ def test_refund_reports_unrecoverable_charge(index, monkeypatch):
         "subscription_expiration_date": time.time() + 86400 * 30}})
     r = tc.handler.handle("/rimborsa 2", "1")
     assert "non riuscito" in r.text and "CHARGE_ID_EMPTY" in r.text and plans.tier(db, "2") == "pro"
+
+
+def test_referral_month_for_whoever_brings_a_new_person(index, monkeypatch):
+    db, client, tc = setup(index, monkeypatch)
+    now = time.time()
+    db.add_chat_id("2")
+    db.set_user_name("2", "Andrea")
+    plans.start_trial(db, "2", now=now - 60 * 86400)  # dentro da due mesi, prova finita: Light
+    assert plans.tier(db, "2") == "light"
+    code = db.friend_code("2")
+    db.add_chat_id("3")
+    db.set_user_name("3", "Luca")
+    plans.start_trial(db, "3")  # appena entrato
+    r = tc.handler.handle(f"/amico {code}", "3")
+    assert "siete amici" in r.text and "ha ricevuto un mese" in r.text
+    assert r.sends[0][0] == "2" and "un mese di Pokébot completo" in r.sends[0][1]
+    assert plans.tier(db, "2") == "pro" and abs(plans.get(db, "2")["pro_until"] - (now + 30 * 86400)) < 120
+    assert plans.get(db, "3")["referred_by"] == "2"
+    # la stessa persona nuova non regala due volte
+    db.add_chat_id("5")
+    plans.start_trial(db, "5", now=now - 60 * 86400)
+    r = tc.handler.handle(f"/amico {db.friend_code('5')}", "3")
+    assert "siete amici" in r.text and r.sends is None and plans.tier(db, "5") == "light"
+    # un'altra persona nuova: il mese si somma a quello già regalato
+    db.add_chat_id("4")
+    plans.start_trial(db, "4")
+    tc.handler.handle(f"/amico {code}", "4")
+    assert abs(plans.get(db, "2")["pro_until"] - (now + 60 * 86400)) < 120
+    # due persone vecchie: nessun regalo
+    assert tc.handler.handle(f"/amico {code}", "5").sends is None
+    # chi è in prova somma il mese alla prova
+    db.add_chat_id("6")
+    plans.start_trial(db, "6")
+    db.add_chat_id("7")
+    plans.start_trial(db, "7")
+    tc.handler.handle(f"/amico {db.friend_code('6')}", "7")
+    assert abs(plans.get(db, "6")["pro_until"] - (now + (plans.TRIAL_DAYS + 30) * 86400)) < 120
+    out = plans.check_trials(db, client, now + (plans.TRIAL_DAYS + 1) * 86400)
+    assert not any(line.startswith("…6") for line in out)  # per lui niente "fine prova": è Completo
+    # il proprietario porta qualcuno: solo l'avviso, ha già tutto
+    db.add_chat_id("8")
+    plans.start_trial(db, "8")
+    r = tc.handler.handle(f"/amico {db.friend_code('1')}", "8")
+    assert r.sends[0][0] == "1" and "codice amico" in r.sends[0][1] and plans.tier(db, "1") == "owner"
+    # chi entra pagando, senza prova, conta come persona nuova
+    tc.handle_payload({"chat_id": 9, "text": "/pagamento", "name": "Pia", "payment": {
+        "currency": "XTR", "total_amount": 250, "invoice_payload": "pro:9", "telegram_payment_charge_id": "ch9",
+        "subscription_expiration_date": now + 86400 * 30}})
+    assert plans.get(db, "9").get("joined")
