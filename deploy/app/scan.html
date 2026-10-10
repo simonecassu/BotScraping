@@ -688,10 +688,12 @@ function growOutward(canvas, quad){
     const mean = pts => { const acc = [0, 0, 0]; for (const [x, y] of pts){ const c = col(x, y); acc[0] += c[0]; acc[1] += c[1]; acc[2] += c[2]; } return acc.map(v => v / pts.length); };
     const cut = []; for (const a of [0.15, 0.4, 0.65]) for (const b of [0.15, 0.4, 0.65]) cut.push([p[0] + (ta[0] * a + tb[0] * b) * ppm, p[1] + (ta[1] * a + tb[1] * b) * ppm]);
     const band = off => { const pts = []; for (const s of [3, 4, 5, 6]){ pts.push([p[0] + ta[0] * s * ppm + na.nx * off * ppm, p[1] + ta[1] * s * ppm + na.ny * off * ppm]); pts.push([p[0] + tb[0] * s * ppm + nb.nx * off * ppm, p[1] + tb[1] * s * ppm + nb.ny * off * ppm]); } return pts; };
-    const C = mean(cut), B = mean(band(-0.5)), O = mean(band(0.5)); const co = l1(C, O), cb = l1(C, B);
-    return { co: Math.round(co), cb: Math.round(cb), s: co < 20 && cb > 22 ? 1 : cb < 12 && co > 20 ? -1 : 0 }; }; // (canali: luminanza e due colori opposti) −1 solo se la zona del taglio somiglia al bordo e non allo sfondo; bordo nero su panno in ombra: incerto, 0
+    const outs = band(0.5); const C = mean(cut), B = mean(band(-0.5)), O = mean(outs); const co = l1(C, O), cb = l1(C, B);
+    let sp = 0; for (const [x, y] of outs) sp = Math.max(sp, l1(col(x, y), O)); // quanto varia lo sfondo da solo (panno a trama grossa, ombra)
+    const s = co < Math.max(20, sp) && cb > Math.max(22, 2 * sp) ? 1 : cb < 12 && co > Math.max(20, sp) ? -1 : 0;
+    return { co: Math.round(co), cb: Math.round(cb), sp: Math.round(sp), s }; }; // (canali: luminanza e due colori opposti) −1 solo se la zona del taglio somiglia al bordo e non allo sfondo; bordo nero su panno in ombra: incerto, 0
   const c0 = q.map((p, i) => cornerAt(p, i)); const s0 = c0.reduce((a, c) => a + c.s, 0);
-  growOutward.last = { corners: s0, c: c0.map(c => [c.co, c.cb]), ppm: +ppm.toFixed(2) };
+  growOutward.last = { corners: s0, c: c0.map(c => [c.co, c.cb, c.sp]), ppm: +ppm.toFixed(2) };
   if (s0 >= 3) return null;
   const d1 = Math.round(6.5 * ppm);
   const walk = (s, dir) => { const { A, vx, vy, nx, ny } = normals[s]; const d0 = dir > 0 ? Math.max(4, Math.round(0.6 * ppm)) : Math.max(3, Math.round(0.3 * ppm));
@@ -719,7 +721,7 @@ function growOutward(canvas, quad){
     const ha = (Math.hypot(Q[2][0] - Q[1][0], Q[2][1] - Q[1][1]) + Math.hypot(Q[3][0] - Q[0][0], Q[3][1] - Q[0][1])) / 2; return Math.min(wa, ha) / Math.max(wa, ha); };
   const target = 63 / 88;
   const scored = options.map(o => { const sh = o.sh.map(v => v || 0); const out = [cornerOf(0, sh[3], sh[0]), cornerOf(1, sh[0], sh[1]), cornerOf(2, sh[1], sh[2]), cornerOf(3, sh[2], sh[3])];
-      const cc = out.map((p, i) => cornerAt(p, i)), cs = cc.map(c => c.s); return { ...o, out, cs, cc: cc.map(c => [c.co, c.cb]), score: cs.reduce((a, b) => a + b, 0), err: Math.abs(ratioOf(out) - target) }; })
+      const cc = out.map((p, i) => cornerAt(p, i)), cs = cc.map(c => c.s); return { ...o, out, cs, cc: cc.map(c => [c.co, c.cb, c.sp]), score: cs.reduce((a, b) => a + b, 0), err: Math.abs(ratioOf(out) - target) }; })
     .filter(o => o.err <= 0.045 && !o.cs.some((v, i) => c0[i].s > 0 && v < 1)).sort((a, b) => (b.score - a.score) || (a.err - b.err));
   growOutward.last.scores = scored.map(o => [o.name, o.score, +o.err.toFixed(3), o.cc]);
   const best = scored[0]; if (!best || best.score < 1 || best.score < s0 + 2) return null;
