@@ -50,6 +50,15 @@ Telegram (`telegram-web-app.js`) viene scaricato a ogni deploy e servito dal pon
 telegram.org non risponde.
 Ognuno vede solo i suoi dati.
 
+**Novità** (`deploy/app/news.html`, dati in `/app/news.json`): uscite italiane e giapponesi con le carte rivelate (TCGdex),
+top 8 dell'ultimo grande torneo con liste, prezzo Cardmarket e carte mancanti per persona (limitlesstcg.com), calendario
+degli eventi con classifica in diretta (rk9.gg), annunci e prodotti speciali (pokemon.com/it). Li scrive il workflow
+**Novità** (`scripts/build_news.py`, ogni 15 minuti: aggiornamento completo una volta l'ora, ogni giro durante un torneo)
+nel branch `bot-news`, che il ponte serve con una cache di 5 minuti; quando c'è qualcosa da annunciare sveglia il bot.
+Avvisi in chat per categoria (`/novita tornei si`; solo Completo e prova, di default solo le uscite) e `/insegui mazzo 1`
+per inseguire le carte che mancano di un mazzo della top 8. I lettori delle pagine HTML sono tolleranti e, se una fonte non
+risponde, resta l'ultimo risultato buono di quella sezione.
+
 **Segnalazioni**: ogni utente può scrivere una volta al giorno un problema o un'idea (`/segnala testo`, anche su più
 righe, o dalla Mini App); il proprietario riceve un messaggio e le trova tutte con `/segnalazioni` o nella Mini App,
 dalle più recenti, con il contatore delle nuove.

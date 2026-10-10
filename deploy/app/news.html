@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Novità · Pescacarte</title>
+<script src="/app/telegram-web-app.js"></script><!-- copia dello script ufficiale di Telegram servita dal ponte -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800;900&display=swap">
+<style>
+/* Pagina Novità della Mini App: dati veri da /app/news.json (scritto dal workflow «Novità», scripts/build_news.py);
+   piano e interruttori della persona da /api/state. Una colonna da telefono: in alto ciò che succede adesso, poi le schede. */
+:root{
+  --bg:#0b1630; --sec:#152648; --card:#1b3160; --deep:#0a1328; --txt:#f4f6fb; --hint:#9fb0d0; --line:rgba(255,255,255,.1);
+  --red:#e3350d; --red2:#b5240a; --yel:#ffb703; --yel2:#c98f00; --blue:#3b7dd8; --navy:#0f1f3d;
+  --ok:#4cd964; --warn:#ffa41b; --bad:#ff5a5f; --link:#7fc4ff;
+  --font:"Nunito",-apple-system,system-ui,"Segoe UI",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg)}
+body{margin:0;color:var(--txt);font:700 15px/1.4 var(--font);
+  background:radial-gradient(circle at 85% -10%, rgba(255,203,5,.16), transparent 38%),radial-gradient(circle at -10% 110%, rgba(227,53,13,.2), transparent 42%),var(--bg);min-height:100%}
+h2,h3{margin:0;text-wrap:balance}
+header{position:sticky;top:0;z-index:5;background:linear-gradient(180deg,var(--red) 0,var(--red) 52%,#111 52%,#111 56%,var(--navy) 56%);padding:calc(env(safe-area-inset-top,0px) + 10px) 16px 0;box-shadow:0 4px 16px rgba(0,0,0,.4)}
+.title{display:flex;align-items:center;gap:10px;font-weight:900;font-size:19px;color:#fff;text-shadow:0 2px 0 rgba(0,0,0,.35);padding-bottom:12px}
+.title small{color:#ffe9a8;font-weight:700;font-size:12px;margin-left:auto;white-space:nowrap}
+.back{border:0;background:rgba(255,255,255,.18);color:#fff;width:34px;height:34px;border-radius:50%;font:900 22px/1 var(--font);flex:none;padding:0 0 3px;cursor:pointer}
+.tabs{display:flex;gap:6px;padding:0 0 10px;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:1 0 auto;border:2px solid transparent;background:var(--sec);color:var(--hint);font:900 13px var(--font);padding:7px 12px;border-radius:999px;cursor:pointer;white-space:nowrap}
+.tab[aria-selected="true"]{background:var(--yel);color:#1a1a1a;border-color:#fff3b0}
+.tab .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--red);margin-left:5px;vertical-align:middle}
+main{padding:12px 16px calc(env(safe-area-inset-bottom,0px) + 40px);max-width:620px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+button:focus-visible,.tab:focus-visible,summary:focus-visible{outline:2px solid var(--yel);outline-offset:2px}
+.demo{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--deep);border:2px dashed #2f4f86;border-radius:14px;padding:9px 12px;font-size:12px;color:var(--hint)}
+.demo b{color:var(--txt)}
+.h{font-size:13px;color:var(--yel);font-weight:900;text-transform:uppercase;letter-spacing:.06em}
+.hint{color:var(--hint);font-size:13px;font-weight:700}
+.box{background:var(--sec);border:3px solid var(--deep);box-shadow:0 4px 0 var(--deep);border-radius:18px;padding:14px;min-width:0}
+.box.red{border-color:var(--red);box-shadow:0 4px 0 var(--red2)}
+.box.yel{border-color:var(--yel);box-shadow:0 4px 0 var(--yel2)}
+.stack{display:flex;flex-direction:column;gap:12px}
+.pill{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:900;padding:3px 9px;border-radius:999px;background:var(--deep);color:var(--hint);border:1px solid #2a3a60;white-space:nowrap}
+.pill.live{background:var(--red);color:#fff;border-color:#ff8a70}
+.pill.live::before{content:"";width:7px;height:7px;border-radius:50%;background:#fff;animation:pulse 1.4s infinite}
+.pill.jp{color:#ffd0d0;border-color:#7a2b2b}
+.pill.sp{color:#1a1a1a;background:var(--yel);border-color:#fff3b0}
+.pill.ok{color:var(--ok);border-color:#2c6b3a}
+.pill.warn{color:var(--warn);border-color:#7a5a1b}
+@keyframes pulse{50%{opacity:.25}}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:999px;background:var(--red);color:#fff;font:900 13px var(--font);padding:9px 14px;box-shadow:0 3px 0 var(--red2);cursor:pointer;min-height:38px}
+.btn.sec{background:var(--yel);color:#1a1a1a;box-shadow:0 3px 0 var(--yel2)}
+.btn.ghost{background:var(--deep);color:var(--txt);box-shadow:0 3px 0 #050a16}
+.btn:disabled{opacity:.45;cursor:default}
+.now{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.now .box{display:flex;flex-direction:column;gap:6px}
+.now .big{font-size:26px;font-weight:900;color:var(--yel);font-variant-numeric:tabular-nums;line-height:1.1}
+.now .nm{font-weight:900;font-size:15px;line-height:1.2}
+@media (max-width:420px){.now{grid-template-columns:1fr}}
+.rel{display:grid;grid-template-columns:62px 1fr;gap:12px;align-items:start}
+.rel .art{width:62px;aspect-ratio:63/88;border-radius:8px;background:linear-gradient(160deg,var(--c1),var(--c2));background-size:cover;background-position:center;border:2px solid var(--deep);display:flex;align-items:flex-end;justify-content:center;font:900 10px var(--font);color:#fff;padding-bottom:6px;text-shadow:0 1px 0 #0008;letter-spacing:.04em;overflow:hidden}
+.rel .t{min-width:0;display:flex;flex-direction:column;gap:5px}
+.rel .nm{font-weight:900;font-size:16px;line-height:1.2}
+.rel .meta{font-size:12px;color:var(--hint)}
+.rel ul{margin:2px 0 0;padding-left:18px;font-size:13px;color:var(--txt);font-weight:700}
+.rel ul li{margin:2px 0}
+.revh{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:6px;font-size:12px;color:var(--hint)}
+.revh b{color:var(--yel);font-weight:900;text-transform:uppercase;letter-spacing:.06em}
+.revs{display:flex;gap:8px;overflow-x:auto;padding:4px 2px 8px;scroll-snap-type:x proximity;scrollbar-width:thin}
+.rc{position:relative;flex:none;width:86px;scroll-snap-align:start;border:0;padding:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.rc .face{position:relative;width:100%;aspect-ratio:63/88;border-radius:7px;overflow:hidden;border:2px solid var(--deep);box-shadow:0 2px 0 var(--deep);background:linear-gradient(165deg,var(--t1),var(--t2));display:block}
+.rc .face img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.rc .ph{position:absolute;inset:6px;border-radius:4px;border:1px solid rgba(255,255,255,.35);display:flex;flex-direction:column;justify-content:space-between;padding:5px;font-size:9px;font-weight:900;color:#fff;text-shadow:0 1px 0 #0009}
+.rc .ph .art2{flex:1;margin:4px 0;border-radius:3px;background:radial-gradient(circle at 50% 40%,rgba(255,255,255,.5),rgba(255,255,255,.05) 60%)}
+.rc .nw{position:absolute;top:4px;left:4px;z-index:1;background:var(--red);color:#fff;font-size:9px;font-weight:900;padding:1px 6px;border-radius:6px}
+.rc .rn{display:block;font-size:11px;font-weight:800;line-height:1.2;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rc .rr{display:block;font-size:10px;color:var(--hint)}
+.lb{position:fixed;inset:0;z-index:20;background:rgba(5,10,22,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:calc(env(safe-area-inset-top,0px) + 16px) 16px calc(env(safe-area-inset-bottom,0px) + 16px)}
+.lb .rc{width:min(68vw,300px);cursor:default}
+.lb .rc .ph{font-size:13px;inset:10px;padding:9px}
+.lb .info{text-align:center;max-width:320px;display:flex;flex-direction:column;gap:4px}
+.lb .info b{font-size:18px;font-weight:900}
+.cd{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--yel)}
+.month{font-size:12px;color:var(--hint);font-weight:900;text-transform:uppercase;letter-spacing:.08em;margin:6px 0 -4px}
+.meta-bars{display:flex;flex-direction:column;gap:7px;margin-top:10px}
+.mb{display:grid;grid-template-columns:minmax(0,1fr) 46px;gap:4px 8px;align-items:center;font-size:13px}
+.mb .tr{grid-column:1/-1;height:10px;border-radius:5px;background:var(--deep);overflow:hidden}
+.mb .tr i{display:block;height:100%;background:linear-gradient(90deg,var(--red),var(--yel));border-radius:5px}
+.mb .pc{text-align:right;font-variant-numeric:tabular-nums;color:var(--yel);font-weight:900}
+.deck{background:var(--sec);border:2px solid var(--line);border-radius:14px;overflow:hidden}
+.deck summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:38px 1fr auto;gap:10px;align-items:center;padding:11px 12px}
+.deck summary::-webkit-details-marker{display:none}
+.deck .pl{width:38px;height:38px;border-radius:50%;background:var(--deep);display:flex;align-items:center;justify-content:center;font-weight:900;color:var(--hint);font-size:14px}
+.deck .pl.p1{background:var(--yel);color:#1a1a1a}
+.deck .pl.p2{background:#cfd8e6;color:#1a1a1a}
+.deck .pl.p3{background:#c98552;color:#1a1a1a}
+.deck .who{min-width:0}
+.deck .who b{display:block;font-weight:900;font-size:15px;line-height:1.2}
+.deck .who small{color:var(--hint);font-size:12px}
+.deck .pr{text-align:right;font-variant-numeric:tabular-nums}
+.deck .pr b{display:block;color:var(--yel);font-weight:900}
+.deck .pr small{font-size:11px;color:var(--hint)}
+.deck[open] summary{border-bottom:1px solid var(--line)}
+.dl{padding:10px 12px 12px;display:flex;flex-direction:column;gap:10px}
+.dl h4{margin:0;font-size:12px;color:var(--hint);text-transform:uppercase;letter-spacing:.06em}
+.dl ul{list-style:none;margin:4px 0 0;padding:0;display:grid;gap:2px}
+.dl li{display:grid;grid-template-columns:24px 1fr auto;gap:8px;font-size:13px;padding:3px 0;border-bottom:1px solid var(--line)}
+.dl li .q{font-weight:900;color:var(--yel);text-align:right;font-variant-numeric:tabular-nums}
+.dl li .cd2{font-family:var(--mono);font-size:11px;color:var(--hint);align-self:center}
+.dl li.miss .n::after{content:" · ti manca";color:var(--warn);font-size:11px}
+.ev{display:grid;grid-template-columns:54px 1fr;gap:12px;align-items:start}
+.ev .date{background:var(--deep);border-radius:12px;text-align:center;padding:6px 0;font-weight:900;line-height:1.1}
+.ev .date b{display:block;font-size:20px;color:var(--yel)}
+.ev .date small{font-size:11px;color:var(--hint);text-transform:uppercase}
+.ev .t{min-width:0;display:flex;flex-direction:column;gap:4px}
+.ev .nm{font-weight:900;font-size:15px;line-height:1.2}
+.stand{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+.stand td,.stand th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left}
+.stand th{color:var(--hint);font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.stand td.r,.stand th.r{text-align:right;font-variant-numeric:tabular-nums}
+.stand td small{color:var(--hint);display:block;font-size:11px}
+.scroll{overflow-x:auto}
+.up{display:flex;flex-direction:column;gap:6px}
+.up .nm{font-weight:900;font-size:15px;line-height:1.25}
+.up p{margin:0;font-size:13px;color:#dbe4f5;max-width:62ch}
+.up .src{font-size:12px;color:var(--hint)}
+.set{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+.set:last-of-type{border-bottom:0}
+.set label{flex:1;font-weight:800;min-width:0}
+.set small{display:block;color:var(--hint);font-size:12px;font-weight:700}
+.sw{width:52px;height:30px;border-radius:15px;background:var(--deep);position:relative;border:2px solid var(--line);flex:none;cursor:pointer;padding:0}
+.sw[aria-checked="true"]{background:var(--red);border-color:#ff8a70}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:22px;height:22px;border-radius:11px;background:#fff;transition:left .15s;box-shadow:0 1px 3px rgba(0,0,0,.4)}
+.sw[aria-checked="true"]::after{left:24px}
+.sw:disabled{opacity:.4;cursor:default}
+.lock{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between;background:var(--deep);border:2px solid var(--yel);border-radius:12px;padding:10px 12px;font-size:13px;margin-top:8px}
+.toast{position:fixed;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);background:#111c;color:#fff;padding:11px 14px;border-radius:14px;font-size:14px;font-weight:800;backdrop-filter:blur(8px);z-index:9;opacity:0;transition:opacity .2s;pointer-events:none;border:2px solid var(--yel)}
+.toast.show{opacity:1}
+a{color:var(--link);text-decoration:none}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <div class="title">
+    <button class="back" id="back" aria-label="Torna alla Mini App">‹</button>
+    <span>Novità</span>
+    <small id="upd">…</small>
+  </div>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tab-uscite" data-tab="uscite" aria-selected="true">Uscite</button>
+    <button class="tab" role="tab" id="tab-mazzi" data-tab="mazzi" aria-selected="false">Mazzi</button>
+    <button class="tab" role="tab" id="tab-eventi" data-tab="eventi" aria-selected="false">Eventi</button>
+    <button class="tab" role="tab" id="tab-agg" data-tab="agg" aria-selected="false">Aggiornamenti</button>
+    <button class="tab" role="tab" id="tab-notif" data-tab="notif" aria-selected="false">Notifiche</button>
+  </div>
+</header>
+
+<main>
+  <div class="demo" id="demo" hidden><span><b>Novità non ancora pronte.</b> Il primo aggiornamento arriva entro un'ora: intanto qui vedi dati di esempio.</span></div>
+  <section class="now" id="now"></section>
+  <section id="p-uscite" class="stack"></section>
+  <section id="p-mazzi" class="stack" hidden></section>
+  <section id="p-eventi" class="stack" hidden></section>
+  <section id="p-agg" class="stack" hidden></section>
+  <section id="p-notif" class="stack" hidden></section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+'use strict';
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const tg = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData ? window.Telegram.WebApp : null;
+if (tg) { try { tg.ready(); tg.expand(); tg.BackButton.onClick(() => { location.href = "/app"; }); tg.BackButton.show(); } catch (e) {} }
+window.__news = {};  // per le prove
+
+/* ---------- dati di esempio: stessa forma di news.json; si vedono solo finché il workflow non ha scritto il primo file ---------- */
+const DAY = 864e5;
+const at = (days, h = 0, m = 0) => { const d = new Date(Date.now() + days * DAY); d.setHours(h, m, 0, 0); return d.toISOString(); };
+const SAMPLE = {
+  updated: at(0, new Date().getHours(), 5),
+  releases: [
+    { id: "es1", name: "Esempio: espansione in arrivo", region: "int", kind: "set", date: at(4), status: "preordini", cards: 191,
+      highlights: ["qui le carte rivelate, con l'immagine quando c'è"], products: [], c1: "#5b2a86", c2: "#1d0f33",
+      revealed: [ { n: 201, name: "Esempio ex", rarity: "Illustrazione speciale", type: "psy", when: at(-1), img: null }, { n: 34, name: "Esempio", rarity: "Rara", type: "fire", when: at(-5), img: null } ] },
+    { id: "es2", name: "Esempio: set giapponese", region: "jp", kind: "set", date: at(21), status: "annunciata", cards: 104, highlights: [], products: [], c1: "#b01e2e", c2: "#3a0a10", revealed: [] },
+  ],
+  decks: { event: "Esempio: Regionale", date: at(-6), players: 1874, format: "Standard", meta_note: "quota tra i primi 32 classificati",
+    meta: [ { a: "Mazzo A", s: 18.4 }, { a: "Mazzo B", s: 14.1 }, { a: "Mazzo C", s: 12.7 } ],
+    top: [ { place: 1, player: "Esempio", country: "IT", a: "Mazzo A", price: 236, missing: null, list: { "Pokémon": [[4, "Carta", "TWM 128"]], "Allenatori": [[4, "Carta", "MEG 119"]], "Energie": [[8, "Energia", "MEE 5"]] }, cards: [] },
+           { place: 2, player: "Esempio", country: "DE", a: "Mazzo B", price: 189, missing: null, list: null, cards: [] } ] },
+  events: [ { id: "ev1", name: "Esempio: Regionale", kind: "Regionale", city: "Milano", country: "Italia", start: at(48, 9), end: at(49, 19), home: true } ],
+  updates: [ { date: at(-2), kind: "Annuncio", title: "Esempio di annuncio", body: "Qui arrivano gli annunci di pokemon.com/it.", src: "pokemon.com/it" } ],
+};
+
+/* ---------- stato ---------- */
+const S = { data: null, tab: "uscite", plan: "full", notif: { espansioni: true, tornei: false, live: false, aggiornamenti: false }, missing: {}, missingCodes: {}, followed: new Set() };
+try { const t = localStorage.getItem("news.tab"); if (t) S.tab = t; } catch (e) {}
+
+async function load() {
+  try { const r = await fetch("/app/news.json", { cache: "no-cache" }); if (r.ok) { S.data = await r.json(); } } catch (e) {}
+  if (!S.data || !S.data.releases) { S.data = SAMPLE; $("#demo").hidden = false; }
+  if (tg) {  // piano, interruttori, carte mancanti e collezioni seguite: dallo stato della persona
+    try { const r = await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: tg.initData }) });
+      if (r.ok) { const st = await r.json(); if (st.plan) S.plan = st.plan.full ? "full" : "light";
+        if (st.news) { Object.assign(S.notif, st.news.notif || {}); S.missing = st.news.missing || {}; S.missingCodes = st.news.missing_codes || {}; S.followed = new Set(st.news.followed || []); } } } catch (e) {}
+  }
+  window.__news = S; render();
+  setInterval(tick, 1000);
+}
+
+/* ---------- utilità ---------- */
+const MESI = ["gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"];
+const MESI_L = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
+const fmtDay = (iso) => { const d = new Date(iso); return `${d.getDate()} ${MESI[d.getMonth()]}`; };
+const fmtTime = (iso) => new Date(iso).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+function countdown(iso) {
+  let s = Math.max(0, Math.round((new Date(iso) - Date.now()) / 1000));
+  const d = Math.floor(s / 86400); s -= d * 86400; const h = Math.floor(s / 3600); s -= h * 3600; const m = Math.floor(s / 60); s -= m * 60;
+  if (d >= 2) return `${d} giorni`;
+  return `${d ? d + "g " : ""}${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+const ago = (iso) => { const m = Math.round((Date.now() - new Date(iso)) / 6e4); return m < 60 ? `${Math.max(1, m)} min fa` : m < 1440 ? `${Math.round(m / 60)} ore fa` : `${Math.round(m / 1440)} giorni fa`; };
+const isLive = (e) => Date.now() >= new Date(e.start) && Date.now() <= new Date(e.end);
+const flag = (cc) => cc && cc.length === 2 ? String.fromCodePoint(...[...cc.toUpperCase()].map((c) => 127397 + c.charCodeAt(0))) : "";
+const eur = (n) => n == null ? "–" : `${Math.round(n)} €`;
+let toastT;
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2600); }
+async function sendCmd(text) {  // come in index.html: il ponte mette il comando in coda e conferma in chat
+  if (!tg) { toast(`Nel bot invia: ${text}`); return false; }
+  try { const r = await fetch("/api/cmd", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: tg.initData, text }) }); return r.ok; }
+  catch (e) { toast("Non riesco a raggiungere il bot: riprova tra poco"); return false; }
+}
+
+/* ---------- in evidenza ---------- */
+function renderNow() {
+  const D = S.data; const live = (D.events || []).find(isLive);
+  const next = (D.releases || []).filter((r) => new Date(r.date) > Date.now()).sort((a, b) => new Date(a.date) - new Date(b.date))[0];
+  const nextEv = (D.events || []).filter((e) => new Date(e.start) > Date.now()).sort((a, b) => new Date(a.start) - new Date(b.start))[0];
+  let h = "";
+  if (live) h += `<div class="box red"><div class="row"><span class="pill live">In corso</span><span class="hint">${live.live && live.live.round ? "turno " + live.live.round : ""}</span></div>
+      <div class="nm">${esc(live.name)}</div><span class="hint">${live.live && live.live.standings.length ? "in testa: " + esc(live.live.standings[0].player) + (live.live.standings[0].a ? " · " + esc(live.live.standings[0].a) : "") : "classifica in arrivo"}</span>
+      <button class="btn" data-go="eventi" style="align-self:flex-start">Classifica</button></div>`;
+  else if (nextEv) h += `<div class="box red"><span class="h">Prossimo torneo</span><div class="nm">${esc(nextEv.name)}</div><div class="big" data-cd="${nextEv.start}">${countdown(nextEv.start)}</div><span class="hint">${fmtDay(nextEv.start)} · ${esc(nextEv.city)}</span></div>`;
+  if (next) h += `<div class="box yel"><span class="h">Prossima uscita</span><div class="nm">${esc(next.name)}</div><div class="big" data-cd="${next.date}">${countdown(next.date)}</div>
+      <span class="hint">${fmtDay(next.date)}${next.region === "jp" ? " · in Giappone" : " · nei negozi italiani"}</span></div>`;
+  $("#now").innerHTML = h;
+}
+
+/* ---------- uscite ---------- */
+const followId = (r) => r.ptcg || null;
+function renderUscite() {
+  const rs = (S.data.releases || []).slice().sort((a, b) => {
+    const fa = new Date(a.date) < Date.now(), fb = new Date(b.date) < Date.now();
+    return fa !== fb ? (fa ? 1 : -1) : fa ? new Date(b.date) - new Date(a.date) : new Date(a.date) - new Date(b.date); });
+  let h = `<p class="hint" style="margin:0">Espansioni italiane e internazionali, set giapponesi in anteprima e prodotti speciali, con le carte rivelate man mano. Con «Segui» il bot inizia a cercarne le carte appena escono.</p>`;
+  let lastM = "";
+  for (const r of rs) {
+    const d = new Date(r.date), past = d < Date.now(); const m = past ? "Già uscite" : `${MESI_L[d.getMonth()]} ${d.getFullYear()}`;
+    if (m !== lastM) { h += `<div class="month">${m}</div>`; lastM = m; }
+    const tags = [r.region === "jp" ? `<span class="pill jp">Giappone</span>` : `<span class="pill">Italia</span>`, r.kind === "special" ? `<span class="pill sp">Prodotto speciale</span>` : "",
+      r.status === "preordini" ? `<span class="pill ok">Preordini aperti</span>` : r.status === "uscita" ? `<span class="pill">Uscita</span>` : `<span class="pill warn">Annunciata</span>`].join("");
+    const fid = followId(r), followed = fid && S.followed.has(fid);
+    h += `<article class="box rel" style="--c1:${esc(r.c1 || "#2f4f86")};--c2:${esc(r.c2 || "#0a1328")}">
+      <div class="art" aria-hidden="true"${r.img ? ` style="background-image:url('${esc(r.img)}')"` : ""}>${r.img ? "" : esc((r.tcg_set || r.id).toUpperCase().slice(0, 6))}</div>
+      <div class="t">
+        <div class="row">${tags}</div>
+        <div class="nm">${esc(r.name)}</div>
+        <div class="meta">${past ? "uscita il " : ""}${fmtDay(r.date)} ${d.getFullYear()}${r.cards ? ` · ${r.cards} carte` : ""}${r.expectedInt ? ` · da noi: ${esc(r.expectedInt)} (stima)` : ""}${past ? "" : ` · <span class="cd" data-cd="${r.date}">${countdown(r.date)}</span>`}</div>
+        ${r.highlights && r.highlights.length ? `<ul>${r.highlights.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+        ${revealed(r)}
+        ${r.products && r.products.length ? `<div class="meta">Prodotti: ${r.products.map(esc).join(" · ")}</div>` : ""}
+        ${r.region === "jp" || r.kind === "special" || !fid ? "" : `<div class="row" style="margin-top:4px">${followed ? `<span class="pill ok">✓ La segui</span>` : `<button class="btn sec" data-follow="${esc(fid)}">Segui</button>`}</div>`}
+      </div></article>`;
+  }
+  $("#p-uscite").innerHTML = h; fixImages($("#p-uscite"));
+}
+
+const TYPE = {"psy": ["#7b4bb8", "#2a1145"], "fire": ["#e2572b", "#5a1405"], "water": ["#3b7dd8", "#0c2350"], "grass": ["#4c9a3b", "#12320c"], "dark": ["#3c3f55", "#0d0e18"], "light": ["#e8c33b", "#6a4a00"], "fight": ["#b0683a", "#3d1d08"], "col": ["#8aa0b8", "#2c3a4c"]};
+const isNew = (c) => Date.now() - new Date(c.when) < 2 * DAY;
+function cardFace(r, c) {
+  const [t1, t2] = TYPE[c.type] || TYPE.col;
+  return `<span class="face" style="--t1:${t1};--t2:${t2}">${isNew(c) ? '<span class="nw">nuova</span>' : ""}
+    <span class="ph"><span>${esc(c.name)}</span><span class="art2"></span><span>${esc(String(c.n))}${r.cards && typeof c.n === "number" ? "/" + r.cards : ""}</span></span>
+    ${c.img ? `<img src="${esc(c.img)}" alt="${esc(c.name)}" loading="lazy">` : ""}</span>`;
+}
+function revealed(r) {
+  const cs = (r.revealed || []).slice().sort((a, b) => new Date(b.when) - new Date(a.when)); if (!cs.length) return "";
+  const nw = cs.filter(isNew).length;
+  return `<div class="revh"><b>Carte rivelate</b><span>${cs.length}${r.cards ? " di " + r.cards : ""}${nw ? ` · ${nw} nuove` : ""}</span></div>
+    <div class="revs">${cs.slice(0, 40).map((c) => `<button class="rc" data-rel="${esc(r.id)}" data-card="${esc(String(c.n))}" aria-label="${esc(c.name)}, ${esc(c.rarity)}">${cardFace(r, c)}
+      <span class="rn">${esc(c.name)}</span><span class="rr">${esc(c.rarity)}</span></button>`).join("")}</div>`;
+}
+function fixImages(root) {  // un'immagine che non si carica lascia il segnaposto disegnato sotto
+  root.querySelectorAll(".face img").forEach((im) => { const drop = () => im.remove(); if (im.complete && !im.naturalWidth) drop(); else im.addEventListener("error", drop); });
+}
+function openCard(relId, n) {
+  const r = S.data.releases.find((x) => x.id === relId); const c = r && (r.revealed || []).find((x) => String(x.n) === n); if (!c) return;
+  const fid = followId(r);
+  const lb = document.createElement("div"); lb.className = "lb"; lb.setAttribute("role", "dialog"); lb.setAttribute("aria-label", c.name);
+  lb.innerHTML = `<div class="rc">${cardFace(r, c)}</div>
+    <div class="info"><b>${esc(c.name)}</b><span class="hint">${esc(c.rarity)} · n. ${esc(String(c.n))}${r.cards && typeof c.n === "number" ? "/" + r.cards : ""} · ${esc(r.name)}</span>
+      <span class="hint">rivelata ${ago(c.when)}${r.region === "jp" ? " · versione giapponese" : ""}</span></div>
+    <div class="row" style="justify-content:center">${r.region === "jp" || !fid || typeof c.n !== "number" ? "" : `<button class="btn sec" data-chase="${esc(fid)}:${esc(String(c.n))}">Avvisami quando è in vendita</button>`}<button class="btn ghost" data-close="1">Chiudi</button></div>`;
+  lb.addEventListener("click", (e) => { if (e.target === lb) lb.remove(); });
+  document.body.appendChild(lb); fixImages(lb); lb.querySelector("[data-close]").focus();
+}
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.querySelectorAll(".lb").forEach((x) => x.remove()); });
+
+/* ---------- mazzi ---------- */
+function renderMazzi() {
+  const D = S.data.decks;
+  if (!D || !D.top || !D.top.length) { $("#p-mazzi").innerHTML = `<div class="box"><span class="h">Mazzi</span><p class="hint" style="margin:6px 0 0">La top 8 dell'ultimo grande torneo arriva con il prossimo aggiornamento.</p></div>`; return; }
+  const meta = D.meta || [], max = Math.max(1, ...meta.filter((x) => x.a !== "Altri").map((x) => x.s));
+  let h = `<div class="box"><span class="h">Meta del momento</span>
+    <div class="nm" style="font-weight:900;font-size:16px;margin-top:4px">${esc(D.event)}</div>
+    <span class="hint">${fmtDay(D.date)}${D.players ? ` · ${D.players.toLocaleString("it-IT")} giocatori` : ""} · ${esc(D.format || "Standard")}</span>
+    ${meta.length ? `<div class="meta-bars">${meta.map((x) => `<div class="mb"><span>${esc(x.a)}</span><span class="pc">${x.s.toFixed(1).replace(".", ",")}%</span><div class="tr"><i style="width:${x.a === "Altri" ? 0 : (x.s / max * 100).toFixed(1)}%"></i></div></div>`).join("")}</div>
+    <p class="hint" style="margin:10px 0 0">${esc(D.meta_note || "Quota dei mazzi sul totale degli iscritti.")}</p>` : ""}</div>`;
+  h += `<div class="h" style="margin-top:4px">Top 8</div>`;
+  for (const t of D.top) {
+    const miss = S.missing[String(t.place)]; const missSet = new Set(S.missingCodes[String(t.place)] || []);
+    h += `<details class="deck"${t.place === 1 ? " open" : ""}><summary>
+      <span class="pl p${t.place}">${t.place}°</span>
+      <span class="who"><b>${esc(t.a)}</b><small>${flag(t.country)} ${esc(t.player)}${miss != null ? ` · ti mancano ${miss} carte` : ""}</small></span>
+      <span class="pr"><b>${eur(t.price)}</b><small>Cardmarket</small></span></summary>`;
+    if (t.list) {
+      h += `<div class="dl">${Object.entries(t.list).filter(([, cs]) => cs.length).map(([g, cs]) => `<div><h4>${esc(g)} · ${cs.reduce((s, c) => s + c[0], 0)}</h4><ul>${cs.map((c) =>
+        `<li class="${missSet.has(c[2]) ? "miss" : ""}"><span class="q">${c[0]}</span><span class="n">${esc(c[1])}</span><span class="cd2">${esc(c[2])}</span></li>`).join("")}</ul></div>`).join("")}
+        <p class="hint" style="margin:0">Il prezzo è la somma dei trend Cardmarket della lista intera${t.price_note ? ` (${esc(t.price_note)})` : ""}. «Ti manca» vale per le espansioni che segui nel bot; le altre carte contano come mancanti.</p>
+        <div class="row"><button class="btn sec" data-copy="${t.place}">Copia lista</button>${miss ? `<button class="btn ghost" data-shop="${t.place}">Cerca quelle che mancano</button>` : ""}</div></div>`;
+    } else h += `<div class="dl"><p class="hint" style="margin:0">Lista non ancora pubblicata dall'organizzatore.</p></div>`;
+    h += `</details>`;
+  }
+  $("#p-mazzi").innerHTML = h;
+}
+
+/* ---------- eventi ---------- */
+function renderEventi() {
+  const evs = (S.data.events || []).filter((e) => new Date(e.end) > Date.now()).sort((a, b) => new Date(a.start) - new Date(b.start));
+  let h = `<p class="hint" style="margin:0">Regionali, Internazionali e Mondiali, con orari in ora italiana. Durante un torneo la classifica si aggiorna da sola.</p>`;
+  if (!evs.length) h += `<div class="box"><p class="hint" style="margin:0">Nessun evento in calendario al momento.</p></div>`;
+  for (const e of evs) {
+    const live = isLive(e), d = new Date(e.start);
+    h += `<article class="box ev${live ? " red" : ""}">
+      <div class="date"><b>${d.getDate()}</b><small>${MESI[d.getMonth()]}</small></div>
+      <div class="t">
+        <div class="row">${live ? `<span class="pill live">In corso</span>` : ""}<span class="pill">${esc(e.kind)}</span>${e.home ? `<span class="pill sp">In Italia</span>` : ""}</div>
+        <div class="nm">${esc(e.name)}</div>
+        <span class="hint">${esc(e.city)}${e.country ? ", " + esc(e.country) : ""} · ${fmtDay(e.start)}–${fmtDay(e.end)}</span>
+        ${live ? "" : `<span class="hint">inizia tra <span class="cd" data-cd="${e.start}">${countdown(e.start)}</span> · alle ${fmtTime(e.start)} ora italiana</span>`}
+        ${live && e.live && e.live.standings.length ? `<div class="scroll"><table class="stand"><thead><tr><th>#</th><th>Giocatore</th><th class="r">V-S-P</th></tr></thead><tbody>
+          ${e.live.standings.map((s) => `<tr><td>${s.pos}</td><td>${flag(s.country)} ${esc(s.player)}${s.a ? `<small>${esc(s.a)}</small>` : ""}</td><td class="r">${esc(s.rec)}</td></tr>`).join("")}</tbody></table></div>
+          <span class="hint">${e.live.round ? `Turno ${e.live.round} · ` : ""}aggiornata ${ago(e.live.updated)}</span>` : live ? `<span class="hint">classifica in arrivo</span>` : ""}
+      </div></article>`;
+  }
+  $("#p-eventi").innerHTML = h;
+}
+
+/* ---------- aggiornamenti ---------- */
+function renderAgg() {
+  const us = (S.data.updates || []).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+  $("#p-agg").innerHTML = us.length ? us.map((u) => `<article class="box up">
+      <div class="row"><span class="pill${u.kind === "Banlist" ? " warn" : u.kind === "Annuncio" ? " sp" : ""}">${esc(u.kind)}</span><span class="hint">${fmtDay(u.date)}</span></div>
+      <div class="nm">${esc(u.title)}</div><p>${esc(u.body)}</p><span class="src">Fonte: ${esc(u.src)}${u.url ? ` · <a href="${esc(u.url)}" target="_blank" rel="noopener">leggi</a>` : ""}</span></article>`).join("")
+    : `<div class="box"><p class="hint" style="margin:0">Nessun annuncio ancora.</p></div>`;
+}
+
+/* ---------- notifiche ---------- */
+const CATS = [
+  ["espansioni", "Uscite", "nuove espansioni annunciate, preordini e giorno di uscita"],
+  ["tornei", "Mazzi dei tornei", "la top 8 appena finisce un grande torneo"],
+  ["live", "Tornei in diretta", "inizio del torneo e classifica"],
+  ["aggiornamenti", "Aggiornamenti e annunci", "banlist, rotazioni, regole e annunci ufficiali"],
+];
+function renderNotif() {
+  const full = S.plan === "full";
+  $("#p-notif").innerHTML = `<div class="box"><span class="h">Avvisi in chat</span><p class="hint" style="margin:6px 0 4px">Scegli cosa vuoi ricevere. Gli avvisi arrivano nella chat del bot.</p>
+    ${CATS.map(([k, t, d]) => `<div class="set"><label for="sw-${k}">${t}<small>${d}</small></label>
+      <button class="sw" role="switch" id="sw-${k}" data-cat="${k}" aria-checked="${full && S.notif[k]}"${full ? "" : " disabled"}></button></div>`).join("")}
+    ${full ? "" : `<div class="lock"><span>Gli avvisi delle novità sono inclusi in Completo e nella prova. Con Light trovi tutto in questa pagina.</span><button class="btn" id="go-sub">Abbonati</button></div>`}
+  </div>`;
+}
+
+/* ---------- montaggio ---------- */
+function render() {
+  const D = S.data;
+  $("#upd").textContent = D.updated ? `aggiornato ${ago(D.updated)}` : "";
+  $("#tab-eventi").innerHTML = "Eventi" + ((D.events || []).some(isLive) ? '<span class="dot" aria-label="torneo in corso"></span>' : "");
+  renderNow(); renderUscite(); renderMazzi(); renderEventi(); renderAgg(); renderNotif(); showTab(S.tab);
+}
+function showTab(t) {
+  if (!document.getElementById("p-" + t)) t = "uscite";
+  S.tab = t; try { localStorage.setItem("news.tab", t); } catch (e) {}
+  document.querySelectorAll(".tab").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
+  document.querySelectorAll("main > section.stack").forEach((s) => { s.hidden = s.id !== "p-" + t; });
+  $("#now").hidden = t === "notif";
+}
+function tick() { document.querySelectorAll("[data-cd]").forEach((el) => { el.textContent = countdown(el.dataset.cd); }); }
+
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.close) return b.closest(".lb").remove();
+  if (b.dataset.rel && !b.closest(".lb")) return openCard(b.dataset.rel, b.dataset.card);
+  if (b.dataset.chase) { if (await sendCmd(`/insegui ${b.dataset.chase}`)) toast("Fatto: ti avviso appena compare in vendita"); b.closest(".lb").remove(); return; }
+  if (b.dataset.tab) return showTab(b.dataset.tab);
+  if (b.dataset.go) return showTab(b.dataset.go);
+  if (b.dataset.follow) {
+    const id = b.dataset.follow;
+    if (await sendCmd(`/collezione ${id}`)) toast("Fatto: la conferma arriva in chat");
+    S.followed.add(id); renderUscite(); return;
+  }
+  if (b.dataset.cat) {
+    const k = b.dataset.cat, on = b.getAttribute("aria-checked") !== "true";
+    b.setAttribute("aria-checked", String(on)); S.notif[k] = on;
+    if (await sendCmd(`/novita ${k} ${on ? "si" : "no"}`)) toast(on ? "Avvisi accesi" : "Avvisi spenti"); return;
+  }
+  if (b.dataset.copy) {
+    const t = S.data.decks.top.find((x) => String(x.place) === b.dataset.copy); if (!t || !t.list) return;
+    const txt = Object.entries(t.list).map(([g, cs]) => `${g}: ${cs.reduce((s, c) => s + c[0], 0)}\n` + cs.map((c) => `${c[0]} ${c[1]} ${c[2]}`).join("\n")).join("\n\n");
+    try { await navigator.clipboard.writeText(txt); toast("Lista copiata: incollala in Pokémon TCG Live"); } catch (err) { toast("Copia non riuscita su questo dispositivo"); }
+    return;
+  }
+  if (b.dataset.shop) {
+    const t = S.data.decks.top.find((x) => String(x.place) === b.dataset.shop);
+    if (await sendCmd(`/insegui mazzo ${t.place}`)) toast(`Il bot insegue le carte che ti mancano: la conferma arriva in chat`); return;
+  }
+  if (b.id === "go-sub") { if (await sendCmd("/abbonati")) toast("Ti ho mandato il pulsante per abbonarti in chat"); return; }
+  if (b.id === "back") { location.href = "/app"; }
+});
+
+load();
+})();
+</script>
+</body>
+</html>

@@ -11,7 +11,7 @@ on:
     - cron: "17 * * * *"
   workflow_dispatch:
   repository_dispatch:
-    types: [telegram, timer]
+    types: [telegram, timer, novita]
 
 permissions:
   contents: write

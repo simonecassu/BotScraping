@@ -154,6 +154,14 @@ def _actions(args, db: Database, index) -> int:
             want_search = commands.poll_once(timeout=0)
         if want_search:
             db.set_kv("search_requested", True)  # la fase di ricerca lo ritrova, anche se gira in un altro processo
+        if commands.enabled:
+            from pokebot import news
+            try:  # avvisi delle novità (uscite, tornei, dirette, annunci) alle persone che li hanno accesi
+                n_news = news.send_alerts(db, commands.client, plans.is_full)
+                if n_news:
+                    print(f"novità · {n_news} avvisi mandati")
+            except Exception as exc:  # noqa: BLE001
+                print(f"novità · errore: {exc}")
         if args.fase == "comandi":
             return 0
     want_search = bool(db.get_kv("search_requested"))

@@ -300,6 +300,23 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
+    // Novità (news.json e immagini): le scrive il workflow novita.yml nel branch bot-news, qui con una cache di 5 minuti
+    if (url.pathname === "/app/news.json" || url.pathname.startsWith("/app/news/")) {
+      const path = url.pathname === "/app/news.json" ? "news.json" : url.pathname.slice("/app/news/".length);
+      if (!/^[\w./-]+$/.test(path) || path.includes("..")) return new Response("", { status: 404 });
+      const src = `https://raw.githubusercontent.com/${repoOf(env)}/bot-news/${path}`;
+      const cache = caches.default; const key = new Request(src);
+      let res = await cache.match(key);
+      if (!res) {
+        const r = await fetch(src, { headers: { "User-Agent": "pokebot-bridge" } });
+        if (!r.ok) return new Response("", { status: 404, headers: { "cache-control": "no-store" } });
+        const type = path.endsWith(".json") ? "application/json; charset=utf-8" : path.endsWith(".webp") ? "image/webp" : "application/octet-stream";
+        res = new Response(await r.arrayBuffer(), { status: 200, headers: { "content-type": type, "cache-control": "public, max-age=300" } });
+        ctx.waitUntil(cache.put(key, res.clone()));
+      }
+      return res;
+    }
+
     // Mini App: pagina statica
     if (url.pathname === "/app" || url.pathname.startsWith("/app/")) {
       // la radice degli asset serve index.html senza redirect (un /index.html esplicito verrebbe rediretto a "/")

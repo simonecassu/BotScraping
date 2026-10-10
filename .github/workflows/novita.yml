@@ -1,0 +1,62 @@
+# Novità per la Mini App: ogni 15 minuti decide se aggiornare (completo una volta l'ora, ogni giro solo con un torneo
+# in corso), scrive news.json e le immagini nel branch bot-news (lo serve il ponte su /app/news.json) e, se c'è
+# qualcosa da annunciare, sveglia il bot che manda gli avvisi in chat. Vedi scripts/build_news.py.
+name: Novità
+
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+    inputs:
+      completo:
+        description: "aggiornamento completo anche se l'ultimo è recente"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: novita
+  cancel-in-progress: false
+
+jobs:
+  aggiorna:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q pillow
+      - name: Ultimo risultato (branch bot-news)
+        run: |
+          mkdir -p news
+          if git fetch -q origin bot-news 2>/dev/null; then git archive FETCH_HEAD | tar -x -C news; echo "ultimo: $(python3 -c "import json;print(json.load(open('news/news.json'))['updated'])" 2>/dev/null || echo '?')"; else echo "prima volta"; fi
+      - name: Aggiorna
+        id: build
+        run: |
+          set +e
+          python scripts/build_news.py --out news --prev news/news.json ${{ inputs.completo && '--completo' || '' }}
+          rc=$?; set -e
+          if [ "$rc" = 3 ]; then echo "fatto=no" >> "$GITHUB_OUTPUT"; exit 0; fi
+          [ "$rc" = 0 ] || exit $rc
+          echo "fatto=si" >> "$GITHUB_OUTPUT"
+          echo "avvisi=$(python3 -c "import json;print(len(json.load(open('news/alerts.json'))['alerts']))")" >> "$GITHUB_OUTPUT"
+      - name: Pubblica nel branch bot-news
+        if: steps.build.outputs.fatto == 'si'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd news && rm -rf .git && git init -q -b bot-news && git add -A
+          git -c user.name=pescacarte -c user.email=pescacarte@users.noreply.github.com commit -q -m "novità $(date -u +%FT%TZ)"
+          git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" bot-news
+          echo "pubblicato: $(du -sh . | cut -f1), immagini $(ls img 2>/dev/null | wc -l)"
+      - name: Sveglia il bot per gli avvisi
+        if: steps.build.outputs.fatto == 'si' && steps.build.outputs.avvisi != '0'
+        env:
+          TOKEN: ${{ secrets.BRIDGE_GITHUB_TOKEN }}
+        run: |
+          curl -fsS -o /dev/null -X POST -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/dispatches" -d '{"event_type":"novita"}' && echo "bot svegliato: ${{ steps.build.outputs.avvisi }} avvisi"

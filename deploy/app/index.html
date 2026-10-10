@@ -114,6 +114,7 @@ textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
       <div class="tile red" data-go="coll"><span class="ic">📚</span><div><b>Collezioni</b><small id="t-coll">…</small></div></div>
       <div class="tile" data-go="settings"><span class="ic">⚙️</span><div><b>Impostazioni</b><small id="t-set">…</small></div></div>
       <div class="tile yel" id="tile-ai"><span class="ic">📐</span><div><b>Valuta carta</b><small>centratura e bordi dalla foto</small></div></div>
+      <div class="tile wide" id="tile-news"><span class="ic">📰</span><div><b>Novità</b><small>uscite, mazzi dei tornei, eventi e annunci</small></div></div>
       <div class="tile" data-go="friends"><span class="ic">👥</span><div><b>Amici</b><small id="t-fr">…</small></div></div>
       <div class="tile wide hidden" data-go="admin" id="tile-admin"><span class="ic">👑</span><div><b>Utenti</b><small id="t-adm">lista d'attesa, piani, abbonamenti</small></div><span class="new hidden" id="adm-new"></span></div>
       <div class="tile wide" data-go="reports"><span class="ic">💬</span><div><b>Segnalazioni</b><small id="t-rep">un problema o un'idea</small></div><span class="new hidden" id="rep-new"></span></div>
@@ -563,7 +564,8 @@ function renderHome() {
   $("#home-hint").textContent = lr ? `Ultimo giro ${new Date(lr.started_at * 1000).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}: ${lr.listings_seen} annunci letti, ${lr.matches} segnalati.` : "";
 }
 document.querySelectorAll(".tile[data-go]").forEach((t) => t.onclick = () => showTab(t.dataset.go));
-$("#tile-ai").onclick = () => { location.href = "/app/scan"; };  // pagina a sé (deploy/app/scan.html): foto, centratura, bordi, voto stimato
+$("#tile-ai").onclick = () => { location.href = "/app/scan"; };
+$("#tile-news").onclick = () => { location.href = "/app/news"; };  // pagina a sé (deploy/app/news.html): dati da /app/news.json (workflow Novità)  // pagina a sé (deploy/app/scan.html): foto, centratura, bordi, voto stimato
 
 /* ---------- Collezioni ---------- */
 async function loadCatalog() {

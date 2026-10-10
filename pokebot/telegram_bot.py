@@ -45,6 +45,7 @@ HELP = """<b>Comandi</b>
 /collezione sv8 attiva | disattiva – accende o spegne la ricerca e le notifiche di quella collezione · sv8:7 – una sua carta in qualsiasi comando
 /cerca 145 – cosa c'è in vendita adesso per quella carta (fino a 3 insieme), dal più economico: una ricerca ogni 5 minuti (Light: ogni 15)
 /insegui 151 – per 6 ore la cerca ogni 5 minuti (Light: ogni 2 ore) e ti avvisa appena spunta un annuncio nuovo · /insegui 151 2h ogni 10m · /insegui stop
+/novita – uscite, mazzi dei tornei, eventi e annunci nella Mini App; /novita tornei si – avvisi in chat per quella categoria (espansioni, tornei, live, aggiornamenti; Completo e prova) · /insegui mazzo 1 – insegue le carte che ti mancano del mazzo 1° dell'ultima top 8
 /storico – gli annunci trovati, divisi per carta e marketplace
 /prezzi 145 – valore Cardmarket e annunci visti · /prezzi – quanto costa finire la collezione
 /valore – quanto vale ciò che hai · /progresso – avanzamento per rarità
@@ -88,7 +89,7 @@ BOT_SHORT_DESCRIPTION = "Cerca su Vinted, Wallapop ed eBay le carte Pokémon che
 PROFILE_VERSION = 5  # presentazione del bot: nome, giorni di prova
 
 # Menu comandi mostrato da Telegram toccando "/" (registrato automaticamente dal bot); il proprietario ne ha uno suo
-MENU_VERSION = 20
+MENU_VERSION = 21
 MENU_COMMANDS = [
     ("mancanti", "Carte che ti mancano"),
     ("aggiungi", "Segna mancanti: /aggiungi 131 132 149-152 c4 (anche ir, sir, tutte)"),
@@ -97,6 +98,7 @@ MENU_COMMANDS = [
     ("lista", "Tutte le carte della collezione con i numeri"),
     ("cerca", "Cosa c'e' in vendita adesso per una carta: /cerca 145"),
     ("insegui", "Cerca una carta per 6 ore e avvisa sui nuovi annunci: /insegui 151"),
+    ("novita", "Uscite, mazzi dei tornei, eventi e annunci; /novita tornei si per gli avvisi"),
     ("storico", "Annunci trovati, divisi per carta e marketplace"),
     ("prezzi", "Valore Cardmarket di una carta (/prezzi 145) o costo per finire (/prezzi)"),
     ("valore", "Valore delle carte che hai e costo per finire"),
@@ -469,7 +471,11 @@ class CommandHandler:
                 self.db.set_kv(f"last_cerca:{self.chat}", time.time())
             return self._search_cards(args)
         if cmd == "/insegui":
+            if args.strip().lower().startswith("mazzo"):
+                return self._chase_deck(args.strip()[5:].strip())
             return self._chase(args)
+        if cmd in ("/novita", "/novità", "/news"):
+            return self._news(args)
         if cmd in ("/amico", "/amica"):
             return self._friends(args)
         if cmd in ("/amici", "/amiche"):
@@ -1361,6 +1367,39 @@ class CommandHandler:
             return Reply("Quell'album non è condiviso.")
         self.db.leave_album(self.chat, album)
         return Reply(f"👋 Sei uscito dall'album condiviso <code>{html.escape(set_id)}</code>: ne hai una copia tutta tua.")
+
+    def _news(self, args: str) -> Reply:
+        """/novita – come stanno gli avvisi · /novita tornei si|no – accende o spegne una categoria (Completo e prova)."""
+        from pokebot import news, plans
+        a = args.strip().lower().split()
+        names = {"espansioni": "Uscite", "tornei": "Mazzi dei tornei", "live": "Tornei in diretta", "aggiornamenti": "Aggiornamenti e annunci"}
+        full = plans.is_full(self.db, self.chat)
+        if len(a) >= 2 and a[0] in news.CATS and a[1] in ("si", "sì", "no", "on", "off"):
+            if not full:
+                return Reply("🌱 Gli avvisi delle novità sono inclusi in Completo e nella prova: con Light trovi tutto nella pagina Novità della Mini App. /abbonati per riceverli in chat.")
+            on = a[1] in ("si", "sì", "on")
+            news.set_setting(self.db, self.chat, a[0], on)
+            return Reply(f"{'🔔' if on else '🔕'} Avvisi «{names[a[0]]}» {'accesi' if on else 'spenti'}.")
+        st = news.settings(self.db, self.chat)
+        lines = ["📰 <b>Novità</b> – uscite, mazzi dei tornei, eventi con classifica e annunci: nella Mini App (tessera Novità).",
+                 "Avvisi in chat: " + " · ".join(f"{names[k]} {'🔔' if st[k] and full else '🔕'}" for k in news.CATS)]
+        lines.append("Cambia con <code>/novita tornei si</code> oppure <code>/novita espansioni no</code>." if full
+                     else "Gli avvisi arrivano con Completo e prova; con Light la pagina c'è lo stesso.")
+        return Reply("\n".join(lines))
+
+    def _chase_deck(self, arg: str) -> Reply:
+        """/insegui mazzo 1 – insegue le carte che ti mancano del mazzo 1° dell'ultima top 8 (entro i limiti del piano)."""
+        from pokebot import news
+        m = re.match(r"(\d)", arg)
+        if not m:
+            return Reply("Scrivi <code>/insegui mazzo 1</code> … <code>8</code>: il mazzo della top 8 in Novità → Mazzi.")
+        data = news.load(self.db)
+        name, toks = news.deck_missing_tokens(self.db, self.chat, data, int(m[1]))
+        if name is None:
+            return Reply("Non trovo quel mazzo: apri Novità → Mazzi nella Mini App per vedere la top 8 di adesso.")
+        if not toks:
+            return Reply(f"Del mazzo {m[1]}° (<b>{html.escape(name)}</b>) non ti manca nessuna carta tra quelle che conosco. 🎉")
+        return self._chase(" ".join(toks))
 
     def _chase(self, args: str) -> Reply:
         """/insegui 151 – per 6 ore cerca quella carta ogni 5 minuti; /insegui – elenco; /insegui stop [carte]."""
