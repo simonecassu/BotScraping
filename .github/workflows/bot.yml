@@ -55,6 +55,7 @@ jobs:
               git show origin/bot-state:pokebot.db > /tmp/pokebot.db.enc  # stato di prima della cifratura
             fi
             python cli.py unseal /tmp/pokebot.db.enc data/pokebot.db
+            git show origin/bot-state:code-sha > /tmp/code-sha-before 2>/dev/null || true  # con quale versione è stato scritto
             echo "stato ripristinato"
           fi
           python cli.py db-hash > /tmp/db-hash-before
@@ -77,13 +78,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           test -f data/pokebot.db || exit 0
-          if [ "$(python cli.py db-hash)" = "$(cat /tmp/db-hash-before)" ]; then
+          # si risalva se il database è cambiato oppure se è cambiato il codice (lo stato per la Mini App può avere campi nuovi)
+          if [ "$(python cli.py db-hash)" = "$(cat /tmp/db-hash-before)" ] && [ "$(cat /tmp/code-sha-before 2>/dev/null)" = "$GITHUB_SHA" ]; then
             echo "nulla è cambiato: stato non risalvato"; python cli.py queue-ack; exit 0
           fi
           rm -rf /tmp/state && mkdir -p /tmp/state
           python cli.py export-json /tmp/state || echo "::warning::stato per la Mini App non scritto"
           # dopo l'export, così eventuali album creati dall'export restano nel database
           python cli.py seal data/pokebot.db /tmp/state/pokebot.db.enc
+          echo "$GITHUB_SHA" > /tmp/state/code-sha
           cd /tmp/state
           git init -q -b bot-state
           git -c user.name=pokebot -c user.email=pokebot@users.noreply.github.com add .
