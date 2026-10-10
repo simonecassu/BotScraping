@@ -394,11 +394,14 @@ def price_cards(top: list[dict], prev: dict, by_code: dict, to_tcgdex: dict) -> 
                 tx = to_tcgdex.get(s["id"])
                 price = None
                 if tx:
-                    try:
-                        cm = (get_json(f"{TCGDEX}/en/cards/{tx}-{num}").get("pricing") or {}).get("cardmarket") or {}
-                        price = cm.get("trend") or cm.get("avg7") or cm.get("avg30") or cm.get("low")
-                    except Exception:  # noqa: BLE001
-                        price = None
+                    for cid in dict.fromkeys((f"{tx}-{num}", f"{tx}-{num.zfill(3)}")):  # TCGdex: numeri a 3 cifre nelle serie recenti (sv06-025)
+                        try:
+                            cm = (get_json(f"{TCGDEX}/en/cards/{cid}").get("pricing") or {}).get("cardmarket") or {}
+                            price = cm.get("trend") or cm.get("avg7") or cm.get("avg30") or cm.get("low")
+                            if price is not None:
+                                break
+                        except Exception:  # noqa: BLE001
+                            price = None
                 cache[tid] = {"p": price, "ts": time.time()}
             p = cache[tid].get("p")
             if p is None:
