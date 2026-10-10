@@ -93,6 +93,14 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 details{margin-top:12px;color:var(--muted);font-size:.85rem}
 summary{cursor:pointer;color:var(--ink)}
 .err{color:var(--bad);font-size:.85rem;margin-top:8px}
+.strip{display:flex;gap:6px;overflow-x:auto;padding:2px 0}
+.strip .ph{position:relative;flex:none;width:36px;height:50px;border-radius:5px;overflow:hidden;border:2px solid var(--line2);cursor:pointer}
+.strip .ph img{width:100%;height:100%;object-fit:cover;display:block}
+.strip .ph.ref{border-color:var(--yel)}.strip .ph.rejected{opacity:.4}
+.strip .ph b{position:absolute;right:1px;bottom:1px;font-size:.6rem;line-height:1;padding:2px 3px;border-radius:4px;background:rgba(0,0,0,.65);color:#fff;font-family:var(--font-mono)}
+.pnote{display:block;color:var(--muted);font-size:.72rem;line-height:1.3}
+.padrow{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;padding:6px 16px 0;font-size:.78rem;color:var(--muted)}
+.padrow button{min-width:46px;padding:8px 0}.padrow span{font-family:var(--font-mono);color:var(--ink)}
 @media (prefers-reduced-motion:reduce){*{transition:none !important}}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap">
@@ -112,6 +120,7 @@ summary{cursor:pointer;color:var(--ink)}
           <button class="snap" data-side="front">📷 Scatta</button>
           <label><button type="button" class="pick" data-side="front">Carica</button><input type="file" accept="image/*" id="file-front" multiple hidden><input type="file" accept="image/*" capture="environment" id="snap-front" hidden></label>
         </div>
+        <div class="strip" id="strip-front" hidden></div><small class="pnote" id="pnote-front" hidden></small>
       </div>
       <div class="shot" data-side="back">
         <div class="thumb" id="thumb-back">Retro</div>
@@ -119,6 +128,7 @@ summary{cursor:pointer;color:var(--ink)}
           <button class="snap" data-side="back">📷 Scatta</button>
           <label><button type="button" class="pick" data-side="back">Carica</button><input type="file" accept="image/*" id="file-back" multiple hidden><input type="file" accept="image/*" capture="environment" id="snap-back" hidden></label>
         </div>
+        <div class="strip" id="strip-back" hidden></div><small class="pnote" id="pnote-back" hidden></small>
       </div>
     </div>
     <div class="level">
@@ -135,6 +145,7 @@ summary{cursor:pointer;color:var(--ink)}
 
   <section class="card" id="results" hidden>
     <div class="label">2 · Risultato</div>
+    <p class="note" id="summary" style="white-space:pre-line;margin-top:4px"></p>
     <div class="grade"><div class="big" id="g-big">–</div><div class="cap" id="g-cap">stima su scala 1–10</div></div>
     <div class="rows" id="rows"></div>
     <div class="warped">
@@ -144,7 +155,7 @@ summary{cursor:pointer;color:var(--ink)}
     <p class="note">Sulle carte full-art (senza bordo colorato) la cornice automatica non è affidabile: tocca “Regola cornice” e porta le 4 maniglie sul filo interno della cornice stampata.</p>
     <details><summary>Come viene calcolato</summary>
       <p><b>Ritaglio.</b> L’app cerca le linee rette dei bordi (a colori, non solo in bianco e nero), sceglie il rettangolo con proporzioni 63:88 e poi affina ogni lato: tra le linee candidate prende quella più esterna in cui il colore appena dentro al taglio è lo stesso sui quattro lati, cioè il bordo stampato. La carta viene raddrizzata a 10 px per millimetro.</p>
-      <p><b>Centratura.</b> Per ogni lato calcola il colore medio di tutta la striscia a ogni distanza dal taglio (la media su centinaia di pixel annulla glitter e trama) e prende il primo salto netto entro 6 mm: quella è la cornice. Un lato in cui il salto è debole (riflesso che scurisce il bordo) viene scartato. Con più foto la cornice è la mediana dei lati validi di tutti gli scatti; il risultato mostra quante foto hanno contribuito per lato e la dispersione. L’ombra dello spessore della carta sul foglio viene riconosciuta e non sposta il taglio. Soglie PSA (fronte 55/45 per il 10, retro 75/25).</p>
+      <p><b>Centratura.</b> Ogni lato viene misurato in sette punti lungo il taglio e sui punti validi si adatta una retta: così si vede se la stampa è ruotata rispetto al taglio e se la cornice è dritta (diagonali e lati opposti della cornice devono tornare: altrimenti la foto non era parallela alla carta, o la carta non è piana). In ogni punto calcola il colore medio della striscia a ogni distanza dal taglio (la media su centinaia di pixel annulla glitter e trama) e prende il primo salto netto entro 6 mm: quella è la cornice. Un lato in cui il salto è debole (riflesso che scurisce il bordo) viene scartato. Con più foto la cornice è la mediana dei lati validi di tutti gli scatti; il risultato mostra quante foto hanno contribuito per lato e la dispersione. L’ombra dello spessore della carta sul foglio viene riconosciuta e non sposta il taglio. Soglie PSA (fronte 55/45 per il 10, retro 75/25).</p>
       <p><b>Angoli e bordi.</b> Conta il bianco della carta esposta, cioè pixel chiari e poco saturi, solo se collegato al taglio: le scritte bianche stampate non contano. Sulle carte con bordo argento o senza bordo non è misurabile per colore.</p>
       <p><b>Superficie</b> (graffi, linee di stampa): non ancora analizzata.</p>
     </details>
@@ -165,12 +176,14 @@ summary{cursor:pointer;color:var(--ink)}
     <label class="chk"><input type="checkbox" id="snap" checked> aggancio automatico ai bordi</label>
     <div class="warn" id="crop-warn" hidden></div></div>
   <div class="crop-body"><canvas id="cropc"></canvas></div>
+  <div class="padrow" id="crop-pad" hidden><span id="crop-pad-lbl">angolo</span><button data-nudge="-1,0" aria-label="sinistra">◀</button><button data-nudge="0,-1" aria-label="su">▲</button><button data-nudge="0,1" aria-label="giù">▼</button><button data-nudge="1,0" aria-label="destra">▶</button><small>1 px per tocco, tieni premuto per scorrere</small></div>
   <div class="bar"><button id="crop-cancel">Annulla</button><button id="crop-redo">Rileva di nuovo</button><button class="primary" id="crop-ok">Conferma</button></div>
 </div>
 
 <div id="frame" class="editor" hidden>
   <div class="crop-head"><b id="frame-title">Cornice fronte</b><span>Trascina le 4 maniglie sul filo interno della cornice stampata. <span id="frame-vals" style="font-family:var(--font-mono)"></span></span></div>
   <div class="crop-body"><canvas id="framec"></canvas></div>
+  <div class="padrow" id="frame-pad" hidden><span id="frame-pad-lbl">lato</span><button data-nudge="-1,0" aria-label="sinistra">◀</button><button data-nudge="0,-1" aria-label="su">▲</button><button data-nudge="0,1" aria-label="giù">▼</button><button data-nudge="1,0" aria-label="destra">▶</button><small>0,1 mm per tocco</small></div>
   <div class="bar"><button id="frame-cancel">Annulla</button><button class="primary" id="frame-ok">Conferma cornice</button></div>
 </div>
 
@@ -191,6 +204,10 @@ summary{cursor:pointer;color:var(--ink)}
 (() => {
 'use strict';
 const $ = s => document.querySelector(s);
+function makePad(el, onMove){ let timer = null; const stop = () => { clearInterval(timer); timer = null; };
+  el.querySelectorAll('[data-nudge]').forEach(b => { const [dx, dy] = b.dataset.nudge.split(',').map(Number);
+    b.addEventListener('pointerdown', e => { e.preventDefault(); onMove(dx, dy); stop(); timer = setInterval(() => onMove(dx, dy), 90); });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => b.addEventListener(ev, stop)); }); }
 const state = { front:null, back:null, tilt:null, side:'front', stream:null };
 const tg = window.Telegram && window.Telegram.WebApp;
 if (tg){ tg.ready(); tg.expand();
@@ -275,25 +292,25 @@ function loadFile(f){ return new Promise(res => { const img = new Image(); img.o
   if (files.length === 1){ const c = await loadFile(files[0]); if (c) acceptImage(side, c); return; }
   // più scatti della stessa faccia: ognuno viene controllato e ritagliato da solo; il migliore fa da riferimento
   const err = $('#err'); err.hidden = false; err.textContent = `Carico ${files.length} foto…`;
-  const shots = [], rejected = [];
+  const shots = [], rejected = [], photos = [];
   for (let i = 0; i < files.length; i++){
     err.textContent = `Foto ${i + 1} di ${files.length}…`; await new Promise(r => setTimeout(r, 0));
-    const c = await loadFile(files[i]); if (!c){ rejected.push('file non leggibile'); continue; }
+    const c = await loadFile(files[i]); if (!c){ rejected.push('file non leggibile'); photos.push({ status: 'rejected', reason: 'file non leggibile', thumb: '' }); continue; }
     const gray = toGray(c, 640); const sh = sharpness(gray), ex = exposure(gray);
-    if (sh < 60 || ex.bright > 0.04 || ex.dark > 0.9){ rejected.push(sh < 60 ? 'sfocata' : ex.bright > 0.04 ? 'riflessi' : 'scura'); continue; }
-    const a = autoQuad(c); if (!a.quad){ rejected.push('carta non trovata'); continue; }
+    if (sh < 60 || ex.bright > 0.04 || ex.dark > 0.9){ const why = sh < 60 ? 'sfocata' : ex.bright > 0.04 ? 'riflessi' : 'scura'; rejected.push(why); photos.push({ status: 'rejected', reason: why, thumb: miniThumb(c) }); continue; }
+    const a = autoQuad(c); if (!a.quad){ rejected.push('carta non trovata'); photos.push({ status: 'rejected', reason: 'carta non trovata', thumb: miniThumb(c) }); continue; }
     const st = a.stats; const conf = (st && Math.min(...st.map(x => x.n)) >= 0.75 && Math.min(...st.map(x => x.contrast)) >= 30) ? 1 : 0.5;
-    shots.push({ canvas: c, sharp: sh, quad: orderQuad(a.quad), conf });
+    const shot = { canvas: c, sharp: sh, quad: orderQuad(a.quad), conf }; shots.push(shot); photos.push({ status: 'used', shot, thumb: miniThumb(c) });
   }
   if (!shots.length){ err.textContent = `Nessuna foto utilizzabile (${rejected.join(', ')}).`; return; }
   shots.sort((p, q) => (q.conf - p.conf) || (q.sharp - p.sharp));
-  const best = shots[0];
-  state[side] = { canvas: best.canvas, sharp: best.sharp, quad: null, shots: shots.slice(1) };
+  const best = shots[0]; const bp = photos.find(x => x.shot === best); bp.status = 'ref'; bp.shot = null;
+  state[side] = { canvas: best.canvas, sharp: best.sharp, quad: null, shots: shots.slice(1), photos };
   err.hidden = rejected.length === 0; err.textContent = rejected.length ? `${rejected.length} foto scartate (${rejected.join(', ')}); ${shots.length} usate.` : '';
   const t = $('#thumb-' + side); t.innerHTML = '';
   const im = new Image(); im.src = best.canvas.toDataURL('image/jpeg', .6); t.appendChild(im);
   const q = document.createElement('span'); q.className = 'q'; q.textContent = `${shots.length} foto · tocca per il ritaglio`; t.appendChild(q);
-  openCrop(side);
+  renderStrip(side); openCrop(side);
 }));
 
 /* ---------- controllo qualità scatto ---------- */
@@ -319,6 +336,36 @@ function exposure(gray){
   for (let i = 0; i < g.length; i++){ if (g[i] < 15) dark++; else if (g[i] > 250) bright++; }
   return { dark: dark / g.length, bright: bright / g.length };
 }
+/* ---------- le foto di una faccia: usate, scartate (perché), e qual è il riferimento ---------- */
+function miniThumb(canvas){ const c = document.createElement('canvas'); c.width = 36; c.height = 50; const k = Math.max(36 / canvas.width, 50 / canvas.height);
+  const w = canvas.width * k, h = canvas.height * k; c.getContext('2d').drawImage(canvas, (36 - w) / 2, (50 - h) / 2, w, h); return c.toDataURL('image/jpeg', .5); }
+function renderStrip(side){
+  const st = state[side], el = $('#strip-' + side), note = $('#pnote-' + side); const ph = (st && st.photos) || [];
+  el.hidden = note.hidden = ph.length < 2; if (ph.length < 2) return;
+  el.innerHTML = ph.map((p, i) => { const badge = p.status === 'ref' ? '★' : p.status === 'used' ? (p.sides != null ? p.sides + '/4' : '✓') : '✗';
+    return `<div class="ph ${p.status}" data-i="${i}"><img src="${p.thumb}" alt=""><b>${badge}</b></div>`; }).join('');
+  const used = ph.filter(p => p.status !== 'rejected').length, rej = ph.filter(p => p.status === 'rejected');
+  note.textContent = `${used} usate su ${ph.length} · ★ riferimento (ritaglio confermato da te, angoli e bordi)` + (rej.length ? ` · ✗ ${rej.map(r => r.reason).join(', ')}` : '')
+    + ' · dopo l’analisi: lati validi per foto · tocca una foto usata per farne il riferimento';
+  el.querySelectorAll('.ph').forEach(n => n.addEventListener('click', () => { const i = +n.dataset.i, p = ph[i];
+    if (p.status === 'rejected'){ showErr(`Foto ${i + 1}: scartata, ${p.reason}.`); return; }
+    if (p.status === 'ref'){ openCrop(side); return; }
+    if (!confirm(`Usare la foto ${i + 1} come riferimento? Dovrai confermare il suo ritaglio.`)) return;
+    setReference(side, p); }));
+}
+function setReference(side, p){
+  const st = state[side], s = p.shot; st.shots = (st.shots || []).filter(x => x !== s);
+  // il vecchio riferimento torna tra gli scatti, con il ritaglio confermato se c'era
+  let oldQuad = st.quad; if (!oldQuad){ const a = autoQuad(st.canvas); oldQuad = a.quad ? orderQuad(a.quad) : null; }
+  const oldPhoto = st.photos.find(x => x.status === 'ref');
+  if (oldQuad){ const sh = { canvas: st.canvas, sharp: st.sharp, quad: oldQuad, conf: 1 }; st.shots.push(sh); Object.assign(oldPhoto, { status: 'used', shot: sh, sides: null }); }
+  else Object.assign(oldPhoto, { status: 'rejected', reason: 'carta non trovata', shot: null, sides: null });
+  Object.assign(p, { status: 'ref', shot: null, sides: null });
+  Object.assign(st, { canvas: s.canvas, sharp: s.sharp, quad: null, frame: null, res: null });
+  const t = $('#thumb-' + side); t.innerHTML = ''; const im = new Image(); im.src = s.canvas.toDataURL('image/jpeg', .6); t.appendChild(im);
+  const q = document.createElement('span'); q.className = 'q'; q.textContent = `${st.shots.length + 1} foto · tocca per il ritaglio`; t.appendChild(q);
+  $('#analyze').disabled = true; $('#results').hidden = true; renderStrip(side); openCrop(side);
+}
 function acceptImage(side, canvas){
   const gray = toGray(canvas, 640);
   const sh = sharpness(gray), ex = exposure(gray);
@@ -329,7 +376,7 @@ function acceptImage(side, canvas){
   const err = $('#err'); err.hidden = probs.length === 0;
   err.textContent = probs.length ? `${side === 'front' ? 'Fronte' : 'Retro'}: foto rifiutata, ${probs.join(', ')}. Rifai lo scatto.` : '';
   if (probs.length) return;
-  state[side] = { canvas, sharp: sh, quad:null };
+  state[side] = { canvas, sharp: sh, quad:null }; renderStrip(side);
   const t = $('#thumb-' + side); t.innerHTML = '';
   const im = new Image(); im.src = canvas.toDataURL('image/jpeg', .6); t.appendChild(im);
   const q = document.createElement('span'); q.className = 'q'; q.textContent = `nitidezza ${sh.toFixed(0)} · tocca per ritagliare`; t.appendChild(q);
@@ -338,7 +385,7 @@ function acceptImage(side, canvas){
 ['front','back'].forEach(side => $('#thumb-' + side).addEventListener('click', () => { if (state[side]) openCrop(side); }));
 
 /* ---------- ritaglio manuale con 4 maniglie ---------- */
-const crop = { side:null, quad:null, scale:1, drag:-1 }; window.__crop = crop;
+const crop = { side:null, quad:null, scale:1, drag:-1, sel:-1 }; window.__crop = crop;
 function orderQuad(q){ const cx = q.reduce((s,p) => s + p[0], 0) / 4, cy = q.reduce((s,p) => s + p[1], 0) / 4;
   return q.slice().sort((a, b) => Math.atan2(a[1]-cy, a[0]-cx) - Math.atan2(b[1]-cy, b[0]-cx)); }
 function openCrop(side){
@@ -347,6 +394,7 @@ function openCrop(side){
     conf = !q ? 0 : (st && Math.min(...st.map(x => x.n)) >= 0.75 && Math.min(...st.map(x => x.contrast)) >= 30) ? 1 : 0.5; }
   if (!q){ const h = src.height * 0.7, w = h * 63 / 88, x0 = (src.width - w) / 2, y0 = (src.height - h) / 2; q = [[x0,y0],[x0+w,y0],[x0+w,y0+h],[x0,y0+h]]; conf = 0; }
   crop.quad = orderQuad(q).map(p => [Math.max(0, Math.min(src.width - 1, p[0])), Math.max(0, Math.min(src.height - 1, p[1]))]);
+  crop.sel = -1; $('#crop-pad').hidden = true;
   $('#crop-title').textContent = (side === 'front' ? 'Ritaglio fronte' : 'Ritaglio retro') + (state[side].quad ? '' : conf >= 0.75 ? ' · rilevata automaticamente' : conf > 0 ? ' · controlla i 4 angoli' : ' · carta non trovata, posiziona i cerchi');
   const wn = $('#crop-warn'); wn.hidden = !!state[side].quad || conf >= 0.75;
   wn.textContent = conf > 0 ? 'Il bordo della carta si distingue poco dallo sfondo: verifica che i cerchi siano sugli angoli. Per una misura affidabile fotografa la carta su uno sfondo scuro e uniforme.' : 'Carta non trovata. Posiziona i cerchi a mano, oppure rifai la foto su uno sfondo scuro e uniforme.';
@@ -373,9 +421,10 @@ function drawCrop(){
   ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.beginPath(); ctx.rect(0, 0, c.width, c.height);
   ctx.moveTo(q[0][0]*s, q[0][1]*s); for (let i = 3; i >= 1; i--) ctx.lineTo(q[i][0]*s, q[i][1]*s); ctx.closePath(); ctx.fill('evenodd');
   ctx.strokeStyle = '#30d158'; ctx.lineWidth = 2 * dpr; ctx.beginPath(); q.forEach((p, i) => i ? ctx.lineTo(p[0]*s, p[1]*s) : ctx.moveTo(p[0]*s, p[1]*s)); ctx.closePath(); ctx.stroke();
-  q.forEach((p, i) => { ctx.beginPath(); ctx.arc(p[0]*s, p[1]*s, 16 * dpr, 0, Math.PI * 2); ctx.fillStyle = i === crop.drag ? '#30d158' : 'rgba(255,255,255,.9)'; ctx.fill(); ctx.lineWidth = 2 * dpr; ctx.strokeStyle = '#111'; ctx.stroke(); });
-  if (crop.drag >= 0){ // lente 3× in alto, lato opposto alla maniglia
-    const p = q[crop.drag], L = 120 * dpr, Z = 3; const lx = p[0]*s < c.width / 2 ? c.width - L - 8*dpr : 8*dpr, ly = 8*dpr;
+  q.forEach((p, i) => { ctx.beginPath(); ctx.arc(p[0]*s, p[1]*s, 16 * dpr, 0, Math.PI * 2); ctx.fillStyle = (i === crop.drag || i === crop.sel) ? '#30d158' : 'rgba(255,255,255,.9)'; ctx.fill(); ctx.lineWidth = 2 * dpr; ctx.strokeStyle = '#111'; ctx.stroke(); });
+  const li = crop.drag >= 0 ? crop.drag : crop.sel;
+  if (li >= 0){ // lente 4× in alto, lato opposto alla maniglia (resta accesa sulla maniglia selezionata, per le frecce)
+    const p = q[li], L = 150 * dpr, Z = 4; const lx = p[0]*s < c.width / 2 ? c.width - L - 8*dpr : 8*dpr, ly = 8*dpr;
     ctx.save(); ctx.beginPath(); ctx.rect(lx, ly, L, L); ctx.clip();
     ctx.drawImage(src, p[0] - L/(2*Z*s), p[1] - L/(2*Z*s), L/(Z*s), L/(Z*s), lx, ly, L, L); ctx.restore();
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 2 * dpr; ctx.strokeRect(lx, ly, L, L);
@@ -384,12 +433,14 @@ function drawCrop(){
 function cropPos(e){ const r = $('#cropc').getBoundingClientRect(); return [(e.clientX - r.left) / crop.scale, (e.clientY - r.top) / crop.scale]; }
 $('#cropc').addEventListener('pointerdown', e => { const [x, y] = cropPos(e); let bi = -1, bd = 44 / crop.scale;
   crop.quad.forEach((p, i) => { const d = Math.hypot(p[0]-x, p[1]-y); if (d < bd){ bd = d; bi = i; } });
-  crop.drag = bi; if (bi >= 0){ e.target.setPointerCapture(e.pointerId); drawCrop(); } });
+  crop.drag = bi; if (bi >= 0){ crop.sel = bi; $('#crop-pad').hidden = false; $('#crop-pad-lbl').textContent = 'angolo ' + (bi + 1); e.target.setPointerCapture(e.pointerId); drawCrop(); } });
 $('#cropc').addEventListener('pointermove', e => { if (crop.drag < 0) return; const src = state[crop.side].canvas; const [x, y] = cropPos(e);
   crop.quad[crop.drag] = [Math.max(0, Math.min(src.width - 1, x)), Math.max(0, Math.min(src.height - 1, y))]; drawCrop(); });
 const endDrag = () => { if (crop.drag >= 0){ const i = crop.drag; crop.drag = -1;
   if ($('#snap').checked){ try{ const r = refineQuad(state[crop.side].canvas, crop.quad, 80, 0.035); crop.quad[i] = r[i]; }catch(e){} } drawCrop(); } };
 $('#cropc').addEventListener('pointerup', endDrag); $('#cropc').addEventListener('pointercancel', endDrag);
+makePad($('#crop-pad'), (dx, dy) => { if (crop.sel < 0) return; const src = state[crop.side].canvas, p = crop.quad[crop.sel];
+  crop.quad[crop.sel] = [Math.max(0, Math.min(src.width - 1, p[0] + dx)), Math.max(0, Math.min(src.height - 1, p[1] + dy))]; drawCrop(); });
 $('#crop-cancel').addEventListener('click', () => { $('#crop').hidden = true; });
 $('#crop-redo').addEventListener('click', () => { state[crop.side].quad = null; openCrop(crop.side); });
 function uprightQuad(q){ // lato lungo verticale: se la carta è di traverso, ruota l'ordine degli angoli
@@ -695,13 +746,12 @@ function borderColor(d){ // colore del bordo stampato: mediana di una fascia 0,4
   const c = [median(r), median(g), median(b)];
   const dev = []; for (let i = 0; i < r.length; i++) dev.push(Math.abs(r[i]-c[0]) + Math.abs(g[i]-c[1]) + Math.abs(b[i]-c[2]));
   return { c, noise: median(dev) }; }
-function borderWidth(d, side){
+function profileJump(d, side, t0, t1){
   // Profilo del colore medio lungo la striscia (8–92% del lato) per ogni distanza dal taglio: la media su centinaia
   // di pixel annulla glitter e trama. La cornice è il primo salto netto del profilo entro 6 mm dal taglio
   // (almeno metà del salto più forte in quella fascia); un salto debole = cornice non visibile su questo lato.
   const len = (side === 'L' || side === 'R') ? H : W; const MAXO = 70, K = 5;
   const at = (o, t) => side === 'L' ? px(d, o, t) : side === 'R' ? px(d, W - 1 - o, t) : side === 'T' ? px(d, t, o) : px(d, t, H - 1 - o);
-  const t0 = Math.round(len * 0.08), t1 = Math.round(len * 0.92);
   const m = []; for (let o = 0; o < MAXO; o++){ let r = 0, g = 0, b = 0, n = 0; for (let t = t0; t < t1; t++){ const p = at(o, t); r += p[0]; g += p[1]; b += p[2]; n++; } m.push([r / n, g / n, b / n]); }
   const D = new Float32Array(MAXO);
   for (let o = K + 4; o < MAXO - K; o++){ let s = 0; for (let ch = 0; ch < 3; ch++){ let a = 0, b = 0; for (let j = 1; j <= K; j++){ a += m[o + j][ch]; b += m[o - j][ch]; } s += Math.abs(a - b) / K; } D[o] = s; }
@@ -711,6 +761,36 @@ function borderWidth(d, side){
   if (p < 0) return null;
   const den = D[p-1] + D[p+1] - 2 * D[p]; const sub = p + (den !== 0 ? 0.5 * (D[p-1] - D[p+1]) / den : 0);
   return { w: sub + 0.5, jump: D[p], dom: D[p] / M }; }
+function borderWidth(d, side){
+  // Sette punti lungo il lato (8–92%): in ognuno la posizione della cornice; sui punti validi una retta (minimi quadrati).
+  // w = valore al centro del lato (coincide con la misura unica quando la cornice è dritta), slope = pendenza
+  // (px per px: rotazione della stampa rispetto al taglio), resid = quanto i punti si discostano dalla retta.
+  const len = (side === 'L' || side === 'R') ? H : W; const K = 7, a = 0.08, b = 0.92, step = (b - a) / K;
+  const pts = [];
+  for (let k = 0; k < K; k++){ const t0 = Math.round(len * (a + k * step)), t1 = Math.round(len * (a + (k + 1) * step));
+    const r = profileJump(d, side, t0, t1); if (r && r.jump >= 30) pts.push({ t: (t0 + t1) / 2, w: r.w, jump: r.jump }); }
+  const whole = profileJump(d, side, Math.round(len * a), Math.round(len * b));
+  if (pts.length < 4) return whole ? Object.assign(whole, { pts, n: pts.length }) : null;
+  const n = pts.length; let st = 0, sw = 0, stt = 0, stw = 0; for (const p of pts){ st += p.t; sw += p.w; stt += p.t * p.t; stw += p.t * p.w; }
+  const m = (n * stw - st * sw) / ((n * stt - st * st) || 1), c = (sw - m * st) / n;
+  const resid = Math.sqrt(pts.reduce((q, p) => q + (p.w - (c + m * p.t)) ** 2, 0) / n), jump = pts.reduce((q, p) => q + p.jump, 0) / n;
+  return { w: c + m * len / 2, jump, dom: whole ? whole.dom : 1, pts, n, slope: m, c, resid, ends: [c + m * len * a, c + m * len * b] }; }
+const sidesOk = w => ['L','R','T','B'].filter(k => w[k] && w[k].jump >= 30).length;
+function frameGeometry(bw){
+  // dalle rette dei quattro lati: rotazione della stampa rispetto al taglio e distorsione, cioè quanto la cornice non è
+  // un rettangolo (diagonali e lati opposti diversi) o non è dritta; sopra 0,3 mm la foto non era parallela o la carta non è piana
+  if (!['L','R','T','B'].every(k => bw[k] && bw[k].slope != null)) return null;
+  // rotazione in senso orario positiva: il lato sinistro si sposta a sinistra scendendo (pendenza negativa), il destro
+  // misurato dal taglio destro cresce, l'alto scende verso destra, il basso misurato dal taglio basso cala
+  const deg = m => Math.atan(m) * 180 / Math.PI, sgn = { L: -1, R: 1, T: 1, B: -1 };
+  const ang = ['L','R','T','B'].map(k => sgn[k] * deg(bw[k].slope)), rot = ang.reduce((p, q) => p + q, 0) / 4;
+  const xL = y => bw.L.c + bw.L.slope * y, xR = y => W - (bw.R.c + bw.R.slope * y), yT = x => bw.T.c + bw.T.slope * x, yB = x => H - (bw.B.c + bw.B.slope * x);
+  const meet = (fx, fy, x, y) => { for (let i = 0; i < 3; i++){ x = fx(y); y = fy(x); } return [x, y]; };
+  const TL = meet(xL, yT, 0, 0), TR = meet(xR, yT, W, 0), BR = meet(xR, yB, W, H), BL = meet(xL, yB, 0, H);
+  const dist = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]);
+  const dev = Math.max(Math.abs(dist(TL, BR) - dist(TR, BL)), Math.abs(dist(TL, TR) - dist(BL, BR)), Math.abs(dist(TL, BL) - dist(TR, BR)));
+  const bend = Math.max(...['L','R','T','B'].map(k => bw[k].resid || 0));
+  return { rot, spread: Math.max(...ang) - Math.min(...ang), dev: dev / 10, bend: bend / 10 }; }
 function medianOf(a){ const s = a.slice().sort((x, y) => x - y); const n = s.length; return n ? (n % 2 ? s[n >> 1] : (s[n/2 - 1] + s[n/2]) / 2) : null; }
 const lum = p => 0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2];
 const sat = p => Math.max(p[0], p[1], p[2]) - Math.min(p[0], p[1], p[2]);
@@ -758,7 +838,7 @@ function analyzeSide(side, back){
   const bw = { L: borderWidth(d,'L'), R: borderWidth(d,'R'), T: borderWidth(d,'T'), B: borderWidth(d,'B') };
   // altri scatti della stessa faccia: stessa misura su ognuno, poi mediana per lato
   const vals = { L: [], R: [], T: [], B: [] }; const addShot = w => { for (const k in vals) if (w[k] && w[k].jump >= 30) vals[k].push(w[k].w); };
-  addShot(bw);
+  addShot(bw); src.refSidesOk = sidesOk(bw); const geo = frameGeometry(bw);
   const shots = src.shots || []; if (shots.length){ const off = document.createElement('canvas'); off.width = W; off.height = H;
     // ogni scatto viene orientato come il riferimento (la carta può essere capovolta di 180° in una foto)
     const thumb = dd => { const t = new Float32Array(63 * 88); for (let y = 0; y < 88; y++) for (let x = 0; x < 63; x++){ let s = 0; for (let j = 0; j < 10; j += 3) for (let i = 0; i < 10; i += 3){ const k = ((y * 10 + j) * W + x * 10 + i) * 4; s += dd[k] + dd[k+1] + dd[k+2]; } t[y * 63 + x] = s / 48; } return t; };
@@ -766,7 +846,7 @@ function analyzeSide(side, back){
     for (const s of shots){ let q = uprightQuad(orderQuad(s.quad)); let im = warp(s.canvas, q, off); const t = thumb(im.data);
       let d0 = 0, d1 = 0; for (let i = 0; i < t.length; i++){ d0 += Math.abs(t[i] - ref[i]); d1 += Math.abs(t[t.length - 1 - i] - ref[i]); }
       if (d1 < d0){ q = [q[2], q[3], q[0], q[1]]; im = warp(s.canvas, q, off); }
-      s.quad = q; const dd = im.data; addShot({ L: borderWidth(dd,'L'), R: borderWidth(dd,'R'), T: borderWidth(dd,'T'), B: borderWidth(dd,'B') }); } }
+      s.quad = q; const dd = im.data; const wsh = { L: borderWidth(dd,'L'), R: borderWidth(dd,'R'), T: borderWidth(dd,'T'), B: borderWidth(dd,'B') }; s.sidesOk = sidesOk(wsh); addShot(wsh); } }
   const n = 1 + shots.length;
   const ok = Object.values(vals).every(a => a.length >= (n >= 5 ? 3 : 1));
   const frameAuto = ok ? { L: medianOf(vals.L), R: medianOf(vals.R), T: medianOf(vals.T), B: medianOf(vals.B) } : null;
@@ -776,7 +856,8 @@ function analyzeSide(side, back){
   const unsure = !ok || (n === 1 && Object.values(bw).some(v => !v || v.jump < 60)) || (n > 1 && (spread > 4 || weakSide)) || Object.values(frameAuto || {}).some(v => v < 10 || v > 60);
   const frame = src.frame || frameAuto;
   const wear = wearMeasure(d, bc, frame); const corners = wear ? wear.corners : null, edges = wear ? wear.edges : null;
-  const res = { quad, img, frame, auto: !src.frame, unsure, back, corners, edges, sharp: src.sharp, bw, bc, n, vals, spread };
+  const res = { quad, img, frame, auto: !src.frame, unsure, back, corners, edges, sharp: src.sharp, bw, bc, n, vals, spread, geo };
+  if (src.photos){ for (const p of src.photos){ if (p.status === 'ref') p.sides = src.refSidesOk; else if (p.status === 'used' && p.shot) p.sides = p.shot.sidesOk; } renderStrip(side); }
   src.res = res; drawWarp(side); return res; }
 function drawWarp(side){ const r = state[side] && state[side].res; if (!r) return; const out = $('#w-' + side), ctx = out.getContext('2d');
   ctx.putImageData(r.img, 0, 0); if (r.frame){ ctx.strokeStyle = r.unsure && r.auto ? '#ff9f0a' : '#ff3b30'; ctx.lineWidth = 3; ctx.setLineDash([10, 8]);
@@ -786,8 +867,10 @@ function centRow(label, r){
   const c = centeringScore(f.L, f.R, f.T, f.B, r.back); r.cent = c;
   const warn = r.unsure && r.auto ? ' <span class="pill warn">verifica</span>' : (!r.auto ? ' <span class="pill">manuale</span>' : '');
   const note = r.unsure && r.auto ? (r.n > 1 ? ' · le foto non concordano o un lato è poco visibile: controlla la cornice tratteggiata' : ' · cornice poco netta: controlla la cornice tratteggiata e regolala, o carica più foto') : '';
+  const g = r.geo, dz = g ? Math.max(g.dev, g.bend) : 0;
+  const geoTxt = !g ? '' : ` · stampa ruotata di ${Math.abs(g.rot).toFixed(1)}°` + (dz > 0.3 ? ` · <span class="pill warn">distorsione ${dz.toFixed(1)} mm</span> foto non parallela alla carta o carta non piana: rifai lo scatto` : ` · cornice dritta (distorsione ${dz.toFixed(2)} mm)`);
   const multi = r.n > 1 && r.auto ? ` · mediana di ${r.n} foto (${Object.keys(r.vals).map(k => r.vals[k].length).join('/')} lati validi S/D/A/B, dispersione ±${(r.spread/10).toFixed(2)} mm)` : '';
-  return `<div class="row"><span class="k">${label} ${pill(c.g)}${warn}</span><span class="v">${ratio(f.L,f.R)} · ${ratio(f.T,f.B)}</span><span class="d">bordi S/D ${(f.L/10).toFixed(2)}/${(f.R/10).toFixed(2)} mm, A/B ${(f.T/10).toFixed(2)}/${(f.B/10).toFixed(2)} mm · scostamento ${(100*c.dev).toFixed(1)}%${multi}${r.back ? ' · soglia PSA 10 per il retro 75/25' : ''}${note}</span></div>`; }
+  return `<div class="row"><span class="k">${label} ${pill(c.g)}${warn}</span><span class="v">${ratio(f.L,f.R)} · ${ratio(f.T,f.B)}</span><span class="d">bordi S/D ${(f.L/10).toFixed(2)}/${(f.R/10).toFixed(2)} mm, A/B ${(f.T/10).toFixed(2)}/${(f.B/10).toFixed(2)} mm · scostamento ${(100*c.dev).toFixed(1)}%${multi}${geoTxt}${r.back ? ' · soglia PSA 10 per il retro 75/25' : ''}${note}</span></div>`; }
 
 $('#analyze').addEventListener('click', () => {
   const btn = $('#analyze'); btn.disabled = true; btn.textContent = 'Analisi in corso…';
@@ -796,6 +879,10 @@ $('#analyze').addEventListener('click', () => {
 });
 function renderResults(){
     const f = state.front && state.front.res, b = state.back && state.back.res;
+    $('#summary').textContent = ['front', 'back'].map(side => { const st = state[side]; if (!st) return null; const ph = st.photos || [], r = st.res;
+      const used = ph.length ? ph.filter(x => x.status !== 'rejected').length : 1, refIdx = ph.findIndex(x => x.status === 'ref');
+      const sides = r && r.vals ? ` · lati validi S ${r.vals.L.length} · D ${r.vals.R.length} · A ${r.vals.T.length} · B ${r.vals.B.length}` : '';
+      return (side === 'front' ? 'Fronte: ' : 'Retro: ') + (ph.length > 1 ? `${used} foto analizzate su ${ph.length} · riferimento n. ${refIdx + 1}` : '1 foto') + sides; }).filter(Boolean).join('\n');
     const rows = []; let grades = [];
     if (!f || f.fail){ rows.push(`<div class="row"><span class="k">Fronte</span><span class="v">—</span><span class="d">${f ? f.fail : 'manca il fronte'}</span></div>`); }
     else {
@@ -821,9 +908,9 @@ function renderResults(){
 }
 
 /* ---------- regolazione manuale della cornice interna ---------- */
-const fr = { side:null, f:null, scale:1, drag:null };
+const fr = { side:null, f:null, scale:1, drag:null, sel:null }; window.__fr = fr;
 function openFrame(side){ const r = state[side].res; if (!r) return; fr.side = side; fr.f = Object.assign({ L:25, R:25, T:25, B:25 }, r.frame || {});
-  $('#frame-title').textContent = side === 'front' ? 'Cornice fronte' : 'Cornice retro'; $('#frame').hidden = false;
+  $('#frame-title').textContent = side === 'front' ? 'Cornice fronte' : 'Cornice retro'; $('#frame').hidden = false; fr.sel = null; $('#frame-pad').hidden = true;
   const c = $('#framec'), body = $('#frame .crop-body').getBoundingClientRect();
   const maxW = Math.max(200, Math.min((body.width || 360) - 16, 560)), maxH = Math.max(240, (body.height || 500) - 16);
   fr.scale = Math.min(maxW / W, maxH / H); const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -834,18 +921,21 @@ function drawFrame(){ const c = $('#framec'), ctx = c.getContext('2d'), s = c.wi
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(r.clean, 0, 0, c.width, c.height);
   ctx.strokeStyle = '#ff3b30'; ctx.lineWidth = 2 * dpr; ctx.setLineDash([8 * dpr, 6 * dpr]); ctx.strokeRect(f.L * s, f.T * s, (W - f.L - f.R) * s, (H - f.T - f.B) * s); ctx.setLineDash([]);
   const hs = frameHandles();
-  for (const k in hs){ const [x, y] = hs[k]; ctx.beginPath(); ctx.arc(x * s, y * s, 16 * dpr, 0, Math.PI * 2); ctx.fillStyle = fr.drag === k ? '#30d158' : 'rgba(255,255,255,.9)'; ctx.fill(); ctx.strokeStyle = '#111'; ctx.lineWidth = 2 * dpr; ctx.stroke(); }
-  if (fr.drag){ const [x, y] = hs[fr.drag], L = 120 * dpr, Z = 4, reg = L / (Z * s); const lx = x * s < c.width / 2 ? c.width - L - 8 * dpr : 8 * dpr, ly = y * s < c.height / 2 ? c.height - L - 8 * dpr : 8 * dpr;
+  for (const k in hs){ const [x, y] = hs[k]; ctx.beginPath(); ctx.arc(x * s, y * s, 16 * dpr, 0, Math.PI * 2); ctx.fillStyle = (fr.drag || fr.sel) === k ? '#30d158' : 'rgba(255,255,255,.9)'; ctx.fill(); ctx.strokeStyle = '#111'; ctx.lineWidth = 2 * dpr; ctx.stroke(); }
+  const lk = fr.drag || fr.sel;
+  if (lk){ const [x, y] = hs[lk], L = 150 * dpr, Z = 4, reg = L / (Z * s); const lx = x * s < c.width / 2 ? c.width - L - 8 * dpr : 8 * dpr, ly = y * s < c.height / 2 ? c.height - L - 8 * dpr : 8 * dpr;
     ctx.save(); ctx.beginPath(); ctx.rect(lx, ly, L, L); ctx.clip(); ctx.drawImage(r.clean, x - reg / 2, y - reg / 2, reg, reg, lx, ly, L, L); ctx.restore();
     ctx.strokeStyle = '#fff'; ctx.lineWidth = 2 * dpr; ctx.strokeRect(lx, ly, L, L); ctx.strokeStyle = '#ff3b30'; ctx.beginPath(); ctx.moveTo(lx + L/2, ly); ctx.lineTo(lx + L/2, ly + L); ctx.moveTo(lx, ly + L/2); ctx.lineTo(lx + L, ly + L/2); ctx.stroke(); }
   $('#frame-vals').textContent = `S ${(f.L/10).toFixed(1)} · D ${(f.R/10).toFixed(1)} · A ${(f.T/10).toFixed(1)} · B ${(f.B/10).toFixed(1)} mm → ${ratio(f.L, f.R)} · ${ratio(f.T, f.B)}`; }
 function framePos(e){ const r = $('#framec').getBoundingClientRect(); return [(e.clientX - r.left) / fr.scale, (e.clientY - r.top) / fr.scale]; }
 $('#framec').addEventListener('pointerdown', e => { const [x, y] = framePos(e), hs = frameHandles(); let bk = null, bd = 44 / fr.scale;
-  for (const k in hs){ const d = Math.hypot(hs[k][0] - x, hs[k][1] - y); if (d < bd){ bd = d; bk = k; } } fr.drag = bk; if (bk){ e.target.setPointerCapture(e.pointerId); drawFrame(); } });
+  for (const k in hs){ const d = Math.hypot(hs[k][0] - x, hs[k][1] - y); if (d < bd){ bd = d; bk = k; } } fr.drag = bk; if (bk){ fr.sel = bk; $('#frame-pad').hidden = false; $('#frame-pad-lbl').textContent = 'lato ' + ({ L: 'sinistro', R: 'destro', T: 'alto', B: 'basso' })[bk]; e.target.setPointerCapture(e.pointerId); drawFrame(); } });
 $('#framec').addEventListener('pointermove', e => { if (!fr.drag) return; const [x, y] = framePos(e); const cl = (v, lo, hi) => Math.round(Math.max(lo, Math.min(hi, v)));
   if (fr.drag === 'L') fr.f.L = cl(x, 1, 200); if (fr.drag === 'R') fr.f.R = cl(W - x, 1, 200); if (fr.drag === 'T') fr.f.T = cl(y, 1, 200); if (fr.drag === 'B') fr.f.B = cl(H - y, 1, 200); drawFrame(); });
 const endFrame = () => { if (fr.drag){ fr.drag = null; drawFrame(); } };
 $('#framec').addEventListener('pointerup', endFrame); $('#framec').addEventListener('pointercancel', endFrame);
+makePad($('#frame-pad'), (dx, dy) => { const k = fr.sel; if (!k) return; const f = fr.f, cl = v => Math.round(Math.max(1, Math.min(200, v)));
+  if (k === 'L') f.L = cl(f.L + dx); if (k === 'R') f.R = cl(f.R - dx); if (k === 'T') f.T = cl(f.T + dy); if (k === 'B') f.B = cl(f.B - dy); drawFrame(); });
 $('#frame-cancel').addEventListener('click', () => { $('#frame').hidden = true; });
 $('#frame-ok').addEventListener('click', () => { const st = state[fr.side]; st.frame = Object.assign({}, fr.f); st.res.frame = st.frame; st.res.auto = false; $('#frame').hidden = true; drawWarp(fr.side); renderResults(); });
 $('#fr-front').addEventListener('click', () => openFrame('front')); $('#fr-back').addEventListener('click', () => openFrame('back'));
@@ -856,6 +946,7 @@ function snapshotResult(){
   const f = state.front && state.front.res, b = state.back && state.back.res; if (!f || f.fail) return null;
   const side = r => r && !r.fail ? { cent: r.cent ? { lr: ratio(r.frame.L, r.frame.R), tb: ratio(r.frame.T, r.frame.B), g: r.cent.g, dev: +(100 * r.cent.dev).toFixed(1) } : null,
     frame: r.frame ? { L: +r.frame.L.toFixed(1), R: +r.frame.R.toFixed(1), T: +r.frame.T.toFixed(1), B: +r.frame.B.toFixed(1) } : null, n: r.n || 1, unsure: !!r.unsure,
+    geo: r.geo ? { rot: +r.geo.rot.toFixed(2), dev: +Math.max(r.geo.dev, r.geo.bend).toFixed(2) } : null,
     corners: r.corners ? r.corners.map(v => +v.toFixed(1)) : null, edges: r.edges ? r.edges.map(v => +v.toFixed(1)) : null } : null;
   return { name: ($('#save-name').value || '').trim() || 'Carta senza nome', ts: Date.now(), grade: $('#g-big').textContent, front: side(f), back: side(b), thumb: thumbOf('#w-front'), thumbBack: b && !b.fail ? thumbOf('#w-back') : null };
 }
@@ -886,7 +977,7 @@ $('#save-btn').addEventListener('click', () => {
 initHist();
 
 $('#again').addEventListener('click', () => {
-  state.front = state.back = null; $('#results').hidden = true; $('#fr-front').hidden = $('#fr-back').hidden = true; $('#analyze').disabled = true;
+  state.front = state.back = null; renderStrip('front'); renderStrip('back'); $('#results').hidden = true; $('#fr-front').hidden = $('#fr-back').hidden = true; $('#analyze').disabled = true;
   $('#thumb-front').textContent = 'Fronte'; $('#thumb-back').textContent = 'Retro'; $('#err').hidden = true; $('#save-note').hidden = true; $('#save-name').value = '';
   window.scrollTo({ top:0, behavior:'smooth' });
 });
