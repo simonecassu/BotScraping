@@ -85,12 +85,14 @@ def border_truth(im: Image.Image) -> dict:
         a, b = int(0.4 * ppm), int(0.8 * ppm) + 1
         ref = tuple(sum(p[c] for p in prof[a:b]) / (b - a) for c in range(3))
         colors.append(ref)
-        width = None
-        for o in range(b, len(prof)):
-            if sum(abs(prof[o][c] - ref[c]) for c in range(3)) > 60:
-                width = o / ppm
-                break
-        out[side] = round(width, 2) if width else None
+        # la cornice è il cambio di colore più forte tra 0,8 e 4,5 mm (il primo cambio può essere la riga di testo in
+        # basso o una linea sottile); se nessun cambio supera 60 non c'è cornice (disegno fino al taglio)
+        best, width = 0.0, None
+        for o in range(max(b, int(0.8 * ppm)), min(len(prof) - 2, int(4.5 * ppm))):
+            jump = sum(abs(prof[o + 2][c] - prof[o - 1][c]) for c in range(3))
+            if jump > best:
+                best, width = jump, (o + 0.5) / ppm
+        out[side] = round(width, 2) if width and best > 60 else None
     r, g, bl = (sum(c[i] for c in colors) / 4 for i in range(3))
     lum = 0.299 * r + 0.587 * g + 0.114 * bl
     chroma = max(r, g, bl) - min(r, g, bl)
@@ -135,7 +137,7 @@ def _apply(coeffs, x, y):
 
 
 VARIANTS = {
-    "carta": {"bg": (205, 203, 196), "shadow": 0.45, "tilt": 0.0},      # foglio chiaro, ombra leggera
+    "carta": {"bg": (222, 220, 214), "shadow": 0.45, "tilt": 0.0},      # foglio chiaro, ombra leggera
     "panno": {"bg": (48, 50, 56), "shadow": 0.7, "tilt": 0.025},         # sfondo scuro, ombra forte, un po' di prospettiva
 }
 

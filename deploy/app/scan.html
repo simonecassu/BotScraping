@@ -656,7 +656,51 @@ function refineQuad(canvas, quad, maxShift, radius){
 function autoQuad(canvas){
   const hq = findQuadHough(canvas); let q = hq ? hq.quad : detectQuad(canvas);
   if (!q || q.length !== 4 || q.some(p => !p || !isFinite(p[0]) || !isFinite(p[1]))) return { quad:null, conf:0 };
-  q = refineQuad(canvas, q, 220, 0.03); return { quad:q, conf: hq ? hq.sup : 0.3, stats: refineQuad.stats }; }
+  q = refineQuad(canvas, q, 220, 0.03);
+  const grown = growOutward(canvas, q); if (grown) q = refineQuad(canvas, grown, 40, 0.012);  // era la cornice stampata: via al taglio vero
+  return { quad:q, conf: hq ? hq.sup : 0.3, stats: refineQuad.stats, grown: !!grown }; }
+
+function growOutward(canvas, quad){
+  // Bordo argento o bianco su un foglio chiaro: il taglio quasi non si vede e il rettangolo trovato può essere la
+  // cornice stampata. La carta vera ha gli angoli arrotondati (raggio ~3 mm): a mezzo millimetro dentro l'angolo, lungo
+  // la diagonale, c'è lo sfondo. Se invece lì c'è ancora colore di carta (angoli vivi) il rettangolo è interno: per ogni
+  // lato si va verso l'esterno finché il colore uniforme del bordo cambia (il taglio), entro 6,5 mm.
+  const S = toColor(canvas, 1400); const { ch, w, h } = S; const sc = w / canvas.width; const q = quad.map(p => [p[0] * sc, p[1] * sc]);
+  const cx = (q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4, cy = (q[0][1] + q[1][1] + q[2][1] + q[3][1]) / 4;
+  const ppm = Math.min(Math.hypot(q[1][0] - q[0][0], q[1][1] - q[0][1]), Math.hypot(q[2][0] - q[1][0], q[2][1] - q[1][1])) / 63;
+  if (!(ppm > 2)) return null;
+  const col = (x, y) => { const acc = [0, 0, 0]; for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]){
+      const xi = Math.max(0, Math.min(w - 1, Math.round(x + dx))), yi = Math.max(0, Math.min(h - 1, Math.round(y + dy))); const i = yi * w + xi;
+      acc[0] += ch[0][i]; acc[1] += ch[1][i]; acc[2] += ch[2][i]; } return acc.map(v => v / 5); };
+  const dist = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
+  let sharp = 0;
+  for (const p of q){ const dx = cx - p[0], dy = cy - p[1], L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
+    const near = col(p[0] + ux * 0.5 * ppm, p[1] + uy * 0.5 * ppm), outside = col(p[0] - ux * 1.5 * ppm, p[1] - uy * 1.5 * ppm);
+    if (dist(near, outside) > 30) sharp++; }
+  growOutward.last = { sharp, ppm: +ppm.toFixed(2) };
+  if (sharp < 3) return null;
+  const shifts = [];
+  for (let s = 0; s < 4; s++){
+    const A = q[s], B = q[(s + 1) % 4]; const vx = B[0] - A[0], vy = B[1] - A[1], L = Math.hypot(vx, vy) || 1; let nx = -vy / L, ny = vx / L;
+    if ((A[0] + vx / 2 - cx) * nx + (A[1] + vy / 2 - cy) * ny < 0){ nx = -nx; ny = -ny; }
+    const mean = d => { const acc = [0, 0, 0]; let n = 0; for (let k = 3; k <= 17; k++){ const t = k / 20, c = col(A[0] + vx * t + nx * d, A[1] + vy * t + ny * d); acc[0] += c[0]; acc[1] += c[1]; acc[2] += c[2]; n++; } return acc.map(v => v / n); };
+    // si parte 0,6 mm fuori dal rettangolo: la riga scura della cornice stampata (~0,4 mm) resta dentro, il bordo è fuori
+    const d0 = Math.max(4, Math.round(0.6 * ppm)); const band = mean(d0); let found = -1, uniform = true;
+    for (let d = d0 + 2; d <= Math.round(6.5 * ppm); d++){ const m = mean(d); if (dist(m, band) > 18){ found = d; break; } if (dist(m, band) > 12) uniform = false; }
+    shifts.push(found > 0 && uniform ? found - 1 : null);
+  }
+  growOutward.last.shifts = shifts;
+  const good = shifts.filter(x => x != null); if (good.length < 2) return null;
+  const med = good.slice().sort((a, b) => a - b)[good.length >> 1]; const sh = shifts.map(x => x == null ? med : x);
+  if (sh.some(x => x < 0.8 * ppm || x > 5 * ppm)) return null;
+  const out = q.map(p => p.slice());
+  for (let s = 0; s < 4; s++){ const A = q[s], B = q[(s + 1) % 4]; const vx = B[0] - A[0], vy = B[1] - A[1], L = Math.hypot(vx, vy) || 1; let nx = -vy / L, ny = vx / L;
+    if ((A[0] + vx / 2 - cx) * nx + (A[1] + vy / 2 - cy) * ny < 0){ nx = -nx; ny = -ny; }
+    for (const i of [s, (s + 1) % 4]){ out[i][0] += nx * sh[s]; out[i][1] += ny * sh[s]; } }
+  const wa = (Math.hypot(out[1][0] - out[0][0], out[1][1] - out[0][1]) + Math.hypot(out[2][0] - out[3][0], out[2][1] - out[3][1])) / 2;
+  const ha = (Math.hypot(out[2][0] - out[1][0], out[2][1] - out[1][1]) + Math.hypot(out[3][0] - out[0][0], out[3][1] - out[0][1])) / 2;
+  const ratio = Math.min(wa, ha) / Math.max(wa, ha); growOutward.last.ratio = +ratio.toFixed(3); if (Math.abs(ratio - 63 / 88) > 0.045) return null;
+  return out.map(p => [p[0] / sc, p[1] / sc]); }
 
 /* ---------- rilevamento carta (ripiego per colore) ---------- */
 function detectQuad(canvas){
@@ -755,9 +799,9 @@ function profileJump(d, side, t0, t1){
   const m = []; for (let o = 0; o < MAXO; o++){ let r = 0, g = 0, b = 0, n = 0; for (let t = t0; t < t1; t++){ const p = at(o, t); r += p[0]; g += p[1]; b += p[2]; n++; } m.push([r / n, g / n, b / n]); }
   const D = new Float32Array(MAXO);
   for (let o = K + 4; o < MAXO - K; o++){ let s = 0; for (let ch = 0; ch < 3; ch++){ let a = 0, b = 0; for (let j = 1; j <= K; j++){ a += m[o + j][ch]; b += m[o - j][ch]; } s += Math.abs(a - b) / K; } D[o] = s; }
-  const lo = 10, hi = 60; let M = 0; for (let i = lo; i < hi; i++) M = Math.max(M, D[i]);
+  const lo = 8, hi = 45; let M = 0; for (let i = lo; i < hi; i++) M = Math.max(M, D[i]);  // il bordo sta tra 0,8 e 4,5 mm
   if (M < 40) return null;
-  let p = -1; for (let i = lo; i < hi; i++){ if (D[i] >= 0.5 * M && D[i] >= D[i-1] && D[i] >= D[i+1]){ p = i; break; } }
+  let p = -1; for (let i = lo; i < hi; i++){ if (D[i] >= 0.4 * M && D[i] >= D[i-1] && D[i] >= D[i+1]){ p = i; break; } }
   if (p < 0) return null;
   const den = D[p-1] + D[p+1] - 2 * D[p]; const sub = p + (den !== 0 ? 0.5 * (D[p-1] - D[p+1]) / den : 0);
   return { w: sub + 0.5, jump: D[p], dom: D[p] / M }; }
@@ -981,6 +1025,7 @@ $('#again').addEventListener('click', () => {
   $('#thumb-front').textContent = 'Fronte'; $('#thumb-back').textContent = 'Retro'; $('#err').hidden = true; $('#save-note').hidden = true; $('#save-name').value = '';
   window.scrollTo({ top:0, behavior:'smooth' });
 });
+window.__fn = { autoQuad, growOutward, refineQuad, findQuadHough };  // per il banco di prova
 })();
 </script>
 
