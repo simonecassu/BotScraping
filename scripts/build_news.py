@@ -376,7 +376,7 @@ def set_maps() -> tuple[dict, dict]:
 
 def price_cards(top: list[dict], prev: dict, by_code: dict, to_tcgdex: dict) -> dict:
     """Prezzo di ogni lista: somma dei trend Cardmarket (TCGdex). I prezzi restano in cache per un giorno."""
-    cache = {k: v for k, v in (prev.get("prices") or {}).items() if time.time() - v.get("ts", 0) < (86400 if v.get("p") is not None else 6 * 3600)}
+    cache = {k: v for k, v in (prev.get("prices") or {}).items() if v.get("v") == 2 and time.time() - v.get("ts", 0) < (86400 if v.get("p") is not None else 6 * 3600)}
     for d in top:
         if not d.get("cards"):
             continue
@@ -402,7 +402,7 @@ def price_cards(top: list[dict], prev: dict, by_code: dict, to_tcgdex: dict) -> 
                                 break
                         except Exception:  # noqa: BLE001
                             price = None
-                cache[tid] = {"p": price, "ts": time.time()}
+                cache[tid] = {"p": price, "ts": time.time(), "v": 2}
             p = cache[tid].get("p")
             if p is None:
                 missing_price += 1
