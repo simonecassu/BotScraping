@@ -52,8 +52,11 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #cam video{flex:1;min-height:0;width:100%;object-fit:cover;background:#000}
 #cam .overlay{position:absolute;inset:0;pointer-events:none}
 #cam .guide{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(72vw,52vh*0.716);aspect-ratio:63/88;border:2px solid rgba(255,255,255,.85);border-radius:3% / 2.2%;box-shadow:0 0 0 2000px rgba(0,0,0,.25)}
-#cam .hud{position:absolute;top:calc(env(safe-area-inset-top,0px) + 12px);left:12px;right:12px;display:flex;justify-content:space-between;color:#fff;font-family:var(--font-mono);font-size:.78rem}
+#cam .hud{position:absolute;top:calc(env(safe-area-inset-top,0px) + 12px);left:12px;right:12px;display:flex;align-items:flex-start;justify-content:space-between;color:#fff;font-family:var(--font-mono);font-size:.78rem}
 #cam .hud span{background:rgba(0,0,0,.5);padding:4px 8px;border-radius:6px}
+#cam .hud .lev{display:flex;flex-direction:column;align-items:center;gap:6px}
+#cam .hud .bubble{background:rgba(0,0,0,.45);border-color:rgba(255,255,255,.8)}
+#cam .hud .bubble::before{border-color:rgba(255,255,255,.7)}
 #cam .hud span.bad{background:rgba(227,53,13,.8)}
 #cam .hud span.ok{background:rgba(43,201,124,.85);color:#07200f;font-weight:700}
 #cam .guide.ok{border-color:var(--ok);border-width:3px}
@@ -195,7 +198,7 @@ summary{cursor:pointer;color:var(--ink)}
   <video id="video" autoplay playsinline muted></video>
   <div class="overlay">
     <div class="guide"></div>
-    <div class="hud"><span id="hud-side">Fronte</span><span id="hud-tilt" hidden></span></div>
+    <div class="hud"><span id="hud-side">Fronte</span><div class="lev" id="hud-lev" hidden><div class="bubble" id="cam-bubble"><i></i></div><span id="hud-tilt"></span></div></div>
   </div>
   <div class="bar">
     <button id="cam-cancel">Annulla</button>
@@ -225,17 +228,16 @@ function onOrient(e){
   const tilt = Math.hypot(b, g);
   state.tilt = tilt;
   const ok = tilt <= 2;
-  const bub = $('#bubble'); bub.classList.toggle('ok', ok);
   const k = 24 / 15;                           // 15° = raggio della bolla
   const dx = Math.max(-24, Math.min(24, g * k)), dy = Math.max(-24, Math.min(24, b * k));
-  bub.querySelector('i').style.transform = `translate(calc(-50% + ${dx}px),calc(-50% + ${dy}px))`;
+  for (const bub of [$('#bubble'), $('#cam-bubble')]){ bub.classList.toggle('ok', ok); bub.querySelector('i').style.transform = `translate(calc(-50% + ${dx}px),calc(-50% + ${dy}px))`; }
   $('#levtxt').innerHTML = `<b>${tilt.toFixed(1)}°</b> di inclinazione<br>${ok ? 'telefono in piano' : 'raddrizza il telefono (≤ 2°)'}`;
-  const hud = $('#hud-tilt'); hud.hidden = false; hud.textContent = ok ? '✓ in piano: scatta' : `inclinato di ${tilt.toFixed(0)}°: raddrizza il telefono`;
+  $('#hud-lev').hidden = false; const hud = $('#hud-tilt'); hud.textContent = ok ? '✓ scatta' : `${tilt.toFixed(0)}° raddrizza`;
   hud.classList.toggle('ok', ok); hud.classList.toggle('bad', !ok); document.querySelector('#cam .guide').classList.toggle('ok', ok);
   $('#shutter').classList.toggle('ready', ok);
 }
 const levelRow = document.querySelector('.level');
-function levelOff(){ levelRow.hidden = true; $('#hud-tilt').hidden = true; $('#shutter').classList.add('ready'); }
+function levelOff(){ levelRow.hidden = true; $('#hud-lev').hidden = true; $('#shutter').classList.add('ready'); }
 async function enableLevel(){
   if (levelOn) return; levelOn = true;
   $('#lev-btn').hidden = true; $('#levtxt').innerHTML = '<b>Livella attiva</b><br>in attesa di dati…';
