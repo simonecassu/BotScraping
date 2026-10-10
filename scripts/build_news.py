@@ -173,6 +173,7 @@ def tcgdex_releases(prev: dict, out: Path, today: datetime) -> list[dict]:
                 continue
             rd = parse_date(d.get("releaseDate") or "")
             if not rd or rd < today - timedelta(days=45) or rd > today + timedelta(days=400):
+                log(f"  set {s['id']} saltato: uscita {d.get('releaseDate')!r}, {len(d.get('cards') or [])} carte")
                 continue
             name = d.get("name") or s.get("name")
             if lang == "en":
@@ -189,7 +190,7 @@ def tcgdex_releases(prev: dict, out: Path, today: datetime) -> list[dict]:
             for c in cards:
                 key = str(c.get("localId") or c.get("id"))
                 if key in old_rev:
-                    revealed.append(old_rev[key])
+                    o = dict(old_rev[key]); o["rarity"] = str(o.get("rarity") or "–"); revealed.append(o)
                     continue
                 if fresh >= 40:  # al massimo 40 carte nuove per giro: le altre al prossimo
                     break
@@ -207,7 +208,7 @@ def tcgdex_releases(prev: dict, out: Path, today: datetime) -> list[dict]:
                 if (c.get("image") or detail.get("image")) and len([r for r in revealed if r.get("img")]) < MAX_IMG_PER_SET:
                     img = save_image(f"{c.get('image') or detail.get('image')}/low.webp", out, f"{s['id']}-{key}")
                 n = int(key) if key.isdigit() else key
-                revealed.append({"n": n, "name": detail.get("name") or c.get("name") or key, "rarity": detail.get("rarity") or "–",
+                revealed.append({"n": n, "name": detail.get("name") or c.get("name") or key, "rarity": str(detail.get("rarity") or "–"),
                                  "type": typ, "when": now_iso(), "img": img})
             status = "uscita" if rd <= today else "preordini" if rd <= today + timedelta(days=45) else "annunciata"
             total = cc.get("official") or cc.get("total") or None
@@ -317,8 +318,10 @@ def limitless_standings(t: dict) -> list[dict]:
         arche = text_of(deck[2]).strip() if deck and deck[2] else (deck[1].replace("-", " ").title() if deck and deck[1] else "")
         top.append({"place": place, "player": player.strip()[:40], "country": country, "a": arche or "–", "price": None, "missing": None,
                     "list": None, "cards": [], "list_url": LIMITLESS + lst[1] if lst else None})
-    if not top or not any(d.get("list_url") for d in top[:8]):
+    if not top or not any(d.get("list_url") for d in top[:8]) or all(d["a"] == "–" for d in top[:8]):
         diag("limitless classifica", page, r"/decks/|/tournaments/\d+/")
+        row = next((tr for tr, cells in rows_of(page) if cells and cells[0] == "1"), "")
+        log(f"  [limitless classifica] riga 1: {' '.join(row.split())[:700]}")
     return top
 
 
@@ -460,7 +463,8 @@ def rk9_events(prev: dict) -> list[dict]:
         start, end = rng
         if end < today - timedelta(days=2) or start > today + timedelta(days=400):
             continue
-        loc = next((c for c in cells if c and c != name and not parse_date(c) and re.search(r"[A-Za-z]", c) and len(c) < 60), "")
+        ni = cells.index(name)
+        loc = next((c for c in cells[ni + 1:] if c and re.search(r"[A-Za-z]", c) and not parse_range(c) and len(c) < 60), "")
         kind = "Mondiale" if re.search(r"world", name, flags=re.I) else "Internazionale" if re.search(r"international", name, flags=re.I) else "Regionale"
         city, _, country = loc.partition(",")
         evs.append({"id": m[0], "ids": ids, "name": re.sub(r"\s+", " ", name.strip()), "kind": kind, "city": city.strip(), "country": country.strip(),
@@ -541,6 +545,7 @@ def main() -> int:
     ap.add_argument("--prev", default="")
     ap.add_argument("--completo", action="store_true", help="aggiornamento completo anche se l'ultimo è recente")
     ap.add_argument("--offline", action="store_true", help="niente rete: solo la struttura (per le prove)")
+    ap.add_argument("--annunci", action="store_true", help="prova anche pokemon.com/it (di solito blocca i bot)")
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -563,8 +568,10 @@ def main() -> int:
     if args.offline:
         full = False
     if full:
-        for name, fn in (("tcgdex", lambda: tcgdex_releases(prev, out, today)), ("pokemon.com", lambda: pokemon_news(prev, out)),
-                         ("limitless", lambda: tournaments(prev)), ("rk9", lambda: rk9_events(prev))):
+        sources = [("tcgdex", lambda: tcgdex_releases(prev, out, today)), ("limitless", lambda: tournaments(prev)), ("rk9", lambda: rk9_events(prev))]
+        if args.annunci:  # pokemon.com/it blocca i bot (Incapsula): si prova solo su richiesta
+            sources.append(("pokemon.com", lambda: pokemon_news(prev, out)))
+        for name, fn in sources:
             try:
                 res = fn()
                 if name == "tcgdex":
