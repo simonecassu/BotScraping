@@ -323,26 +323,36 @@ def limitless_standings(t: dict) -> list[dict]:
 
 
 def limitless_decklist(url: str) -> tuple[dict, list]:
-    """Una lista: gruppi «Pokémon/Allenatori/Energie» con [quantità, nome, codice] e le carte come [q, 'CODICE numero']."""
+    """Una lista: ogni carta è un link /cards/SET/NUMERO con la quantità accanto; i gruppi (Pokémon, Trainer, Energy) dalle
+    intestazioni che precedono. Torna i gruppi per la pagina ([quantità, nome, codice]) e le carte ([quantità, 'SET numero'])."""
     page = fetch(url)
-    t = text_of(page)
+    heads = [(m.start(), {"p": "Pokémon", "t": "Allenatori", "e": "Energie"}[m[1][0].lower()])
+             for m in re.finditer(r">\s*(Pok[eé]mon|Trainer|Energy)\s*(?:\(\d+\)|\d+)?\s*<", page)]
     groups: dict[str, list] = {"Pokémon": [], "Allenatori": [], "Energie": []}
-    cur = "Pokémon"
     cards = []
-    for line in t.splitlines():
-        line = line.strip()
-        if re.match(r"^pok[eé]mon\b", line, flags=re.I):
-            cur = "Pokémon"
-        elif re.match(r"^trainer", line, flags=re.I):
-            cur = "Allenatori"
-        elif re.match(r"^energ", line, flags=re.I):
-            cur = "Energie"
-        m = re.match(r"^(\d{1,2})\s+(.+?)\s+([A-Z][A-Z0-9]{1,4})\s+(\d{1,3}[a-zA-Z]?)$", line)
-        if m:
-            groups[cur].append([int(m[1]), m[2].strip(), f"{m[3]} {m[4]}"])
-            cards.append([int(m[1]), f"{m[3]} {m[4]}"])
+    prev = 0
+    for m in re.finditer(r'<a[^>]+href="/cards/([A-Z0-9]{2,5})/(\d{1,3}[a-zA-Z]?)"[^>]*>(.*?)</a>', page, flags=re.S):
+        name = " ".join(text_of(m[3]).split())
+        seg = " ".join(text_of(page[max(prev, m.start() - 400):m.start()]).split())
+        q = None
+        mm = re.match(r"^(\d{1,2})\s+(.*)$", name)
+        if mm:
+            q, name = int(mm[1]), mm[2]
+        else:
+            nums = re.findall(r"(?:^|\s)(\d{1,2})(?=\s*$)", seg)
+            q = int(nums[-1]) if nums else None
+        prev = m.end()
+        if not q or q > 60 or not name:
+            continue
+        grp = "Pokémon"
+        for pos, g in heads:
+            if pos < m.start():
+                grp = g
+        code = f"{m[1]} {m[2]}"
+        groups[grp].append([q, name, code])
+        cards.append([q, code])
     if not cards:
-        diag("limitless lista", page, r"decks|cards")
+        diag("limitless lista", page, r"cards")
     return groups, cards
 
 
