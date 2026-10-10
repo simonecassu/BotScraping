@@ -33,7 +33,9 @@ al buio, inseguimenti, annunci trovati, prezzi e lista della spesa), **Amici** (
 conferma subito in chat («📲 Ricevuto dalla Mini App»), il bot lo esegue e pubblica lo stato prima della ricerca, così
 l'app si aggiorna da sola in circa mezzo minuto e in chat arriva il risultato.
 La casella di ricerca in Collezioni trova anche le carte in tutte le espansioni (indice `deploy/app/cards.json`,
-generato da `scripts/build_card_index.py` a ogni deploy del ponte), raggruppate per espansione.
+generato da `scripts/build_card_index.py` a ogni deploy del ponte), raggruppate per espansione. Lo script ufficiale di
+Telegram (`telegram-web-app.js`) viene scaricato a ogni deploy e servito dal ponte, così la pagina si apre anche dove
+telegram.org non risponde.
 Ognuno vede solo i suoi dati.
 
 **Segnalazioni**: ogni utente può scrivere una volta al giorno un problema o un'idea (`/segnala testo`, anche su più

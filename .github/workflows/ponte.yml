@@ -44,6 +44,13 @@ jobs:
       - name: Indice delle carte per la ricerca nella Mini App
         run: python3 ../scripts/build_card_index.py app/cards.json
 
+      # Lo script ufficiale di Telegram viene servito dal ponte stesso: se dal telefono telegram.org non risponde
+      # (rete filtrata, proxy), la Mini App non resta su uno schermo nero in attesa dello script.
+      - name: Script di Telegram per la Mini App
+        run: |
+          curl -fsSL --retry 3 -o app/telegram-web-app.js https://telegram.org/js/telegram-web-app.js
+          grep -q "WebApp" app/telegram-web-app.js || { echo "::error::telegram-web-app.js scaricato ma non valido"; exit 1; }
+
       - name: Pubblica il worker
         run: |
           set -o pipefail  # se il deploy fallisce, il passo fallisce (e le chiavi non vanno al worker vecchio)
