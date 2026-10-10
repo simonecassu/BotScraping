@@ -183,10 +183,10 @@ def compose(scan: Image.Image, variant: str, seed: int) -> tuple[Image.Image, li
 
 
 def synthetic_scan(kind: str, seed: int) -> Image.Image:
-    """Carta disegnata (per --offline): bordo giallo o argento, cornice stampata e disegno a macchie."""
+    """Carta disegnata (per --offline): bordo giallo, argento, bianco o nero, cornice stampata e disegno a macchie."""
     rnd = random.Random(seed)
     W, H = 734, 1024
-    border = (240, 196, 50) if kind == "giallo" else (190, 190, 192)
+    border = {"giallo": (240, 196, 50), "argento": (190, 190, 192), "bianco": (246, 246, 244), "nero": (24, 24, 28)}[kind]
     im = Image.new("RGB", (W, H), border)
     d = ImageDraw.Draw(im)
     L, R, T, B = [int(rnd.uniform(1.6, 2.6) * W / MM_W) for _ in range(4)]
@@ -259,7 +259,7 @@ def main() -> int:
     out = pathlib.Path(args.out)
     (out / "foto").mkdir(parents=True, exist_ok=True)
     if args.offline:
-        cards = [{"id": f"synth-{k}-{i}", "name": f"{k} {i}", "set": "synth", "rarity": k, "scan": synthetic_scan(k, i)} for k in ("giallo", "argento") for i in range(2)]
+        cards = [{"id": f"synth-{k}-{i}", "name": f"{k} {i}", "set": "synth", "rarity": k, "scan": synthetic_scan(k, i)} for k in ("giallo", "argento", "bianco", "nero") for i in range(2)]
     else:
         cards = sample_cards()
         if args.limit:
@@ -284,13 +284,14 @@ def main() -> int:
     results = run_page(photos, out)
     # ---- tabella
     print(f"\n{'carta':<14} {'rarità':<24} {'bordo':<22} {'var':<6} {'angoli px':>9}  {'cornice vera S/D/A/B mm':<26} {'trovata S/D/A/B mm (salto)':<40} note")
-    stats = {}
+    stats, stats_var = {}, {}
     for r in results:
         t = r["truth"]
         truth_s = "/".join("-" if t[k] is None else f"{t[k]:.1f}" for k in "LRTB")
         if "err" in r:
             print(f"{r['id']:<14} {r['rarity'][:24]:<24} {t['kind']:<22} {r['variant']:<6} {'-':>9}  {truth_s:<26} {'-':<40} {r['err'][:60]}")
             stats.setdefault(t["kind"], []).append(("fail", None))
+            stats_var.setdefault(f"{t['kind']} su {r['variant']}", []).append(("fail", None))
             continue
         qe = quad_error(r["quad"], r["corners"])
         f = r["res"]
@@ -306,17 +307,21 @@ def main() -> int:
         print(f"{r['id']:<14} {r['rarity'][:24]:<24} {t['kind']:<22} {r['variant']:<6} {qe:>9.1f}  {truth_s:<26} {found:<40} {' · '.join(note)}")
         if qe > 5:  # angoli sbagliati: cosa aveva trovato ogni passo (per capire dove sbaglia)
             print(f"{'':<14} angoli veri {[tuple(round(v) for v in c) for c in r['corners']]} · trovati {[tuple(c) for c in r['quad']]}\n{'':<14} passi: {r.get('auto', '')[:300]}")
-        stats.setdefault(t["kind"], []).append(("ok", qe, errs, sum(1 for k in 'LRTB' if f[k] is None and t[k] is not None)))
-    print("\nriepilogo per tipo di bordo:")
-    for kind, rows in stats.items():
-        ok = [x for x in rows if x[0] == "ok"]
-        if not ok:
-            print(f"  {kind:<22} carta mai trovata ({len(rows)} foto)")
-            continue
-        q = sum(x[1] for x in ok) / len(ok)
-        e = [v for x in ok for v in x[2]]
-        miss = sum(x[3] for x in ok)
-        print(f"  {kind:<22} foto {len(rows)}, carta trovata {len(ok)}, angoli ±{q:.1f} px, cornice: errore medio {sum(e) / len(e) if e else 0:.2f} mm, max {max(e) if e else 0:.2f} mm, lati non trovati {miss}")
+        row = ("ok", qe, errs, sum(1 for k in 'LRTB' if f[k] is None and t[k] is not None))
+        stats.setdefault(t["kind"], []).append(row)
+        stats_var.setdefault(f"{t['kind']} su {r['variant']}", []).append(row)
+    for title, groups in (("per tipo di bordo", stats), ("per tipo di bordo e sfondo", stats_var)):
+        print(f"\nriepilogo {title}:")
+        for kind, rows in groups.items():
+            ok = [x for x in rows if x[0] == "ok"]
+            if not ok:
+                print(f"  {kind:<22} carta mai trovata ({len(rows)} foto)")
+                continue
+            q = sum(x[1] for x in ok) / len(ok)
+            e = [v for x in ok for v in x[2]]
+            miss = sum(x[3] for x in ok)
+            bad = sum(1 for x in ok if x[1] > 5)
+            print(f"  {kind:<22} foto {len(rows)}, carta trovata {len(ok)}, angoli ±{q:.1f} px (oltre 5 px: {bad}), cornice: errore medio {sum(e) / len(e) if e else 0:.2f} mm, max {max(e) if e else 0:.2f} mm, lati non trovati {miss}")
     (out / "risultati.json").write_text(json.dumps([{k: v for k, v in r.items() if k not in ("path",)} for r in results], default=str, ensure_ascii=False, indent=1), encoding="utf-8")
     return 0
 

@@ -136,7 +136,7 @@ summary{cursor:pointer;color:var(--ink)}
       <div class="levtxt" id="levtxt"><b>Livella</b><br>tocca “Attiva livella”</div>
       <button id="lev-btn">Attiva livella</button>
     </div>
-    <p class="note">Fotografa la carta su un foglio bianco. Con “Carica” puoi selezionare <b>più foto della stessa faccia</b> (10–20 scatti, muovendo un po’ il telefono): la carta viene trovata in ognuna e la centratura è la mediana di tutte, così le foto dove un bordo prende un riflesso non pesano.</p>
+    <p class="note">Fotografa la carta su uno sfondo uniforme di colore <b>opposto al bordo</b>: scuro (panno o cartoncino nero) per i bordi bianchi o argento, chiaro per i bordi neri; con i bordi gialli va bene tutto. Con “Carica” puoi selezionare <b>più foto della stessa faccia</b> (10–20 scatti, muovendo un po’ il telefono): la carta viene trovata in ognuna e la centratura è la mediana di tutte, così le foto dove un bordo prende un riflesso non pesano.</p>
     <div class="btnrow" style="margin-top:12px">
       <button class="primary full" id="analyze" disabled>Analizza</button>
     </div>
@@ -397,7 +397,7 @@ function openCrop(side){
   crop.sel = -1; $('#crop-pad').hidden = true;
   $('#crop-title').textContent = (side === 'front' ? 'Ritaglio fronte' : 'Ritaglio retro') + (state[side].quad ? '' : conf >= 0.75 ? ' · rilevata automaticamente' : conf > 0 ? ' · controlla i 4 angoli' : ' · carta non trovata, posiziona i cerchi');
   const wn = $('#crop-warn'); wn.hidden = !!state[side].quad || conf >= 0.75;
-  wn.textContent = conf > 0 ? 'Il bordo della carta si distingue poco dallo sfondo: verifica che i cerchi siano sugli angoli. Per una misura affidabile fotografa la carta su uno sfondo scuro e uniforme.' : 'Carta non trovata. Posiziona i cerchi a mano, oppure rifai la foto su uno sfondo scuro e uniforme.';
+  wn.textContent = conf > 0 ? 'Il bordo della carta si distingue poco dallo sfondo: verifica che i cerchi siano sugli angoli. Per una misura affidabile fotografa su uno sfondo uniforme di colore opposto al bordo: scuro per bordi bianchi o argento, chiaro per bordi neri.' : 'Carta non trovata. Posiziona i cerchi a mano, oppure rifai la foto su uno sfondo uniforme di colore opposto al bordo (scuro per bordi bianchi o argento, chiaro per bordi neri).';
   $('#crop').hidden = false;
   try{
     const c = $('#cropc'); const body = $('#crop .crop-body').getBoundingClientRect();
@@ -662,10 +662,12 @@ function autoQuad(canvas){
   return { quad:q, conf: hq ? hq.sup : 0.3, stats: refineQuad.stats, grown: !!grown }; }
 
 function growOutward(canvas, quad){
-  // Bordo argento o bianco su un foglio chiaro: il taglio quasi non si vede e il rettangolo trovato può essere la
-  // cornice stampata. La carta vera ha gli angoli arrotondati (raggio ~3 mm): a mezzo millimetro dentro l'angolo, lungo
-  // la diagonale, c'è lo sfondo. Se invece lì c'è ancora colore di carta (angoli vivi) il rettangolo è interno: per ogni
-  // lato si va verso l'esterno finché il colore uniforme del bordo cambia (il taglio), entro 6,5 mm.
+  // Bordo argento, bianco o nero quasi dello stesso colore dello sfondo: il taglio si vede poco e il rettangolo trovato può
+  // essere la cornice stampata, su uno o più lati. Due indizi. 1) La carta vera ha gli angoli arrotondati (raggio ~3 mm):
+  // a mezzo millimetro dentro l'angolo, lungo la diagonale, c'è lo sfondo come fuori; se almeno 3 angoli sono così il
+  // rettangolo è al taglio e non si tocca. 2) Altrimenti su ogni lato si segue il colore medio lungo il lato da 0,6 a
+  // 6,5 mm verso l'esterno: il taglio è il salto netto più esterno (l'ombra della carta sfuma piano e non conta); si
+  // spostano solo i lati con un salto, e il risultato vale solo se le proporzioni si avvicinano a 63:88.
   const S = toColor(canvas, 1400); const { ch, w, h } = S; const sc = w / canvas.width; const q = quad.map(p => [p[0] * sc, p[1] * sc]);
   const cx = (q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4, cy = (q[0][1] + q[1][1] + q[2][1] + q[3][1]) / 4;
   const ppm = Math.min(Math.hypot(q[1][0] - q[0][0], q[1][1] - q[0][1]), Math.hypot(q[2][0] - q[1][0], q[2][1] - q[1][1])) / 63;
@@ -674,34 +676,42 @@ function growOutward(canvas, quad){
       const xi = Math.max(0, Math.min(w - 1, Math.round(x + dx))), yi = Math.max(0, Math.min(h - 1, Math.round(y + dy))); const i = yi * w + xi;
       acc[0] += ch[0][i]; acc[1] += ch[1][i]; acc[2] += ch[2][i]; } return acc.map(v => v / 5); };
   const dist = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
-  let sharp = 0;
+  let rounded = 0;
   for (const p of q){ const dx = cx - p[0], dy = cy - p[1], L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
     const near = col(p[0] + ux * 0.5 * ppm, p[1] + uy * 0.5 * ppm), outside = col(p[0] - ux * 1.5 * ppm, p[1] - uy * 1.5 * ppm);
-    if (dist(near, outside) > 30) sharp++; }
-  growOutward.last = { sharp, ppm: +ppm.toFixed(2) };
-  if (sharp < 3) return null;
+    if (dist(near, outside) < 15) rounded++; }
+  growOutward.last = { rounded, ppm: +ppm.toFixed(2) };
+  if (rounded >= 3) return null;
+  const normal = s => { const A = q[s], B = q[(s + 1) % 4]; const vx = B[0] - A[0], vy = B[1] - A[1], L = Math.hypot(vx, vy) || 1; let nx = -vy / L, ny = vx / L;
+    if ((A[0] + vx / 2 - cx) * nx + (A[1] + vy / 2 - cy) * ny < 0){ nx = -nx; ny = -ny; } return { A, vx, vy, nx, ny }; };
+  const d0 = Math.max(4, Math.round(0.6 * ppm)), d1 = Math.round(6.5 * ppm); // si parte oltre la riga scura della cornice (~0,4 mm)
   const shifts = [];
-  for (let s = 0; s < 4; s++){
-    const A = q[s], B = q[(s + 1) % 4]; const vx = B[0] - A[0], vy = B[1] - A[1], L = Math.hypot(vx, vy) || 1; let nx = -vy / L, ny = vx / L;
-    if ((A[0] + vx / 2 - cx) * nx + (A[1] + vy / 2 - cy) * ny < 0){ nx = -nx; ny = -ny; }
-    const mean = d => { const acc = [0, 0, 0]; let n = 0; for (let k = 3; k <= 17; k++){ const t = k / 20, c = col(A[0] + vx * t + nx * d, A[1] + vy * t + ny * d); acc[0] += c[0]; acc[1] += c[1]; acc[2] += c[2]; n++; } return acc.map(v => v / n); };
-    // si parte 0,6 mm fuori dal rettangolo: la riga scura della cornice stampata (~0,4 mm) resta dentro, il bordo è fuori
-    const d0 = Math.max(4, Math.round(0.6 * ppm)); const band = mean(d0); let found = -1, uniform = true;
-    for (let d = d0 + 2; d <= Math.round(6.5 * ppm); d++){ const m = mean(d); if (dist(m, band) > 18){ found = d; break; } if (dist(m, band) > 12) uniform = false; }
-    shifts.push(found > 0 && uniform ? found - 1 : null);
-  }
+  for (let s = 0; s < 4; s++){ const { A, vx, vy, nx, ny } = normal(s);
+    const prof = []; // colore medio lungo il lato (24 punti tra il 15% e l'85%, lontano dagli angoli) a ogni distanza d
+    for (let d = d0 - 4; d <= d1 + 4; d++){ const acc = [0, 0, 0]; for (let k = 0; k < 24; k++){ const t = 0.15 + 0.7 * k / 23; const c = col(A[0] + vx * t + nx * d, A[1] + vy * t + ny * d); acc[0] += c[0]; acc[1] += c[1]; acc[2] += c[2]; } prof.push([acc[0] / 24, acc[1] / 24, acc[2] / 24]); }
+    const P = d => prof[d - d0 + 4];
+    const g = (d, k) => { const a = P(d + k), b = P(d - k); return Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2])); };
+    let gmax = 0; for (let d = d0; d <= d1; d++) gmax = Math.max(gmax, g(d, 1));
+    let found = null;
+    for (let d = d1; d >= d0 && found === null; d--){ const v = g(d, 1);
+      // salto netto: massimo locale, forte, e in 2 px c'è quasi tutto il cambiamento di 6 px (un'ombra sfumata no)
+      if (v < 9 || v < 0.25 * gmax || v < g(d - 1, 1) || v < g(d + 1, 1) || v < 0.45 * g(d, 3)) continue;
+      const a = g(d - 1, 1), c = g(d + 1, 1), den = a - 2 * v + c; found = den < 0 ? d + 0.5 * (a - c) / den : d; }
+    shifts.push(found !== null && found >= 0.8 * ppm && found <= 5.5 * ppm ? +found.toFixed(1) : null); }
   growOutward.last.shifts = shifts;
-  const good = shifts.filter(x => x != null); if (good.length < 2) return null;
-  const med = good.slice().sort((a, b) => a - b)[good.length >> 1]; const sh = shifts.map(x => x == null ? med : x);
-  if (sh.some(x => x < 0.8 * ppm || x > 5 * ppm)) return null;
-  const out = q.map(p => p.slice());
-  for (let s = 0; s < 4; s++){ const A = q[s], B = q[(s + 1) % 4]; const vx = B[0] - A[0], vy = B[1] - A[1], L = Math.hypot(vx, vy) || 1; let nx = -vy / L, ny = vx / L;
-    if ((A[0] + vx / 2 - cx) * nx + (A[1] + vy / 2 - cy) * ny < 0){ nx = -nx; ny = -ny; }
-    for (const i of [s, (s + 1) % 4]){ out[i][0] += nx * sh[s]; out[i][1] += ny * sh[s]; } }
-  const wa = (Math.hypot(out[1][0] - out[0][0], out[1][1] - out[0][1]) + Math.hypot(out[2][0] - out[3][0], out[2][1] - out[3][1])) / 2;
-  const ha = (Math.hypot(out[2][0] - out[1][0], out[2][1] - out[1][1]) + Math.hypot(out[3][0] - out[0][0], out[3][1] - out[0][1])) / 2;
-  const ratio = Math.min(wa, ha) / Math.max(wa, ha); growOutward.last.ratio = +ratio.toFixed(3); if (Math.abs(ratio - 63 / 88) > 0.045) return null;
-  return out.map(p => [p[0] / sc, p[1] / sc]); }
+  const good = shifts.filter(x => x != null); if (!good.length) return null;
+  const ratioOf = Q => { const wa = (Math.hypot(Q[1][0] - Q[0][0], Q[1][1] - Q[0][1]) + Math.hypot(Q[2][0] - Q[3][0], Q[2][1] - Q[3][1])) / 2;
+    const ha = (Math.hypot(Q[2][0] - Q[1][0], Q[2][1] - Q[1][1]) + Math.hypot(Q[3][0] - Q[0][0], Q[3][1] - Q[0][1])) / 2; return Math.min(wa, ha) / Math.max(wa, ha); };
+  const apply = sh => { const out = q.map(p => p.slice());
+    for (let s = 0; s < 4; s++){ if (!sh[s]) continue; const { nx, ny } = normal(s); for (const i of [s, (s + 1) % 4]){ out[i][0] += nx * sh[s]; out[i][1] += ny * sh[s]; } }
+    return out; };
+  const options = [shifts];
+  // 3 lati con lo stesso spostamento: era la cornice su tutti e 4 i lati, il quarto va come gli altri (vale se migliora le proporzioni)
+  if (good.length === 3){ const med = good.slice().sort((a, b) => a - b)[1]; if (good.every(v => Math.abs(v - med) <= Math.max(3, 0.2 * med))) options.push(shifts.map(v => v == null ? med : v)); }
+  const target = 63 / 88; let best = null, bestErr = Math.abs(ratioOf(q) - target);
+  for (const sh of options){ const out = apply(sh), err = Math.abs(ratioOf(out) - target); if (err <= 0.045 && err < bestErr){ best = out; bestErr = err; growOutward.last.applied = sh; } }
+  growOutward.last.ratio = +ratioOf(best || q).toFixed(3);
+  return best ? best.map(p => [p[0] / sc, p[1] / sc]) : null; }
 
 /* ---------- rilevamento carta (ripiego per colore) ---------- */
 function detectQuad(canvas){

@@ -38,6 +38,9 @@ Il pulsante **App** accanto alla chat apre: **Collezioni** (checklist con le car
 al buio, inseguimenti, annunci trovati, prezzi e lista della spesa), **Amici** (codice amico, album in comune),
 **Impostazioni**, **Segnalazioni** e **Valuta carta** (`deploy/app/scan.html`: foto fronte e retro, ritaglio, centratura
 e bordi misurati nel telefono, voto stimato 1-10, storico locale; livella con i sensori di Telegram quando ci sono).
+Sfondo consigliato per le foto: di colore opposto al bordo (scuro per bordi bianchi o argento, chiaro per bordi neri).
+Un banco di prova su scan ufficiali (`scripts/scanner_test.py`, Actions → **Prova scanner**) misura per ogni tipo di
+bordo quanto bene vengono trovati angoli e cornice.
 Ogni tocco diventa un comando per il bot: il ponte
 conferma subito in chat («📲 Ricevuto dalla Mini App»), il bot lo esegue e pubblica lo stato prima della ricerca, così
 l'app si aggiorna da sola in circa mezzo minuto e in chat arriva il risultato.
