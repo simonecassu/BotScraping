@@ -391,6 +391,9 @@ function render() {
   const D = S.data;
   $("#upd").textContent = D.updated ? `aggiornato ${ago(D.updated)}` : "";
   $("#tab-eventi").innerHTML = "Eventi" + ((D.events || []).some(isLive) ? '<span class="dot" aria-label="torneo in corso"></span>' : "");
+  const hasDecks = !!(D.decks && D.decks.top && D.decks.top.length), hasEv = !!(D.events && D.events.length);
+  $("#tab-mazzi").hidden = !hasDecks; $("#tab-eventi").hidden = !hasEv;  // senza dati veri le schede non si vedono
+  if ((S.tab === "mazzi" && !hasDecks) || (S.tab === "eventi" && !hasEv)) S.tab = "uscite";
   renderNow(); renderUscite(); renderMazzi(); renderEventi(); renderAgg(); renderNotif(); showTab(S.tab);
 }
 function showTab(t) {

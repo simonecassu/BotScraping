@@ -78,6 +78,19 @@ def text_of(fragment: str) -> str:
     return re.sub(r"[ \t\r\f\v]+", " ", t)
 
 
+def diag(name: str, page: str, pattern: str = "") -> None:
+    """Quando una pagina non dà risultati: i primi link che somigliano a quello che cerchiamo e le prime righe di tabella."""
+    links = [m[1] for m in re.finditer(r'href="([^"]+)"', page) if not pattern or re.search(pattern, m[1])]
+    uniq = list(dict.fromkeys(links))[:12]
+    log(f"  [{name}] {len(page)} byte, link: {uniq}")
+    rows = rows_of(page)[:4]
+    for _tr, cells in rows:
+        log(f"  [{name}] riga: {[c[:30] for c in cells][:8]}")
+    if not rows:
+        t = text_of(page)
+        log(f"  [{name}] testo: {' '.join(t.split())[:400]}")
+
+
 def rows_of(page: str) -> list[tuple[str, list[str]]]:
     """Le righe <tr> di una pagina: (html della riga, celle come testo)."""
     out = []
@@ -133,6 +146,7 @@ def tcgdex_releases(prev: dict, out: Path, today: datetime) -> list[dict]:
     for lang, region in (("en", "int"), ("ja", "jp")):
         sets = get_json(f"{TCGDEX}/{lang}/sets")
         recent = sets[-14:]  # l'elenco segue l'ordine delle serie: in coda i set più nuovi
+        log(f"  tcgdex {lang}: {len(sets)} set, ultimi {[x['id'] for x in recent[-5:]]}")
         for s in recent:
             try:
                 d = get_json(f"{TCGDEX}/{lang}/sets/{s['id']}")
@@ -205,6 +219,8 @@ def pokemon_news(prev: dict, out: Path) -> tuple[list[dict], list[dict]]:
             links.append(u)
     links = links[:12]
     log(f"pokemon.com/it: {len(links)} articoli nell'elenco")
+    if not links:
+        diag("pokemon.com", page, r"novita|news")
     updates, specials = [], []
     seen_new = 0
     for u in links:
@@ -262,6 +278,8 @@ def limitless_latest_major() -> dict | None:
         players = next((int(c.replace(",", "")) for c in cells if re.fullmatch(r"[\d,]{2,6}", c)), None)
         if d and d <= datetime.now(timezone.utc) and (best is None or d > best["date"]):
             best = {"id": m[2], "url": LIMITLESS + m[1], "name": name.strip(), "date": d, "players": players}
+    if not best:
+        diag("limitless", page, r"/tournaments/")
     return best
 
 
@@ -416,6 +434,8 @@ def rk9_events(prev: dict) -> list[dict]:
         evs.append({"id": m[1], "name": name.strip(), "kind": kind, "city": city.strip(), "country": country.strip(),
                     "start": iso(start.replace(hour=8)), "end": iso(end.replace(hour=20)), "home": bool(re.search(r"ital", loc, flags=re.I))})
     log(f"eventi rk9: {len(evs)} in calendario")
+    if not evs:
+        diag("rk9", page, r"tournament|event|pairings")
     return evs
 
 
