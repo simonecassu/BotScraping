@@ -212,12 +212,13 @@ def test_reports_one_a_day_multiline_and_owner_list(index, monkeypatch):
     assert not reports.sent_today(db, "2", tomorrow)
 
 
-def test_copies_set_exact_number_silently(index):
+def test_copies_set_exact_number_with_short_confirmation(index):
     db = make_db()
     h = CommandHandler(index, db)
     r = h.handle("/doppioni imposta me55:131 3")
-    assert r.text == "" and db.copies("me") == {"me55-131": 3}
-    h.handle("/doppioni imposta me55:131 0")
+    assert "ne hai 4 (3 doppioni)" in r.text and db.copies("me") == {"me55-131": 3}
+    assert "ne hai 2 (1 doppione)" in h.handle("/doppioni imposta me55:131 1").text
+    assert "ne hai 1 (nessun doppione)" in h.handle("/doppioni imposta me55:131 0").text
     assert db.copies("me") == {}
     assert "Usa" in h.handle("/doppioni imposta me55:131").text
     both = h.handle("/doppioni imposta me55:131 2\n/mancanti")  # in un messaggio con altro: nessuna riga vuota

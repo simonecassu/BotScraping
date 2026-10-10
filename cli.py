@@ -7,6 +7,8 @@
   python cli.py analizza "titolo annuncio" ["descrizione"]   mostra come il bot classifica un testo
   python cli.py actions          un passaggio completo per GitHub Actions / cron: legge i comandi
                                  Telegram arrivati, esegue la ricerca, compatta il database
+                                 (--fase comandi | --fase ricerca: mezzo giro per volta, così bot.yml salva lo
+                                 stato subito dopo i comandi e la Mini App si aggiorna in mezzo minuto)
   python cli.py export-json DIR  scrive lo stato per la Mini App e il ponte (cifrato; --chiaro per guardarlo)
   python cli.py seal SRC DST     cifra un file per il branch pubblico bot-state (unseal: il contrario)
   python cli.py queue-ack        cancella dalla coda i comandi eseguiti (dopo aver salvato lo stato)
@@ -53,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("queue-ack", help="cancella dalla coda i comandi eseguiti nell'ultimo giro")
     ac = sub.add_parser("actions", help="comandi Telegram + ricerca + pulizia (per GitHub Actions / cron)")
     ac.add_argument("--force", action="store_true", help="cerca anche se l'intervallo non è ancora passato")
+    ac.add_argument("--fase", choices=("comandi", "ricerca"), help="solo i comandi Telegram, oppure solo inseguimenti e ricerca")
     args = p.parse_args(argv)
 
     logging.basicConfig(level=logging.DEBUG if getattr(args, "verbose", False) else logging.INFO,
@@ -94,66 +97,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  errore {k}: {v}")
         return 0
     if args.cmd == "actions":
-        commands = TelegramCommands(index, db)
-        commands.ensure_menu()  # menu comandi e presentazione del bot, solo quando cambiano
-        from pokebot import plans
-        plans.migrate(db)  # chi era dentro prima dei piani tiene tutto
-        db.migrate_personal_settings()  # le vecchie impostazioni "di tutti" diventano del proprietario
-        # ogni persona collegata ha i suoi album di casa (nati "tutte mancanti"): devono esistere nel database salvato
-        for chat in db.chat_ids():
-            for sid in config.HOME_SET_IDS:
-                coll.album_for(db, chat, sid)
-        want_search = False
-        from pokebot.queue import GitHubQueue
-        # comandi salvati dal ponte: si cancellano dalla coda (queue-ack) solo dopo aver salvato lo stato
-        n_queue, want_search = GitHubQueue().drain(commands.handle_payload, done_file=str(QUEUE_DONE))
-        if n_queue:
-            print(f"Comandi dalla coda: {n_queue}")
-        if not commands.enabled:
-            print("TELEGRAM_BOT_TOKEN mancante: nessun comando letto, nessuna notifica possibile.")
-        elif not n_queue:  # senza ponte (webhook spento) i messaggi si leggono direttamente da Telegram
-            want_search = commands.poll_once(timeout=0)
-        from pokebot import cardmarket
-        try:  # prezzi Cardmarket (TCGdex): ogni carta una volta al giorno, prima le mancanti
-            line = cardmarket.refresh(db, index, wanted_first=db.wanted_of_members())
-            if line:
-                print(f"cardmarket · {line}")
-        except Exception as exc:  # noqa: BLE001 - i prezzi non devono mai fermare il bot
-            print(f"cardmarket · errore: {exc}")
-        from pokebot.watch import run_watches
-        for line in run_watches(index, db):  # inseguimenti (/insegui): a ogni sveglia, 5 minuti
-            print(f"inseguimento · {line}")
-        if commands.enabled and not db.get_kv("bot_username"):
-            try:  # serve all'app per il link "aggiungimi" e al canale per il pulsante
-                db.set_kv("bot_username", commands.client.get_me())
-            except Exception as exc:  # noqa: BLE001
-                print(f"getMe: {exc}")
-        if commands.enabled:
-            from pokebot import channel
-            try:
-                for line in plans.check_trials(db, commands.client):  # promemoria e fine della prova
-                    print(f"piani · {line}")
-            except Exception as exc:  # noqa: BLE001 - un errore qui non deve fermare la ricerca
-                print(f"piani · errore: {exc}")
-            try:
-                line = channel.post_daily(db, index, commands.client)  # canale degli affari: una volta al giorno
-                if line:
-                    print(f"canale · {line}")
-            except Exception as exc:  # noqa: BLE001
-                print(f"canale · errore: {exc}")
-        if not (args.force or want_search or _search_due(db)):
-            from pokebot.search import flush_all_queues
-            flush_all_queues(db, index.by_id)  # chi ha finito pausa o notte riceve quello che si è accumulato
-            print("Ricerca completa non ancora dovuta (vedi /intervallo): solo comandi Telegram e inseguimenti.")
-            db.prune()
-            return 0
-        rep = run_search(index, db)
-        db.set_kv("last_search_ts", time.time())
-        db.prune()
-        print(f"Query: {rep.queries} · annunci: {rep.listings} (nuovi {rep.new_listings}) · match: {rep.matches} · notifiche: {rep.notified}")
-        for k, v in rep.errors.items():
-            print(f"  errore {k}: {v}")
-        return 0
+        return _actions(args, db, index)
     if args.cmd == "export-json":
         from pokebot.webapp_export import write_state
         files = write_state(index, db, args.folder, seal=not args.chiaro)
@@ -182,6 +126,87 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  ambigua '{g.name}': {', '.join(c.label for c in g.candidates)}")
         return 0
     return 1
+
+
+def _actions(args, db: Database, index) -> int:
+    """Il giro del bot su GitHub Actions, in due fasi: `--fase comandi` (i comandi arrivati dal ponte) e `--fase ricerca`
+    (inseguimenti, prezzi, ricerca). Tra le due bot.yml salva lo stato: così la Mini App vede le modifiche in mezzo
+    minuto, senza aspettare la ricerca. Senza `--fase` (cron, PC) fa tutto in un colpo."""
+    from pokebot import collections as coll
+    from pokebot import news, plans
+    commands = TelegramCommands(index, db)
+    commands.ensure_menu()  # menu comandi e presentazione del bot, solo quando cambiano
+    plans.migrate(db)  # chi era dentro prima dei piani tiene tutto
+    db.migrate_personal_settings()  # le vecchie impostazioni "di tutti" diventano del proprietario
+    # ogni persona collegata ha i suoi album di casa (nati "tutte mancanti"): devono esistere nel database salvato
+    for chat in db.chat_ids():
+        for sid in config.HOME_SET_IDS:
+            coll.album_for(db, chat, sid)
+    if args.fase != "ricerca":
+        from pokebot.queue import GitHubQueue
+        # comandi salvati dal ponte: si cancellano dalla coda (queue-ack) solo dopo aver salvato lo stato
+        n_queue, want_search = GitHubQueue().drain(commands.handle_payload, done_file=str(QUEUE_DONE))
+        if n_queue:
+            print(f"Comandi dalla coda: {n_queue}")
+        if not commands.enabled:
+            print("TELEGRAM_BOT_TOKEN mancante: nessun comando letto, nessuna notifica possibile.")
+        elif not n_queue:  # senza ponte (webhook spento) i messaggi si leggono direttamente da Telegram
+            want_search = commands.poll_once(timeout=0)
+        if want_search:
+            db.set_kv("search_requested", True)  # la fase di ricerca lo ritrova, anche se gira in un altro processo
+        if commands.enabled:
+            try:  # novità del bot (data/novita.txt): quando il testo cambia, un messaggio a tutte le persone collegate
+                line = news.send(db, commands.client)
+                if line:
+                    print(f"novità · {line}")
+            except Exception as exc:  # noqa: BLE001 - mai fermare il giro per un avviso
+                print(f"novità · errore: {exc}")
+        if args.fase == "comandi":
+            return 0
+    want_search = bool(db.get_kv("search_requested"))
+    if want_search:
+        db.set_kv("search_requested", False)
+    from pokebot import cardmarket
+    try:  # prezzi Cardmarket (TCGdex): ogni carta una volta al giorno, prima le mancanti
+        line = cardmarket.refresh(db, index, wanted_first=db.wanted_of_members())
+        if line:
+            print(f"cardmarket · {line}")
+    except Exception as exc:  # noqa: BLE001 - i prezzi non devono mai fermare il bot
+        print(f"cardmarket · errore: {exc}")
+    from pokebot.watch import run_watches
+    for line in run_watches(index, db):  # inseguimenti (/insegui): a ogni sveglia, 5 minuti
+        print(f"inseguimento · {line}")
+    if commands.enabled and not db.get_kv("bot_username"):
+        try:  # serve all'app per il link "aggiungimi" e al canale per il pulsante
+            db.set_kv("bot_username", commands.client.get_me())
+        except Exception as exc:  # noqa: BLE001
+            print(f"getMe: {exc}")
+    if commands.enabled:
+        from pokebot import channel
+        try:
+            for line in plans.check_trials(db, commands.client):  # promemoria e fine della prova
+                print(f"piani · {line}")
+        except Exception as exc:  # noqa: BLE001 - un errore qui non deve fermare la ricerca
+            print(f"piani · errore: {exc}")
+        try:
+            line = channel.post_daily(db, index, commands.client)  # canale degli affari: una volta al giorno
+            if line:
+                print(f"canale · {line}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"canale · errore: {exc}")
+    if not (args.force or want_search or _search_due(db)):
+        from pokebot.search import flush_all_queues
+        flush_all_queues(db, index.by_id)  # chi ha finito pausa o notte riceve quello che si è accumulato
+        print("Ricerca completa non ancora dovuta (vedi /intervallo): solo comandi Telegram e inseguimenti.")
+        db.prune()
+        return 0
+    rep = run_search(index, db)
+    db.set_kv("last_search_ts", time.time())
+    db.prune()
+    print(f"Query: {rep.queries} · annunci: {rep.listings} (nuovi {rep.new_listings}) · match: {rep.matches} · notifiche: {rep.notified}")
+    for k, v in rep.errors.items():
+        print(f"  errore {k}: {v}")
+    return 0
 
 
 def _search_due(db: Database) -> bool:

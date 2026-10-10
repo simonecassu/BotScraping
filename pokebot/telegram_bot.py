@@ -1436,9 +1436,12 @@ class CommandHandler:
             cards, unknown = self.resolve(" ".join(what))
             if not n.isdigit() or not cards or unknown:
                 return Reply("Usa <code>/doppioni imposta 131 2</code>: la carta e quante copie in più ne hai.")
+            k = min(int(n), 99)
             for c in cards:
-                self.db.set_copies(c.id, min(int(n), 99), self.chat)
-            return Reply("")  # dalla Mini App, un tocco alla volta su + e −: nessun messaggio in chat per ogni tocco
+                self.db.set_copies(c.id, k, self.chat)
+            # conferma breve: dalla Mini App arriva un comando per carta (il numero finale, non ogni tocco su + e −)
+            dup = "nessun doppione" if not k else f"{k} doppion{'e' if k == 1 else 'i'}"
+            return Reply(f"📦 {html.escape(cards[0].label)}: ne hai {k + 1} ({dup}).")
         remove = verb.lower() in ("togli", "rimuovi", "meno", "-")
         cards, unknown = self.resolve(rest if remove else a)
         if not cards:
@@ -1802,7 +1805,7 @@ class TelegramCommands:
 
     def _deliver(self, chat_id: str, reply: Reply) -> None:
         try:
-            if reply.text.strip():  # risposta vuota: comando silenzioso (es. i + e − dei doppioni nella Mini App)
+            if reply.text.strip():  # risposta vuota: comando senza nulla da dire
                 self.client.send(chat_id, reply.text, reply.buttons)
             if reply.document:
                 self.client.send_document(chat_id, reply.document[0], reply.document[1])

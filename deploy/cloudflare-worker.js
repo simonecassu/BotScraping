@@ -228,6 +228,17 @@ async function wakeForApp(env) {
   try { await dispatch(env, { event_type: "timer", client_payload: { reason: "apertura della Mini App" } }); } catch {}
 }
 
+// Un tocco nella Mini App: conferma subito in chat che è arrivato, così si vede che il bot lavora (il risultato vero lo
+// scrive il bot mezzo minuto dopo, quando esegue il comando). Al massimo una conferma ogni 2 minuti per persona.
+const appAck = new Map();
+function appAckDue(chatId, nowMs) {
+  for (const [k, t] of appAck) if (nowMs - t > 120e3) appAck.delete(k);
+  if (appAck.has(chatId)) return false;
+  appAck.set(chatId, nowMs);
+  return true;
+}
+const APP_ACK = "📲 Ricevuto dalla Mini App: lo applico tra circa mezzo minuto e ti confermo qui.";
+
 // Chi non è collegato può solo chiedere l'accesso: lo stesso messaggio una volta ogni 30 minuti, e non più di 50
 // richieste di sconosciuti ogni 30 minuti (per istanza del worker), così nessuno può far partire GitHub a raffica.
 // Un "/start CODICE" d'invito è un messaggio diverso dal "/start" di prima: passa.
@@ -286,7 +297,7 @@ async function verifyInitData(env, initData) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     // Mini App: pagina statica
@@ -316,6 +327,10 @@ export default {
       const text = String(m.body.text || "").trim().slice(0, 4000);
       if (!text.startsWith("/")) return Response.json({ ok: false, error: "comando non valido" }, { status: 400 });
       const ok = await sendCommand(env, m.user.id, text, m.user.first_name || m.user.username || "");
+      if (ok && appAckDue(String(m.user.id), Date.now())) {
+        const ack = telegram(env, "sendMessage", { chat_id: m.user.id, text: APP_ACK }).catch(() => {});
+        if (ctx && ctx.waitUntil) ctx.waitUntil(ack); else await ack;  // la risposta all'app non aspetta Telegram
+      }
       return Response.json(ok ? { ok } : { ok, error: "il bot non risponde adesso: riprova tra un minuto" }, { status: ok ? 200 : 502 });
     }
 

@@ -263,15 +263,16 @@ async function sendCmd(text) {
 }
 
 let refreshing = null, loadRetries = 0;
-async function awaitRefresh(what, quiet = false) {
-  // dopo un comando: il bot gira su GitHub (30-60 s); resta in ascolto e aggiorna da solo appena lo stato cambia
+async function awaitRefresh(what, quiet = false, maxMs = 150000) {
+  // dopo un comando: il bot gira su GitHub e pubblica lo stato subito dopo i comandi (15-40 s); si controlla ogni
+  // 5 secondi il primo minuto, poi ogni 7, e si aggiorna da soli appena lo stato cambia
   if (refreshing) return;
-  const before = state ? state.generated_at : 0;
+  const before = state ? state.generated_at : 0, t0 = Date.now();
   const upd = $("#upd");
   refreshing = (async () => {
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; Date.now() - t0 < maxMs; i++) {
       upd.textContent = "⏳ " + (what || "aggiornamento") + "…";
-      await new Promise((r) => setTimeout(r, i < 4 ? 10000 : 7000));
+      await new Promise((r) => setTimeout(r, i < 12 ? 5000 : 7000));
       await load();
       if (state && state.generated_at !== before) { if (!quiet) toast("✅ Aggiornato"); break; }
     }
@@ -1044,7 +1045,7 @@ function showTab(name, push = true) {
 $("#back").onclick = () => { let prev = stack.pop() || "home"; if (prev === "check") prev = "coll"; showTab(prev, false); if (prev === "home") stack.length = 0; };
 if (tg && tg.BackButton) { tg.BackButton.onClick(() => $("#back").click()); new MutationObserver(() => $("#back").classList.contains("hidden") ? tg.BackButton.hide() : tg.BackButton.show()).observe($("#back"), { attributes: true }); }
 // all'apertura: si mostra subito quello che c'è, il bot viene svegliato e appena ripubblica l'App si aggiorna da sola
-load(true).then(loadCatalog).then(() => { renderCollections(); if (state) awaitRefresh("aggiorno", true); });
+load(true).then(loadCatalog).then(() => { renderCollections(); if (state) awaitRefresh("controllo novità", true, 45000); });  // all'apertura il bot rifà un giro: se ha novità arrivano da sole
 setInterval(load, 90000);
 </script>
 </body>

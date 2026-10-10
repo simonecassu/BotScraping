@@ -29,7 +29,9 @@ funziona per gli altri, e nessuno vede le richieste di accesso tranne il proprie
 
 Il pulsante **App** accanto alla chat apre: **Collezioni** (checklist con le carte possedute accese e le mancanti
 al buio, inseguimenti, annunci trovati, prezzi e lista della spesa), **Amici** (codice amico, album in comune),
-**Impostazioni**, **Segnalazioni** e **Analisi IA** (in arrivo). Ogni tocco diventa un comando per il bot.
+**Impostazioni**, **Segnalazioni** e **Analisi IA** (in arrivo). Ogni tocco diventa un comando per il bot: il ponte
+conferma subito in chat («📲 Ricevuto dalla Mini App»), il bot lo esegue e pubblica lo stato prima della ricerca, così
+l'app si aggiorna da sola in circa mezzo minuto e in chat arriva il risultato.
 La casella di ricerca in Collezioni trova anche le carte in tutte le espansioni (indice `deploy/app/cards.json`,
 generato da `scripts/build_card_index.py` a ogni deploy del ponte), raggruppate per espansione.
 Ognuno vede solo i suoi dati.
@@ -91,8 +93,11 @@ GitHub sospende i workflow pianificati dopo 60 giorni senza attività sul reposi
   `bot-queue` e sveglia subito il workflow. Ogni 5 minuti controlla se c'è qualcosa da fare (ricerca completa ogni
   `/intervallo` minuti, inseguimenti, annunci da consegnare, post del canale) e solo allora sveglia GitHub.
   Il cron di GitHub in `bot.yml` è una riserva oraria.
-- Il **bot** (`python cli.py actions`) esegue i comandi in coda, gli inseguimenti, la ricerca e le consegne, poi
-  salva lo stato nel branch `bot-state`.
+- Il **bot** gira in due fasi (`python cli.py actions --fase comandi`, poi `--fase ricerca`): prima i comandi in coda,
+  subito salvati nel branch `bot-state` (`scripts/save_state.sh`, così la Mini App li vede in mezzo minuto), poi
+  inseguimenti, prezzi, ricerca e consegne, e un secondo salvataggio.
+- **Novità in chat**: quando cambia il testo di `data/novita.txt` (poche righe su cosa c'è di nuovo), il bot lo manda
+  una volta a tutte le persone collegate, di giorno; file vuoto, nessun messaggio.
 - Chi non è collegato può solo chiedere l'accesso (`/start`; lo stesso messaggio al massimo una volta ogni 30 minuti).
 - I comandi escono dalla coda solo dopo che lo stato è stato salvato: se un giro si interrompe, il successivo li ritrova
   (un pagamento ripetuto si riconosce e non conta due volte).
@@ -126,7 +131,7 @@ Struttura: `pokebot/cards.py` (collezioni e indice), `matcher.py` (riconosciment
 `scrapers/` (un modulo per marketplace), `search.py` (ciclo di ricerca e consegne), `watch.py` (inseguimenti),
 `telegram_bot.py` (comandi), `plans.py` (prova, Light, abbonamenti), `cardmarket.py` (prezzi TCGdex),
 `channel.py` (canale degli affari), `collections.py` (altre collezioni), `webapp_export.py` + `deploy/app/` (Mini App),
-`vault.py` + `queue.py` (cifratura e coda comandi), `deploy/` (ponte), `.github/workflows/` (bot, ponte, video demo),
+`vault.py` + `queue.py` (cifratura e coda comandi), `news.py` (novità in chat), `deploy/` (ponte), `.github/workflows/` (bot, ponte, video demo),
 `promo/` (volantino stampabile).
 
 I dati della 30th (`data/sets/`) vengono da [pokemon-tcg-data](https://github.com/PokemonTCG/pokemon-tcg-data):

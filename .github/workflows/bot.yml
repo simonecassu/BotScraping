@@ -24,6 +24,12 @@ jobs:
   cerca:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
+      EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # coda comandi (branch bot-queue) e salvataggio dello stato (bot-state)
     steps:
       - uses: actions/checkout@v4
 
@@ -38,8 +44,6 @@ jobs:
       # Se il ripristino fallisce il job si ferma e lo stato salvato resta intatto (mai sovrascritto con uno vuoto).
       - name: Ripristina lo stato precedente
         id: restore
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
           mkdir -p data
           rc=0; git ls-remote --exit-code --heads origin bot-state >/dev/null || rc=$?
@@ -60,36 +64,21 @@ jobs:
           fi
           python cli.py db-hash > /tmp/db-hash-before
 
-      - name: Comandi Telegram + ricerca
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
-          EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # per leggere e svuotare la coda comandi (branch bot-queue)
-          FORCE: ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }}
-        run: python cli.py actions $FORCE
+      # Due fasi, con un salvataggio in mezzo: lo stato esce subito dopo i comandi, prima della ricerca (che può durare
+      # un paio di minuti), così la Mini App vede le modifiche in mezzo minuto. I comandi eseguiti escono dalla coda
+      # solo dopo il salvataggio: se il giro si interrompe, il prossimo li ritrova (scripts/save_state.sh).
+      - name: Comandi Telegram
+        run: python cli.py actions --fase comandi
 
-      # I comandi eseguiti escono dalla coda solo dopo il salvataggio: se il giro si interrompe, il prossimo li ritrova.
+      - name: Salva lo stato (dopo i comandi)
+        if: always() && steps.restore.outcome == 'success'
+        run: bash scripts/save_state.sh
+
+      - name: Inseguimenti + ricerca
+        env:
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }}
+        run: python cli.py actions --fase ricerca $FORCE
+
       - name: Salva lo stato
         if: always() && steps.restore.outcome == 'success'
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          test -f data/pokebot.db || exit 0
-          # si risalva se il database è cambiato oppure se è cambiato il codice (lo stato per la Mini App può avere campi nuovi)
-          if [ "$(python cli.py db-hash)" = "$(cat /tmp/db-hash-before)" ] && [ "$(cat /tmp/code-sha-before 2>/dev/null)" = "$GITHUB_SHA" ]; then
-            echo "nulla è cambiato: stato non risalvato"; python cli.py queue-ack; exit 0
-          fi
-          rm -rf /tmp/state && mkdir -p /tmp/state
-          python cli.py export-json /tmp/state || echo "::warning::stato per la Mini App non scritto"
-          # dopo l'export, così eventuali album creati dall'export restano nel database
-          python cli.py seal data/pokebot.db /tmp/state/pokebot.db.enc
-          echo "$GITHUB_SHA" > /tmp/state/code-sha
-          cd /tmp/state
-          git init -q -b bot-state
-          git -c user.name=pokebot -c user.email=pokebot@users.noreply.github.com add .
-          git -c user.name=pokebot -c user.email=pokebot@users.noreply.github.com commit -q -m "stato"
-          git push -q --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" bot-state
-          cd "$GITHUB_WORKSPACE" && python cli.py queue-ack
+        run: bash scripts/save_state.sh
