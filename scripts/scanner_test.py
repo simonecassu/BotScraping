@@ -85,14 +85,20 @@ def border_truth(im: Image.Image) -> dict:
         a, b = int(0.4 * ppm), int(0.8 * ppm) + 1
         ref = tuple(sum(p[c] for p in prof[a:b]) / (b - a) for c in range(3))
         colors.append(ref)
-        # la cornice è il cambio di colore più forte tra 0,8 e 4,5 mm (il primo cambio può essere la riga di testo in
-        # basso o una linea sottile); se nessun cambio supera 60 non c'è cornice (disegno fino al taglio)
-        best, width = 0.0, None
-        for o in range(max(b, int(0.8 * ppm)), min(len(prof) - 2, int(4.5 * ppm))):
-            jump = sum(abs(prof[o + 2][c] - prof[o - 1][c]) for c in range(3))
-            if jump > best:
-                best, width = jump, (o + 0.5) / ppm
-        out[side] = round(width, 2) if width and best > 60 else None
+        # la cornice è la prima distanza (tra 0,8 e 4,5 mm) in cui almeno il 70% dei punti lungo il lato ha un colore
+        # diverso dal bordo: la riga di testo in basso o un disegno che tocca il bordo cambiano solo una parte dei punti
+        width = None
+        pts = list(range(t0, t1, 2))
+        for o in range(max(b, int(0.8 * ppm)), min(len(prof), int(4.5 * ppm))):
+            changed = 0
+            for tt in pts:
+                p = px[o, tt] if side == "L" else px[W - 1 - o, tt] if side == "R" else px[tt, o] if side == "T" else px[tt, H - 1 - o]
+                if abs(p[0] - ref[0]) + abs(p[1] - ref[1]) + abs(p[2] - ref[2]) > 60:
+                    changed += 1
+            if changed > 0.7 * len(pts):
+                width = o / ppm
+                break
+        out[side] = round(width, 2) if width else None
     r, g, bl = (sum(c[i] for c in colors) / 4 for i in range(3))
     lum = 0.299 * r + 0.587 * g + 0.114 * bl
     chroma = max(r, g, bl) - min(r, g, bl)
@@ -229,9 +235,10 @@ def run_page(photos: list[dict], out: pathlib.Path) -> list[dict]:
             pg.click("#analyze")
             pg.wait_for_selector("#results:not([hidden])", timeout=60000)
             pg.wait_for_timeout(100)
+            auto = pg.evaluate("window.__fn && window.__fn.autoQuad.last ? JSON.stringify(window.__fn.autoQuad.last) : ''")
             res = pg.evaluate("""(() => { const r = window.__cs.front.res; const side = k => r.bw[k] ? { w: +(r.bw[k].w / 10).toFixed(2), jump: Math.round(r.bw[k].jump), n: r.bw[k].n ?? null } : null;
               return { L: side('L'), R: side('R'), T: side('T'), B: side('B'), unsure: !!r.unsure, cent: r.cent ? r.cent.g : null, geo: r.geo ? { rot: +r.geo.rot.toFixed(2), dev: +Math.max(r.geo.dev, r.geo.bend).toFixed(2) } : null }; })()""")
-            results.append({**ph, "quad": quad, "title": title, "res": res, "secs": round(time.time() - t0, 1)})
+            results.append({**ph, "quad": quad, "title": title, "res": res, "auto": auto, "secs": round(time.time() - t0, 1)})
         b.close()
     if errs:
         print("errori JS:", errs[:5])
@@ -297,6 +304,8 @@ def main() -> int:
         if errs:
             note.append(f"err max {max(errs):.2f} mm")
         print(f"{r['id']:<14} {r['rarity'][:24]:<24} {t['kind']:<22} {r['variant']:<6} {qe:>9.1f}  {truth_s:<26} {found:<40} {' · '.join(note)}")
+        if qe > 5:  # angoli sbagliati: cosa aveva trovato ogni passo (per capire dove sbaglia)
+            print(f"{'':<14} angoli veri {[tuple(round(v) for v in c) for c in r['corners']]} · trovati {[tuple(c) for c in r['quad']]}\n{'':<14} passi: {r.get('auto', '')[:300]}")
         stats.setdefault(t["kind"], []).append(("ok", qe, errs, sum(1 for k in 'LRTB' if f[k] is None and t[k] is not None)))
     print("\nriepilogo per tipo di bordo:")
     for kind, rows in stats.items():

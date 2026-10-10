@@ -656,8 +656,9 @@ function refineQuad(canvas, quad, maxShift, radius){
 function autoQuad(canvas){
   const hq = findQuadHough(canvas); let q = hq ? hq.quad : detectQuad(canvas);
   if (!q || q.length !== 4 || q.some(p => !p || !isFinite(p[0]) || !isFinite(p[1]))) return { quad:null, conf:0 };
-  q = refineQuad(canvas, q, 220, 0.03);
+  q = refineQuad(canvas, q, 220, 0.03); const refined = q.map(p => p.map(Math.round));
   const grown = growOutward(canvas, q); if (grown) q = refineQuad(canvas, grown, 40, 0.012);  // era la cornice stampata: via al taglio vero
+  autoQuad.last = { hough: hq ? hq.quad.map(p => p.map(Math.round)) : null, refined, grown: !!grown, grow: growOutward.last };  // per il banco di prova
   return { quad:q, conf: hq ? hq.sup : 0.3, stats: refineQuad.stats, grown: !!grown }; }
 
 function growOutward(canvas, quad){
@@ -801,7 +802,7 @@ function profileJump(d, side, t0, t1){
   for (let o = K + 4; o < MAXO - K; o++){ let s = 0; for (let ch = 0; ch < 3; ch++){ let a = 0, b = 0; for (let j = 1; j <= K; j++){ a += m[o + j][ch]; b += m[o - j][ch]; } s += Math.abs(a - b) / K; } D[o] = s; }
   const lo = 8, hi = 45; let M = 0; for (let i = lo; i < hi; i++) M = Math.max(M, D[i]);  // il bordo sta tra 0,8 e 4,5 mm
   if (M < 40) return null;
-  let p = -1; for (let i = lo; i < hi; i++){ if (D[i] >= 0.4 * M && D[i] >= D[i-1] && D[i] >= D[i+1]){ p = i; break; } }
+  let p = -1; for (let i = lo; i < hi; i++){ if (D[i] >= 0.5 * M && D[i] >= D[i-1] && D[i] >= D[i+1]){ p = i; break; } }
   if (p < 0) return null;
   const den = D[p-1] + D[p+1] - 2 * D[p]; const sub = p + (den !== 0 ? 0.5 * (D[p-1] - D[p+1]) / den : 0);
   return { w: sub + 0.5, jump: D[p], dom: D[p] / M }; }
