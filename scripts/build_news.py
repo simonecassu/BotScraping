@@ -417,7 +417,8 @@ def tournaments(prev: dict) -> tuple[dict | None, dict]:
         log("tornei: nessun grande torneo trovato nell'elenco")
         return None, prev.get("prices") or {}
     old = prev.get("decks") or {}
-    if old.get("id") == t["id"] and old.get("top") and all(d.get("list") or not d.get("list_url") for d in old["top"][:8]):
+    if old.get("id") == t["id"] and old.get("top") and all(d.get("list") or not d.get("list_url") for d in old["top"][:8]) \
+            and not any(d.get("a") in (None, "", "–") for d in old["top"][:8]) and (old.get("meta") or old.get("top")[0].get("price") is not None):
         log(f"tornei: {t['name']} già letto")
         return old, prev.get("prices") or {}
     top = limitless_standings(t)
