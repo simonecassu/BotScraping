@@ -233,18 +233,26 @@ textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
 <div class="toast" id="toast"></div>
 
 <script>
-let tg = window.Telegram && window.Telegram.WebApp;
+let tg = window.Telegram && window.Telegram.WebApp, tgPending = false;
 if (tg) { tg.ready(); tg.expand(); }
-else {  // lo script servito dal ponte non è arrivato: si prova quello di telegram.org (i dati firmati si leggono comunque dall'indirizzo)
-  const s = document.createElement("script"); s.src = "https://telegram.org/js/telegram-web-app.js";
-  s.onload = () => { tg = window.Telegram && window.Telegram.WebApp; if (tg) { tg.ready(); tg.expand(); } };
-  document.head.appendChild(s);
+else {  // lo script servito dal ponte non è arrivato (rete lenta, richiesta fallita): si riprova quello del ponte, poi quello di
+  // telegram.org; appena uno arriva, se la pagina è ancora senza dati, li carica da sola (senza «Riprova»)
+  tgPending = true;
+  const urls = ["/app/telegram-web-app.js?r=" + Date.now(), "https://telegram.org/js/telegram-web-app.js"];
+  const tryNext = () => { const u = urls.shift(); if (!u) { tgPending = false; return; }
+    const s = document.createElement("script"); s.src = u;
+    s.onload = () => { tgPending = false; tg = window.Telegram && window.Telegram.WebApp; if (tg) { try { tg.ready(); tg.expand(); } catch (e) {} } if (window.__tgArrived) window.__tgArrived(); };
+    s.onerror = tryNext; document.head.appendChild(s); };
+  tryNext();
 }
-// i dati firmati da Telegram: dallo script ufficiale o, se quello non li ha visti, direttamente dall'indirizzo
-// (#tgWebAppData=…): l'app funziona anche se lo script manca o se Telegram consegna l'indirizzo un attimo dopo
+// i dati firmati da Telegram: dallo script ufficiale, dall'indirizzo (#tgWebAppData=…) o da quelli che lo script ufficiale
+// salva nella sessione (dopo «‹ Pescacarte» da un'altra pagina l'indirizzo non li ha più): l'app funziona anche se lo
+// script manca o se Telegram consegna l'indirizzo un attimo dopo
 function initData() {
   if (tg && tg.initData) return tg.initData;
-  try { return new URLSearchParams(location.hash.slice(1)).get("tgWebAppData") || ""; } catch (e) { return ""; }
+  try { const d = new URLSearchParams(location.hash.slice(1)).get("tgWebAppData"); if (d) return d; } catch (e) {}
+  try { const p = JSON.parse(sessionStorage.getItem("__telegram__initParams") || "{}"); if (p && p.tgWebAppData) return p.tgWebAppData; } catch (e) {}
+  return "";
 }
 const inTelegram = () => !!window.Telegram || /Telegram/i.test(navigator.userAgent);
 const $ = (s, el = document) => el.querySelector(s);
@@ -1095,11 +1103,12 @@ if (tg && tg.BackButton) { tg.BackButton.onClick(() => $("#back").click()); new 
 async function start() {
   // dentro Telegram i dati firmati possono arrivare un attimo dopo la pagina: si aspetta fino a 8 secondi prima di dirlo
   const t0 = Date.now();
-  while (!initData() && inTelegram() && Date.now() - t0 < 8000) await new Promise((r) => setTimeout(r, 250));
+  while (!initData() && (inTelegram() || tgPending) && Date.now() - t0 < 8000) await new Promise((r) => setTimeout(r, 250));
   await load(true); await loadCatalog(); renderCollections();
   if (state) awaitRefresh("aggiorno", true, 45000);  // all'apertura il bot rifà un giro: se c'è qualcosa di nuovo arriva da solo
 }
 window.addEventListener("hashchange", () => { if (!state && initData()) load(true).then(renderCollections); });
+window.__tgArrived = () => { if (!state && initData()) load(true).then(renderCollections); };  // lo script di Telegram è arrivato in ritardo
 start();
 setInterval(load, 90000);
 </script>
