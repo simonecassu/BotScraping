@@ -288,3 +288,43 @@ def test_user_manages_own_subscription(index, monkeypatch):
     r = tc.handler.handle("/abbonati", "2")
     assert "per sempre" in r.text and not r.buttons
     assert tc.handler.handle("/abbonati stop", "2").buttons is None
+
+
+def test_refund_recovers_charge_id_from_star_transactions(index, monkeypatch):
+    """Le versioni vecchie salvavano l'id del pagamento tagliato: Telegram risponde CHARGE_ID_EMPTY. Il bot lo ritrova
+    tra le transazioni Stars (stessa persona, stesso importo, data più vicina), riprova e corregge il record."""
+    db, client, tc = setup(index, monkeypatch)
+    db.add_chat_id("2")
+    full = "stars_" + "a" * 90
+    calls = []
+    client.refund_stars = lambda uid, ch: (calls.append(("refund", ch)) or ((True, "") if ch == full else (False, "Bad Request: CHARGE_ID_EMPTY")))
+    client.cancel_subscription = lambda uid, ch, canceled=True: (calls.append(("cancel", ch)) or ((True, "") if ch == full else (False, "Bad Request: CHARGE_ID_EMPTY")))
+    client.star_transactions = lambda limit=100: [
+        {"id": "stars_other", "amount": 250, "date": time.time(), "source": {"type": "user", "user": {"id": 999}}},
+        {"id": full, "amount": 250, "date": time.time() - 60, "source": {"type": "user", "user": {"id": 2}}},
+        {"id": "stars_old", "amount": 250, "date": time.time() - 40 * 86400, "source": {"type": "user", "user": {"id": 2}}},
+        {"id": "stars_refund", "amount": 250, "date": time.time(), "receiver": {"type": "user", "user": {"id": 2}}}]
+    tc.handle_payload({"chat_id": 2, "text": "/pagamento", "payment": {
+        "currency": "XTR", "total_amount": 250, "invoice_payload": "pro:2", "telegram_payment_charge_id": full,
+        "subscription_expiration_date": time.time() + 86400 * 30}})
+    p = plans.get(db, "2")
+    assert p["payments"][-1]["charge"] == full  # l'id intero, non più tagliato
+    p["payments"][-1]["charge"] = full[:80]  # come lo avevano salvato le versioni vecchie
+    db.set_kv("plan:2", p)
+    r = tc.handler.handle("/rimborsa 2 annulla", "1")
+    assert calls == [("cancel", full[:80]), ("cancel", full)] and "Rinnovo fermato" in r.text
+    assert plans.get(db, "2")["payments"][-1]["charge"] == full  # record corretto
+    r = tc.handler.handle("/rimborsa 2", "1")
+    assert calls[-1] == ("refund", full) and "Rimborsate" in r.text and plans.tier(db, "2") == "light"
+
+
+def test_refund_reports_unrecoverable_charge(index, monkeypatch):
+    db, client, tc = setup(index, monkeypatch)
+    db.add_chat_id("2")
+    client.refund_stars = lambda uid, ch: (False, "Bad Request: CHARGE_ID_EMPTY")
+    client.star_transactions = lambda limit=100: []
+    tc.handle_payload({"chat_id": 2, "text": "/pagamento", "payment": {
+        "currency": "XTR", "total_amount": 250, "invoice_payload": "pro:2", "telegram_payment_charge_id": "x" * 80,
+        "subscription_expiration_date": time.time() + 86400 * 30}})
+    r = tc.handler.handle("/rimborsa 2", "1")
+    assert "non riuscito" in r.text and "CHARGE_ID_EMPTY" in r.text and plans.tier(db, "2") == "pro"

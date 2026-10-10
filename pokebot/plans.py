@@ -107,7 +107,8 @@ def record_payment(db: Database, chat: str, payment: dict, now: float | None = N
     None se quel pagamento era già registrato (lo stesso comando arrivato due volte)."""
     now = now or time.time()
     p = get(db, chat)
-    charge = str(payment.get("telegram_payment_charge_id") or "")[:80]
+    # l'id intero: serve a Telegram per rimborsi e rinnovo (tagliato, non lo riconosce: «CHARGE_ID_EMPTY»)
+    charge = str(payment.get("telegram_payment_charge_id") or "")[:400]
     if charge and any(x.get("charge") == charge for x in (p.get("payments") or [])):
         return None
     until = float(payment.get("subscription_expiration_date") or 0) or max(now, float(p.get("pro_until") or 0)) + SUB_PERIOD_S
@@ -117,7 +118,7 @@ def record_payment(db: Database, chat: str, payment: dict, now: float | None = N
     p["renew_off"] = False  # un pagamento (anche un rinnovo) vuol dire che il rinnovo è attivo
     pays = list(p.get("payments") or [])
     pays.append({"ts": now, "stars": int(payment.get("total_amount") or 0),
-                 "charge": str(payment.get("telegram_payment_charge_id") or "")[:80],
+                 "charge": charge,
                  "recurring": bool(payment.get("is_recurring")), "first": bool(payment.get("is_first_recurring"))})
     p["payments"] = pays[-24:]
     save(db, chat, p)

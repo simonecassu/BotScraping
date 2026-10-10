@@ -183,6 +183,13 @@ class TelegramClient:
         data = resp.json()
         return bool(data.get("ok")), str(data.get("description", ""))
 
+    def star_transactions(self, limit: int = 100) -> list[dict]:
+        """Le ultime transazioni in Stars del bot (pagamenti ricevuti e rimborsi): l'id di un pagamento ricevuto è il
+        telegram_payment_charge_id, utile se quello salvato non viene riconosciuto."""
+        resp = requests.get(f"{self.base}/getStarTransactions", params={"limit": limit}, timeout=config.HTTP_TIMEOUT)
+        data = resp.json()
+        return list((data.get("result") or {}).get("transactions") or []) if data.get("ok") else []
+
     def refund_stars(self, user_id: str, charge_id: str) -> tuple[bool, str]:
         """Restituisce per intero le Stars di un pagamento (Telegram non fa rimborsi parziali) e ferma il rinnovo."""
         resp = requests.post(f"{self.base}/refundStarPayment", json={"user_id": int(user_id), "telegram_payment_charge_id": charge_id},
@@ -774,10 +781,11 @@ class CommandHandler:
             return Reply("Quell'ID non è tra le persone collegate (vedi /utenti).")
         self.db.ban(target)  # non rientra da solo (un rinnovo dell'abbonamento o un /start)
         note = ""
-        pays = [x for x in (plans.get(self.db, target).get("payments") or []) if x.get("charge") and not x.get("refunded")]
+        p = plans.get(self.db, target)
+        pays = [x for x in (p.get("payments") or []) if x.get("charge") and not x.get("refunded")]
         if pays:
             try:
-                ok, _ = TelegramClient().cancel_subscription(target, pays[-1]["charge"])
+                ok, _ = self._with_charge(target, p, pays[-1], lambda ch: TelegramClient().cancel_subscription(target, ch))
             except (requests.RequestException, ValueError):
                 ok = False
             note = ("\nAbbonamento: rinnovo fermato." if ok else "\n⚠️ Non sono riuscito a fermare il rinnovo dell'abbonamento: "
@@ -886,6 +894,33 @@ class CommandHandler:
             return Reply(text + "\n\n⚠️ Il pagamento non è disponibile in questo momento, riprova tra poco.")
         return Reply(text, buttons=[[(f"⭐ Abbonati · {plans.PRICE_STARS} Stars", link)]])
 
+    def _lookup_charge(self, target: str, last: dict) -> str:
+        """Ritrova l'id di un pagamento tra le transazioni Stars del bot: stessa persona, stesso importo, data più vicina."""
+        try:
+            txs = TelegramClient().star_transactions()
+        except (requests.RequestException, ValueError):
+            return ""
+        mine = [t for t in txs if not t.get("receiver") and str(((t.get("source") or {}).get("user") or {}).get("id")) == str(target)
+                and int(t.get("amount") or 0) == int(last.get("stars") or 0) and t.get("id")]
+        if not mine:
+            return ""
+        return str(min(mine, key=lambda t: abs(float(t.get("date") or 0) - float(last.get("ts") or 0)))["id"])
+
+    def _with_charge(self, target: str, p: dict, last: dict, call) -> tuple[bool, str]:
+        """Esegue call(charge_id) con l'id salvato; se Telegram non lo riconosce (es. salvato tagliato dalle versioni
+        vecchie), lo ritrova tra le transazioni del bot, riprova e corregge il record."""
+        ok, err = call(last["charge"])
+        if ok or "CHARGE_ID" not in err.upper():
+            return ok, err
+        fixed = self._lookup_charge(target, last)
+        if not fixed or fixed == last["charge"]:
+            return ok, err
+        ok, err = call(fixed)
+        if ok:
+            last["charge"] = fixed
+            plans.save(self.db, target, p)
+        return ok, err
+
     def _manage_subscription(self, what: str, p: dict, last: dict, head: str) -> Reply:
         """L'abbonato gestisce il suo abbonamento in Stars (anche dalla Mini App): rinnovo e richiesta di rimborso."""
         until = plans._date(p.get("pro_until"))
@@ -895,7 +930,7 @@ class CommandHandler:
         if what in ("stop", "ferma", "disdici", "annulla", "riattiva", "rinnova"):
             resume = what in ("riattiva", "rinnova")
             try:
-                ok, err = TelegramClient().cancel_subscription(self.chat, last["charge"], canceled=not resume)
+                ok, err = self._with_charge(self.chat, p, last, lambda ch: TelegramClient().cancel_subscription(self.chat, ch, canceled=not resume))
             except (requests.RequestException, ValueError) as exc:
                 ok, err = False, str(exc)
             if not ok:
@@ -968,7 +1003,7 @@ class CommandHandler:
         used_txt = f"{used:.0f} giorn{'o' if round(used) == 1 else 'i'}" if used >= 1 else "meno di un giorno"
         if mode in ("annulla", "stop", "disdici"):
             try:
-                ok, err = TelegramClient().cancel_subscription(target, last["charge"])
+                ok, err = self._with_charge(target, p, last, lambda ch: TelegramClient().cancel_subscription(target, ch))
             except (requests.RequestException, ValueError) as exc:
                 ok, err = False, str(exc)
             if not ok:
@@ -984,7 +1019,7 @@ class CommandHandler:
                          f"• <code>/rimborsa {target} annulla</code> – ferma il rinnovo, resta completo fino al {plans._date(p.get('pro_until'))}\n"
                          f"• <code>/rimborsa {target} forza</code> – rimborsa comunque tutte le {last.get('stars', 0)} ⭐")
         try:
-            ok, err = TelegramClient().refund_stars(target, last["charge"])
+            ok, err = self._with_charge(target, p, last, lambda ch: TelegramClient().refund_stars(target, ch))
         except (requests.RequestException, ValueError) as exc:
             ok, err = False, str(exc)
         if not ok:
