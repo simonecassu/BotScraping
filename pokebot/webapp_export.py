@@ -203,7 +203,6 @@ def _plan_info(db: Database, chat_id: str) -> dict:
             "max_collections": None if full else plans.LIGHT_MAX_COLLECTIONS,
             # abbonamento pagato: la Mini App mostra i pulsanti per fermare/riattivare il rinnovo e chiedere il rimborso
             "paid": bool(pays), "lifetime": bool(p.get("lifetime")), "renew_off": bool(p.get("renew_off")),
-            "until": float(p.get("pro_until") or 0),
             "refundable": bool(pays) and (time.time() - last_ts) / 86400 <= plans.REFUND_DAYS}
 
 

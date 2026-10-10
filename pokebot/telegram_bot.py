@@ -880,7 +880,7 @@ class CommandHandler:
         p = plans.get(self.db, self.chat)
         pays = [x for x in (p.get("payments") or []) if x.get("charge") and not x.get("refunded")]
         if t == "pro" and pays and not p.get("lifetime"):
-            return self._manage_subscription(args.split()[0].lower() if args.split() else "", p, pays[-1], head)
+            return self._manage_subscription((args.split() or [""])[0].lower(), p, pays[-1], head)
         if t == "pro":
             return Reply(head)  # per sempre, o acceso dal proprietario: nulla da gestire
         link = plans.invoice_link(self.db, TelegramClient(), self.chat)

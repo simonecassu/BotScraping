@@ -1085,7 +1085,7 @@ async function start() {
   const t0 = Date.now();
   while (!initData() && inTelegram() && Date.now() - t0 < 8000) await new Promise((r) => setTimeout(r, 250));
   await load(true); await loadCatalog(); renderCollections();
-  if (state) awaitRefresh("controllo novità", true, 45000);  // all'apertura il bot rifà un giro: se ha novità arrivano da sole
+  if (state) awaitRefresh("aggiorno", true, 45000);  // all'apertura il bot rifà un giro: se c'è qualcosa di nuovo arriva da solo
 }
 window.addEventListener("hashchange", () => { if (!state && initData()) load(true).then(renderCollections); });
 start();
