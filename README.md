@@ -54,7 +54,7 @@ Ognuno vede solo i suoi dati.
 top 8 dell'ultimo grande torneo con liste, prezzo Cardmarket e carte mancanti per persona (limitlesstcg.com), calendario
 degli eventi (rk9.gg; la classifica in diretta non è ancora disponibile). Gli annunci di pokemon.com/it non si leggono: il sito
 blocca i bot (la scheda resta nascosta). Li scrive il workflow
-**Novità** (`scripts/build_news.py`, ogni 15 minuti: aggiornamento completo una volta l'ora, ogni giro durante un torneo)
+**Novità** (`scripts/build_news.py`, ogni quarto d'ora su sveglia del ponte, il cron di GitHub è solo una riserva oraria: aggiornamento completo una volta l'ora, ogni giro durante un torneo)
 nel branch `bot-news`, che il ponte serve con una cache di 5 minuti; quando c'è qualcosa da annunciare sveglia il bot.
 Avvisi in chat per categoria (`/novita tornei si`; solo Completo e prova, di default solo le uscite) e `/insegui mazzo 1`
 per inseguire le carte che mancano di un mazzo della top 8. I lettori delle pagine HTML sono tolleranti e, se una fonte non

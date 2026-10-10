@@ -435,10 +435,14 @@ export default {
     return new Response("ok");
   },
 
-  // Timer (vedi [triggers] in wrangler.toml): sveglia il bot su GitHub quando c'è qualcosa da fare.
+  // Timer (vedi [triggers] in wrangler.toml): sveglia il bot su GitHub quando c'è qualcosa da fare e, ogni quarto
+  // d'ora, fa aggiornare le Novità (novita.yml): il cron di GitHub Actions da solo parte in ritardo o salta.
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
       try { await ensureWebhook(env); } catch {}
+      if (new Date(event.scheduledTime).getUTCMinutes() % 15 === 0) {
+        try { await dispatch(env, { event_type: "novita-aggiorna" }); } catch {}
+      }
       const reason = timerReason(await readState(env), event.scheduledTime / 1000);
       if (reason) await dispatch(env, { event_type: "timer", client_payload: { reason } });
     })());

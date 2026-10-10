@@ -1,11 +1,14 @@
-# Novità per la Mini App: ogni 15 minuti decide se aggiornare (completo una volta l'ora, ogni giro solo con un torneo
+# Novità per la Mini App: ogni quarto d'ora (lo sveglia il timer del ponte Cloudflare, perché il cron di GitHub parte in
+# ritardo o salta: qui resta solo come riserva oraria) decide se aggiornare (completo una volta l'ora, ogni giro solo con un torneo
 # in corso), scrive news.json e le immagini nel branch bot-news (lo serve il ponte su /app/news.json) e, se c'è
 # qualcosa da annunciare, sveglia il bot che manda gli avvisi in chat. Vedi scripts/build_news.py.
 name: Novità
 
 on:
+  repository_dispatch:
+    types: [novita-aggiorna]
   schedule:
-    - cron: "7,22,37,52 * * * *"
+    - cron: "52 * * * *"
   workflow_dispatch:
     inputs:
       completo:
