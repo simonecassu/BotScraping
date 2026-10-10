@@ -103,12 +103,13 @@ def build_state(index: CardIndex, db: Database, max_found: int = 300, chat_id: s
         "shopping": _shopping(groups, wanted, shared),
         "copies": db.copies(chat_id),
         "reports": _reports(db, chat_id),
-        "admin": _admin(db) if db.owner_chat_id() == chat_id else None,
+        "admin": _admin(db, index) if db.owner_chat_id() == chat_id else None,
     }
 
 
-def _admin(db: Database) -> dict:
-    """Solo per il proprietario: lista d'attesa e persone collegate con il loro piano (per il pannello Utenti)."""
+def _admin(db: Database, index: CardIndex) -> dict:
+    """Solo per il proprietario: lista d'attesa e persone collegate con il loro piano e le loro collezioni
+    (per il pannello Utenti)."""
     now = time.time()
     users = []
     for c in db.chat_ids():
@@ -117,10 +118,25 @@ def _admin(db: Database) -> dict:
         until = p.get("pro_until") if t == "pro" else p.get("trial_until") if t == "trial" else None
         users.append({"id": c, "name": db.user_name(c), "tier": t, "label": plans.describe(db, c, now),
                       "lifetime": bool(p.get("lifetime")), "until": float(until) if until else None,
-                      "paid": bool(p.get("payments")), "banned": db.is_banned(c)})
+                      "paid": bool(p.get("payments")), "banned": db.is_banned(c),
+                      "collections": _user_collections(db, index, c)})
     return {"waitlist": [{"id": c, "name": w.get("name") or "", "source": w.get("source") or "", "ts": w.get("ts")}
                          for c, w in sorted(db.waitlist().items(), key=lambda kv: kv[1].get("ts") or 0)],
             "users": users, "trial_days": plans.TRIAL_DAYS, "refund_days": plans.REFUND_DAYS}
+
+
+def _user_collections(db: Database, index: CardIndex, chat_id: str) -> list[dict]:
+    """Le collezioni di una persona in breve: carte, numeri delle mancanti, ricerca accesa o spenta."""
+    active = set(db.active_sets(chat_id))
+    out = []
+    for sid, album in db.albums_of(chat_id).items():
+        cs = index.get_set(sid)
+        if not cs:
+            continue
+        missing = db.wanted_ids([album])
+        out.append({"id": sid, "name": cs.name_it or cs.name, "total": len(cs.cards), "active": sid in active,
+                    "missing": [c.number for c in cs.cards if c.id in missing]})
+    return out
 
 
 def _reports(db: Database, chat_id: str) -> dict:

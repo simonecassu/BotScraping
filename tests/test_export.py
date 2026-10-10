@@ -76,3 +76,12 @@ def test_admin_panel_only_for_owner(index, monkeypatch):
     assert user["admin"] is None
     assert [w["id"] for w in owner["admin"]["waitlist"]] == ["9"] and [u["id"] for u in owner["admin"]["users"]] == ["1", "2"]
     assert owner["admin"]["users"][1]["tier"] in ("light", "trial", "pro") and owner["admin"]["trial_days"] == 5
+
+
+def test_owner_sees_users_collections(index, monkeypatch):
+    from pokebot import collections as coll
+    db = _two_people(monkeypatch)
+    db.set_wanted_bulk(["me55-131"], True, coll.album_for(db, "2", "me55"))
+    db.set_wanted_bulk([c.id for c in index.get_set("me55").cards if c.id != "me55-131"], False, coll.album_for(db, "2", "me55"))
+    cols = {c["id"]: c for c in build_state(index, db, chat_id="1")["admin"]["users"][1]["collections"]}
+    assert cols["me55"]["missing"] == ["131"] and cols["me55"]["total"] == 161 and cols["me55"]["active"]

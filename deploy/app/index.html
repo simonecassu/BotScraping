@@ -98,6 +98,7 @@ textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
 .usr .top{display:flex;align-items:center;gap:10px}.usr .top div{flex:1;min-width:0}.usr b{font-weight:900}.usr small{display:block;color:var(--hint);font-weight:700;font-size:12px}
 .usr .act{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.usr .act .btn{padding:7px 11px;font-size:12px}.btn.ghost{background:transparent;color:var(--hint);box-shadow:none;border:2px solid var(--line)}
 .usr.banned{opacity:.55}
+.ucoll{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}.ucoll .coll{margin-bottom:6px;padding:8px 10px}.ucoll .grid{margin:6px 0 10px}.ucoll .c{cursor:default}
 .warn{background:#3a2a0a;border:2px solid var(--warn);color:#ffd9a0;border-radius:12px;padding:9px 12px;font-size:13px;font-weight:700;margin:8px 0}
 </style>
 </head>
@@ -411,12 +412,44 @@ function renderAdmin() {
       ${me ? "" : `<div class="act">${plan("prova " + a.trial_days, "🎁 Prova " + a.trial_days + "g")}${plan("pro 30", "⭐ Pro 30g")}${plan("sempre", "💎 Pro per sempre")}${plan("light", "🌱 Light")}</div>
       <div class="act">${u.paid ? `<button class="btn ghost" data-cmd="/rimborsa ${esc(u.id)}" data-confirm="Rimborsare l'ultimo pagamento di ${esc(u.name)}? (intero, solo entro ${a.refund_days} giorni)">💸 Rimborsa</button>
       <button class="btn ghost" data-cmd="/rimborsa ${esc(u.id)} annulla" data-confirm="Fermare il rinnovo di ${esc(u.name)}?">⏹ Ferma rinnovo</button>` : ""}
-      <button class="btn ghost" data-cmd="/espelli ${esc(u.id)}" data-confirm="Espellere ${esc(u.name)}? Perde l'accesso e non può rientrare da solo.">⛔ Espelli</button></div>`}</div>`;
+      <button class="btn ghost" data-cmd="/espelli ${esc(u.id)}" data-confirm="Espellere ${esc(u.name)}? Perde l'accesso e non può rientrare da solo.">⛔ Espelli</button>
+      <button class="btn sec" data-ucoll="${esc(u.id)}">📚 Collezioni</button></div><div class="ucoll hidden" id="ucoll-${esc(u.id)}"></div>`}</div>`;
   }).join("");
+  $("#adm-users").querySelectorAll("[data-ucoll]").forEach((b) => b.onclick = () => {
+    const box = $("#ucoll-" + b.dataset.ucoll), open = box.classList.toggle("hidden");
+    if (!open) renderUserColl(b.dataset.ucoll);
+  });
   document.querySelectorAll("#tab-admin [data-cmd]").forEach((b) => b.onclick = async () => {
     if (b.dataset.confirm && !confirm(b.dataset.confirm)) return;
     if (await sendCmd(b.dataset.cmd)) { toast(b.dataset.ok || "Inviato: guarda la chat"); b.closest(".usr") && (b.closest(".usr").style.opacity = .5); }
   });
+}
+
+/* ---------- le collezioni di un utente, in sola lettura (solo proprietario) ---------- */
+const openUserColl = {};  // utente → collezione aperta
+function cardsOfSet(sid) {  // tutte le carte di una collezione: quelle di casa dallo stato, le altre dall'indice
+  if (HOME_SETS.includes(sid)) return cards.filter((c) => c.set === sid);
+  const pat = imgPattern[sid] || `https://images.pokemontcg.io/${sid}/{n}.png`;
+  return ((cardIndex || {})[sid] || []).map(([number, name, , url]) => ({ number, name, image: url || pat.replace("{n}", number) }));
+}
+function renderUserColl(uid) {
+  const box = $("#ucoll-" + uid), u = ((state.admin || {}).users || []).find((x) => x.id === uid);
+  if (!box || !u) return;
+  const cols = u.collections || [];
+  if (!cols.length) { box.innerHTML = '<p class="hint">Nessuna collezione ancora.</p>'; return; }
+  const cur = openUserColl[uid];
+  box.innerHTML = cols.map((c) => `<div class="coll" data-sid="${esc(c.id)}"><div style="flex:1;min-width:0"><b>${esc(setName(c.id, c.name))}</b>
+      <small>${c.total - c.missing.length}/${c.total} possedute · ${c.missing.length} mancanti</small></div>
+      <span class="st ${c.active ? "on" : ""}">${c.active ? "🔎 attiva" : "💤 spenta"}</span></div>` +
+    (cur === c.id ? renderUserGrid(c) : "")).join("");
+  box.querySelectorAll(".coll[data-sid]").forEach((el) => el.onclick = () => { openUserColl[uid] = openUserColl[uid] === el.dataset.sid ? null : el.dataset.sid; renderUserColl(uid); });
+}
+function renderUserGrid(c) {
+  if (!HOME_SETS.includes(c.id) && !cardIndex) { loadCardIndex().then(() => renderAll()); return '<p class="hint">Carico le carte…</p>'; }
+  const miss = new Set(c.missing), list = cardsOfSet(c.id);
+  if (!list.length) return '<p class="hint">Carte non disponibili per questa collezione.</p>';
+  return `<div class="grid">` + list.map((k) => `<div class="c ${miss.has(k.number) ? "miss" : ""}">${miss.has(k.number) ? '<span class="tag">MANCA</span>' : ""}
+    <img loading="lazy" src="${esc(k.image || "")}" alt=""><div class="n">#${esc(k.number)}</div><div class="nm">${esc(k.name)}</div></div>`).join("") + "</div>";
 }
 
 /* ---------- Segnalazioni ---------- */
