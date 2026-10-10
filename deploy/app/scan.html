@@ -49,12 +49,15 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .note{color:var(--muted);font-size:.85rem;margin:8px 0 0}
 /* fotocamera */
 #cam{position:fixed;inset:0;background:#000;z-index:10;display:flex;flex-direction:column}
-#cam video{flex:1;width:100%;object-fit:cover;background:#000}
+#cam video{flex:1;min-height:0;width:100%;object-fit:cover;background:#000}
 #cam .overlay{position:absolute;inset:0;pointer-events:none}
 #cam .guide{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(72vw,52vh*0.716);aspect-ratio:63/88;border:2px solid rgba(255,255,255,.85);border-radius:3% / 2.2%;box-shadow:0 0 0 2000px rgba(0,0,0,.25)}
 #cam .hud{position:absolute;top:calc(env(safe-area-inset-top,0px) + 12px);left:12px;right:12px;display:flex;justify-content:space-between;color:#fff;font-family:var(--font-mono);font-size:.78rem}
 #cam .hud span{background:rgba(0,0,0,.5);padding:4px 8px;border-radius:6px}
-#cam .bar{padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 16px);display:flex;align-items:center;justify-content:space-between;gap:12px;background:#000}
+#cam .hud span.bad{background:rgba(227,53,13,.8)}
+#cam .hud span.ok{background:rgba(43,201,124,.85);color:#07200f;font-weight:700}
+#cam .guide.ok{border-color:var(--ok);border-width:3px}
+#cam .bar{flex:none;padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 16px);display:flex;align-items:center;justify-content:space-between;gap:12px;background:#000}
 #cam .bar button{background:#1b1b1b;color:#fff;border-color:#333}
 #cam .shutter{width:68px;height:68px;border-radius:50%;background:#fff !important;border:4px solid #888 !important;padding:0}
 #cam .shutter.ready{border-color:var(--ok) !important}
@@ -139,6 +142,7 @@ summary{cursor:pointer;color:var(--ink)}
     <p class="note">Fotografa <b>una carta alla volta</b>, meglio senza bustina, su uno sfondo uniforme di colore <b>opposto al bordo</b>: scuro (panno o cartoncino nero) per i bordi bianchi o argento, chiaro per i bordi neri; con i bordi gialli va bene tutto. Con “Carica” puoi selezionare <b>più foto della stessa faccia</b> (10–20 scatti, muovendo un po’ il telefono): la carta viene trovata in ognuna e la centratura è la mediana di tutte, così le foto dove un bordo prende un riflesso non pesano.</p>
     <div class="btnrow" style="margin-top:12px">
       <button class="primary full" id="analyze" disabled>Analizza</button>
+      <small class="note" id="analyze-hint" style="display:block;text-align:center;margin-top:8px">Per analizzare serve almeno la foto del fronte.</small>
     </div>
     <div class="err" id="err" hidden></div>
   </section>
@@ -191,7 +195,7 @@ summary{cursor:pointer;color:var(--ink)}
   <video id="video" autoplay playsinline muted></video>
   <div class="overlay">
     <div class="guide"></div>
-    <div class="hud"><span id="hud-side">Fronte</span><span id="hud-tilt">livella –</span></div>
+    <div class="hud"><span id="hud-side">Fronte</span><span id="hud-tilt" hidden></span></div>
   </div>
   <div class="bar">
     <button id="cam-cancel">Annulla</button>
@@ -226,11 +230,12 @@ function onOrient(e){
   const dx = Math.max(-24, Math.min(24, g * k)), dy = Math.max(-24, Math.min(24, b * k));
   bub.querySelector('i').style.transform = `translate(calc(-50% + ${dx}px),calc(-50% + ${dy}px))`;
   $('#levtxt').innerHTML = `<b>${tilt.toFixed(1)}°</b> di inclinazione<br>${ok ? 'telefono in piano' : 'raddrizza il telefono (≤ 2°)'}`;
-  $('#hud-tilt').textContent = `livella ${tilt.toFixed(1)}°`;
+  const hud = $('#hud-tilt'); hud.hidden = false; hud.textContent = ok ? '✓ in piano: scatta' : `inclinato di ${tilt.toFixed(0)}°: raddrizza il telefono`;
+  hud.classList.toggle('ok', ok); hud.classList.toggle('bad', !ok); document.querySelector('#cam .guide').classList.toggle('ok', ok);
   $('#shutter').classList.toggle('ready', ok);
 }
 const levelRow = document.querySelector('.level');
-function levelOff(){ levelRow.hidden = true; $('#hud-tilt').textContent = ''; $('#shutter').classList.add('ready'); }
+function levelOff(){ levelRow.hidden = true; $('#hud-tilt').hidden = true; $('#shutter').classList.add('ready'); }
 async function enableLevel(){
   if (levelOn) return; levelOn = true;
   $('#lev-btn').hidden = true; $('#levtxt').innerHTML = '<b>Livella attiva</b><br>in attesa di dati…';
@@ -364,7 +369,7 @@ function setReference(side, p){
   Object.assign(st, { canvas: s.canvas, sharp: s.sharp, quad: null, frame: null, res: null });
   const t = $('#thumb-' + side); t.innerHTML = ''; const im = new Image(); im.src = s.canvas.toDataURL('image/jpeg', .6); t.appendChild(im);
   const q = document.createElement('span'); q.className = 'q'; q.textContent = `${st.shots.length + 1} foto · tocca per il ritaglio`; t.appendChild(q);
-  $('#analyze').disabled = true; $('#results').hidden = true; renderStrip(side); openCrop(side);
+  updateAnalyze(); $('#results').hidden = true; renderStrip(side); openCrop(side);
 }
 function acceptImage(side, canvas){
   const gray = toGray(canvas, 640);
@@ -379,9 +384,12 @@ function acceptImage(side, canvas){
   state[side] = { canvas, sharp: sh, quad:null }; renderStrip(side);
   const t = $('#thumb-' + side); t.innerHTML = '';
   const im = new Image(); im.src = canvas.toDataURL('image/jpeg', .6); t.appendChild(im);
-  const q = document.createElement('span'); q.className = 'q'; q.textContent = `nitidezza ${sh.toFixed(0)} · tocca per ritagliare`; t.appendChild(q);
-  openCrop(side);
+  const q = document.createElement('span'); q.className = 'q'; q.textContent = `nitidezza ${sh.toFixed(0)} · ritaglio da confermare`; t.appendChild(q);
+  updateAnalyze(); openCrop(side);
 }
+function updateAnalyze(){ // si analizza solo con il fronte e il suo ritaglio confermato: il motivo sta scritto sotto il pulsante
+  const f = state.front, ok = !!(f && f.quad); $('#analyze').disabled = !ok; const h = $('#analyze-hint'); h.hidden = ok;
+  h.textContent = !f ? 'Per analizzare serve almeno la foto del fronte.' : 'Conferma il ritaglio del fronte: tocca la sua foto e poi «Conferma».'; }
 ['front','back'].forEach(side => $('#thumb-' + side).addEventListener('click', () => { if (state[side]) openCrop(side); }));
 
 /* ---------- ritaglio manuale con 4 maniglie ---------- */
@@ -395,7 +403,7 @@ function openCrop(side){
   if (!q){ const h = src.height * 0.7, w = h * 63 / 88, x0 = (src.width - w) / 2, y0 = (src.height - h) / 2; q = [[x0,y0],[x0+w,y0],[x0+w,y0+h],[x0,y0+h]]; conf = 0; }
   crop.quad = orderQuad(q).map(p => [Math.max(0, Math.min(src.width - 1, p[0])), Math.max(0, Math.min(src.height - 1, p[1]))]);
   crop.sel = -1; $('#crop-pad').hidden = true;
-  $('#crop-title').textContent = (side === 'front' ? 'Ritaglio fronte' : 'Ritaglio retro') + (state[side].quad ? '' : conf >= 0.75 ? ' · rilevata automaticamente' : conf > 0 ? ' · controlla i 4 angoli' : ' · carta non trovata, posiziona i cerchi');
+  $('#crop-title').textContent = (side === 'front' ? 'Ritaglio fronte' : 'Ritaglio retro') + (state[side].quad ? ' · ritaglio confermato' : conf >= 0.75 ? ' · rilevata automaticamente' : conf > 0 ? ' · controlla i 4 angoli' : ' · carta non trovata, posiziona i cerchi');
   const wn = $('#crop-warn'); wn.hidden = !!state[side].quad || conf >= 0.75;
   wn.textContent = conf > 0 ? 'Il bordo della carta si distingue poco dallo sfondo: verifica che i cerchi siano sugli angoli. Per una misura affidabile fotografa su uno sfondo uniforme di colore opposto al bordo: scuro per bordi bianchi o argento, chiaro per bordi neri.' : 'Carta non trovata. Posiziona i cerchi a mano, oppure rifai la foto su uno sfondo uniforme di colore opposto al bordo (scuro per bordi bianchi o argento, chiaro per bordi neri).';
   $('#crop').hidden = false;
@@ -441,7 +449,7 @@ const endDrag = () => { if (crop.drag >= 0){ const i = crop.drag; crop.drag = -1
 $('#cropc').addEventListener('pointerup', endDrag); $('#cropc').addEventListener('pointercancel', endDrag);
 makePad($('#crop-pad'), (dx, dy) => { if (crop.sel < 0) return; const src = state[crop.side].canvas, p = crop.quad[crop.sel];
   crop.quad[crop.sel] = [Math.max(0, Math.min(src.width - 1, p[0] + dx)), Math.max(0, Math.min(src.height - 1, p[1] + dy))]; drawCrop(); });
-$('#crop-cancel').addEventListener('click', () => { $('#crop').hidden = true; });
+$('#crop-cancel').addEventListener('click', () => { $('#crop').hidden = true; updateAnalyze(); });
 $('#crop-redo').addEventListener('click', () => { state[crop.side].quad = null; openCrop(crop.side); });
 function uprightQuad(q){ // lato lungo verticale: se la carta è di traverso, ruota l'ordine degli angoli
   const wa = (Math.hypot(q[1][0]-q[0][0], q[1][1]-q[0][1]) + Math.hypot(q[2][0]-q[3][0], q[2][1]-q[3][1])) / 2;
@@ -449,7 +457,7 @@ function uprightQuad(q){ // lato lungo verticale: se la carta è di traverso, ru
   return wa > ha ? [q[1], q[2], q[3], q[0]] : q; }
 $('#crop-ok').addEventListener('click', () => { state[crop.side].quad = uprightQuad(orderQuad(crop.quad)); state[crop.side].frame = null; $('#crop').hidden = true;
   const t = $('#thumb-' + crop.side).querySelector('.q'); if (t) t.textContent = `nitidezza ${state[crop.side].sharp.toFixed(0)} · ritaglio ok`;
-  $('#analyze').disabled = !(state.front && state.front.quad); });
+  updateAnalyze(); });
 
 /* ---------- rilevamento carta: bordi a colori + Hough ---------- */
 function toColor(canvas, maxW){ // 3 canali: luminanza e due canali di colore opposto (giallo/blu, rosso/verde)
@@ -1047,7 +1055,7 @@ $('#save-btn').addEventListener('click', () => {
 initHist();
 
 $('#again').addEventListener('click', () => {
-  state.front = state.back = null; renderStrip('front'); renderStrip('back'); $('#results').hidden = true; $('#fr-front').hidden = $('#fr-back').hidden = true; $('#analyze').disabled = true;
+  state.front = state.back = null; renderStrip('front'); renderStrip('back'); $('#results').hidden = true; $('#fr-front').hidden = $('#fr-back').hidden = true; updateAnalyze();
   $('#thumb-front').textContent = 'Fronte'; $('#thumb-back').textContent = 'Retro'; $('#err').hidden = true; $('#save-note').hidden = true; $('#save-name').value = '';
   window.scrollTo({ top:0, behavior:'smooth' });
 });
