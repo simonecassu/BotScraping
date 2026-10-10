@@ -133,7 +133,7 @@ def _actions(args, db: Database, index) -> int:
     (inseguimenti, prezzi, ricerca). Tra le due bot.yml salva lo stato: così la Mini App vede le modifiche in mezzo
     minuto, senza aspettare la ricerca. Senza `--fase` (cron, PC) fa tutto in un colpo."""
     from pokebot import collections as coll
-    from pokebot import news, plans
+    from pokebot import plans
     commands = TelegramCommands(index, db)
     commands.ensure_menu()  # menu comandi e presentazione del bot, solo quando cambiano
     plans.migrate(db)  # chi era dentro prima dei piani tiene tutto
@@ -154,13 +154,6 @@ def _actions(args, db: Database, index) -> int:
             want_search = commands.poll_once(timeout=0)
         if want_search:
             db.set_kv("search_requested", True)  # la fase di ricerca lo ritrova, anche se gira in un altro processo
-        if commands.enabled:
-            try:  # novità del bot (data/novita.txt): quando il testo cambia, un messaggio a tutte le persone collegate
-                line = news.send(db, commands.client)
-                if line:
-                    print(f"novità · {line}")
-            except Exception as exc:  # noqa: BLE001 - mai fermare il giro per un avviso
-                print(f"novità · errore: {exc}")
         if args.fase == "comandi":
             return 0
     want_search = bool(db.get_kv("search_requested"))

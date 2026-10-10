@@ -1,4 +1,0 @@
-La Mini App ora si aggiorna da sola in circa mezzo minuto dopo ogni tocco, e ogni modifica fatta dall'app viene confermata in chat: prima «📲 Ricevuto», poi il risultato.
-Nella ricerca di Collezioni trovi qualsiasi carta di tutte le espansioni (✓ se ce l'hai), con filtri per rarità, anteprima e anno; in Impostazioni scegli i nomi delle espansioni in italiano o in inglese.
-Il pulsante Doppioni mostra + e − su ogni carta che hai, con la quantità totale.
-Dalla home puoi mandare una Segnalazione al giorno: un problema o un'idea.
