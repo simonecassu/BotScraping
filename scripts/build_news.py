@@ -376,7 +376,7 @@ def set_maps() -> tuple[dict, dict]:
 
 def price_cards(top: list[dict], prev: dict, by_code: dict, to_tcgdex: dict) -> dict:
     """Prezzo di ogni lista: somma dei trend Cardmarket (TCGdex). I prezzi restano in cache per un giorno."""
-    cache = {k: v for k, v in (prev.get("prices") or {}).items() if time.time() - v.get("ts", 0) < 86400}
+    cache = {k: v for k, v in (prev.get("prices") or {}).items() if time.time() - v.get("ts", 0) < (86400 if v.get("p") is not None else 6 * 3600)}
     for d in top:
         if not d.get("cards"):
             continue
@@ -426,7 +426,7 @@ def tournaments(prev: dict) -> tuple[dict | None, dict]:
         return None, prev.get("prices") or {}
     old = prev.get("decks") or {}
     if old.get("id") == t["id"] and old.get("top") and all(d.get("list") or not d.get("list_url") for d in old["top"][:8]) \
-            and not any(d.get("a") in (None, "", "–") for d in old["top"][:8]) and (old.get("meta") or old.get("top")[0].get("price") is not None):
+            and not any(d.get("a") in (None, "", "–") or d.get("price_note") for d in old["top"][:8]) and old.get("meta"):
         log(f"tornei: {t['name']} già letto")
         return old, prev.get("prices") or {}
     top = limitless_standings(t)
