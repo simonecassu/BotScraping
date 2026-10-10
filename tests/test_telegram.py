@@ -42,7 +42,7 @@ def test_settings_commands(index):
     h.handle("/fonti vinted ebay")
     s = db.settings_for("me")
     assert s["lot_min_ratio"] == 0.6 and s["max_price"] == 80 and s["sources"] == ["vinted", "ebay"]
-    assert h.handle("/cerca").run_search
+    assert h.handle("/cerca").run_search and db.get_kv("search_requested_by") == "me"
     assert "sconosciuto" in h.handle("/boh").text
     db.mark_seen("x:1")
     assert "conferma" in h.handle("/resetvisti").text and db.is_seen("x:1")

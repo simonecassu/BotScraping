@@ -272,3 +272,51 @@ def test_targeted_search_rejects_sibling_numbers(index):
     assert not ok("Mew ex (30C 152) 30° Anniversario ita")  # numero di un'altra Mew ex
     assert not ok("Mew ex 152/128 30th celebration")
     assert not ok("Lapras 131/128 30th")
+
+
+def test_requested_search_delivers_now_even_in_pause(index, monkeypatch):
+    """Chi scrive /cerca è sveglio: i suoi annunci, anche quelli già in coda, arrivano subito, pausa o notte che sia."""
+    from pokebot import plans, search
+    monkeypatch.setattr("pokebot.config.TELEGRAM_CHAT_ID", "")
+    db = make_db()
+    db.add_chat_id("1")
+    db.set_kv("telegram_chat_id", "1")  # il proprietario
+    album, _ = db.ensure_album("1", "me55")
+    db.set_wanted_bulk(["me55-131", "me55-132"], True, album)
+    db.save_settings({"generic_queries": ["x"], "per_card_queries": False})
+    db.save_user_prefs("1", {"paused": True})
+    assert plans.is_full(db, "1") and search.notifications_suppressed(db.settings_for("1"))
+    sent = []
+
+    class N:
+        def __init__(self, chat_ids=None):
+            self.chat = (chat_ids or [""])[0]
+
+        def send(self, text, disable_preview=False):
+            sent.append((self.chat, text))
+            return True
+
+        def notify_many(self, items, max_per_card=5, images=True):
+            sent.extend((self.chat, lst.title) for lst, _ in items)
+            return [True] * len(items)
+
+        def notify_listing(self, listing, result):
+            sent.append((self.chat, listing.title))
+            return True
+
+        def notify_deal(self, listing, result, median, images=True, ref_label="", extra=""):
+            return self.notify_listing(listing, result)
+
+    monkeypatch.setattr(search, "TelegramNotifier", N)
+    fid = db.add_found("k0", "vinted", "Articuno 132/128", "https://v/0", "10 €", "", "single",
+                       [{"id": "me55-132", "label": "Articuno", "sure": True}], None, False)
+    db.enqueue("1", [fid])  # accumulato da un giro precedente, durante la pausa
+    rep = run_search(index, db, scrapers={"fake": FakeScraper([
+        Listing("fake", "1", "Lapras 131/128 30th", "https://x/1", price=10, price_text="10 €")])})
+    assert rep.queued == 1 and rep.delivered_to == {} and sent == []  # giro automatico: tutto in coda
+    assert len(db.queued_found("1")) == 2
+    rep = run_search(index, db, requested_by="1", scrapers={"fake": FakeScraper([
+        Listing("fake", "2", "Lapras 131/128 30th bis", "https://x/2", price=9, price_text="9 €")])})
+    assert rep.queued == 0 and rep.delivered_to["1"] == 3 and db.queued_found("1") == []
+    titles = [t for c, t in sent if c == "1"]
+    assert any("Accumulati" in t for t in titles) and "Lapras 131/128 30th bis" in titles and "Articuno 132/128" in titles

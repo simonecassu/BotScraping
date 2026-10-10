@@ -68,7 +68,7 @@ OWNER_HELP = """
 /segnalazioni · /recensioni · /rimborsa ID (entro {refund_days} giorni; annulla = ferma solo il rinnovo)
 /canale @nome – canale degli affari · /canale ora · /canale 20 · /canale off
 /fonti wallapop vinted ebay · /intervallo 20 – valgono per tutti
-/cerca – ricerca completa adesso · /storico svuota · /resetvisti – rinotifica gli annunci già visti"""
+/cerca – ricerca completa adesso (i risultati ti arrivano subito, anche in pausa o di notte, con una riga di esito) · /storico svuota · /resetvisti – rinotifica gli annunci già visti"""
 
 
 # comandi seguiti da testo libero: il messaggio resta intero anche se va a capo (non è un comando per riga)
@@ -458,8 +458,9 @@ class CommandHandler:
         if cmd == "/cerca":
             owner = self._is_owner(chat_id or self.chat)
             if not args.strip():
-                if owner:
-                    return Reply("🔎 Ok, cerco adesso.", run_search=True)
+                if owner:  # i suoi annunci arrivano subito, anche in pausa o di notte, e a fine giro una riga di esito
+                    self.db.set_kv("search_requested_by", str(chat_id or self.chat))
+                    return Reply("🔎 Ok, cerco adesso: tra un paio di minuti ti dico com'è andata.", run_search=True)
                 return Reply("🔎 La ricerca completa gira da sola per tutti, più volte all'ora. "
                              "Per vedere subito cosa c'è in vendita per una carta: <code>/cerca 145</code>.")
             if not owner:  # le ricerche mirate interrogano i marketplace dal vivo: con un intervallo minimo

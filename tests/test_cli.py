@@ -39,7 +39,7 @@ def _quiet_actions(monkeypatch, db):
     monkeypatch.setattr("pokebot.watch.run_watches", lambda *a, **k: [])
     monkeypatch.setattr("pokebot.telegram_bot.TelegramCommands.ensure_menu", lambda self: None)
     searches = []
-    monkeypatch.setattr(cli, "run_search", lambda index, db: searches.append(1) or _Report())
+    monkeypatch.setattr(cli, "run_search", lambda index, db, **kw: searches.append(1) or _Report())
     return searches
 
 
@@ -63,3 +63,18 @@ def test_actions_without_phase_does_everything(monkeypatch):
     monkeypatch.setattr("pokebot.queue.GitHubQueue.drain", lambda self, handle, done_file=None: (0, False))
     assert cli.main(["actions"]) == 0 and searches == []
     assert cli.main(["actions", "--force"]) == 0 and searches == [1]
+
+
+def test_search_summary_for_cerca():
+    from collections import Counter
+    from pokebot.search import RunReport
+    from cli import search_summary
+    rep = RunReport(started_at=0, wanted_count=0)
+    assert "nessuna carta mancante" in search_summary(rep, "1")
+    rep = RunReport(started_at=0, wanted_count=3, listings=120, new_listings=7, per_source=Counter(vinted=100, ebay=20),
+                    delivered_to=Counter({"1": 2}), errors={"wallapop": "timeout"})
+    text = search_summary(rep, "1", suppressed=True)
+    assert "120 annunci letti (ebay 20 · vinted 100), 7 mai visti" in text and "per te 2 annunci" in text
+    assert "modalità notte" in text and "wallapop" in text
+    text = search_summary(rep, "2", suppressed=True)
+    assert "niente di nuovo" in text and "notte" not in text

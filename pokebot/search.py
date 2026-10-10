@@ -41,6 +41,7 @@ class RunReport:
     wanted_count: int = 0
     skipped: Counter = field(default_factory=Counter)
     per_source: Counter = field(default_factory=Counter)
+    delivered_to: Counter = field(default_factory=Counter)  # annunci consegnati a ogni persona (chat → quanti)
 
 
 def build_queries(index: CardIndex, wanted_ids: set[str], settings: dict, db: Database) -> list[str]:
@@ -95,7 +96,9 @@ def build_scrapers(settings: dict) -> dict:
 
 
 def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None = None,
-               scrapers: dict | None = None, dry_run: bool = False) -> RunReport:
+               scrapers: dict | None = None, dry_run: bool = False, requested_by: str | None = None) -> RunReport:
+    """Un giro di ricerca. `requested_by` è chi ha scritto /cerca: è sveglio e aspetta, quindi i suoi annunci
+    partono subito anche in pausa o di notte, compresi quelli già in coda."""
     report = RunReport(started_at=time.time())
     settings = db.get_settings()
     # si cercano solo le collezioni attive: indice ridotto a quelle, mancanti solo le loro
@@ -115,6 +118,9 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
         language, lot_ratio, max_price = _run_filters(db)
         if not dry_run:
             flush_all_queues(db, index.by_id)
+            if requested_by:  # la coda di chi ha chiesto la ricerca parte subito, pausa o notte che sia
+                report.delivered_to[requested_by] += flush_queued(db, TelegramNotifier(chat_ids=[requested_by]),
+                                                                  db.settings_for(requested_by), index.by_id, requested_by)
     else:  # un destinatario esplicito (prove): valgono le impostazioni condivise
         language = str(settings.get("language", "ita") or "ita")
         lot_ratio = float(settings.get("lot_min_ratio", 0.5))
@@ -160,7 +166,7 @@ def run_search(index: CardIndex, db: Database, notifier: TelegramNotifier | None
         if qstats:
             record_query_stats(db, qstats)
 
-    _notify_pending(pending, db, report, dry_run, notifier=notifier, settings=settings)
+    _notify_pending(pending, db, report, dry_run, notifier=notifier, settings=settings, requested_by=requested_by)
     report.finished_at = time.time()
     db.finish_run(run_id, report.listings, report.matches, report.errors, dict(report.per_source))
     log.info("Ciclo completato: %d query, %d annunci (%d nuovi), %d match, %d notifiche, %d affari, %d in coda · per fonte: %s",
@@ -349,7 +355,8 @@ def flush_all_queues(db: Database, index_by_id: dict | None = None) -> int:
 
 
 def _notify_pending(pending: list, db: Database, report: RunReport, dry_run: bool,
-                    notifier: TelegramNotifier | None = None, settings: dict | None = None) -> None:
+                    notifier: TelegramNotifier | None = None, settings: dict | None = None,
+                    requested_by: str | None = None) -> None:
     """Registra gli annunci una volta sola, poi li consegna a ogni persona collegata con le SUE impostazioni
     (pausa, notte, foto, quanti per carta, affari). Chi ha le notifiche sospese li trova in coda al risveglio."""
     if not pending:
@@ -384,13 +391,16 @@ def _notify_pending(pending: list, db: Database, report: RunReport, dry_run: boo
         if not pending:
             continue
         light = bool(chat) and not plans.is_full(db, chat)
-        if light or notifications_suppressed(st):  # Light: tutto nel riepilogo delle 19
+        # Light: tutto nel riepilogo delle 19; pausa o notte: in coda, tranne a chi ha appena scritto /cerca (è sveglio)
+        if light or (notifications_suppressed(st) and chat != requested_by):
             db.enqueue(chat, [found_ids[lst.key] for lst, _ in pending])
             report.queued += len(pending)
             log.info("In coda per %s (%s): %d annunci", masked(chat), "Light" if light else "pausa/notte", len(pending))
             continue
         delivered, deals, failed = _deliver(pending, ntf, st, history, dry_run, report, pending_keys, cm)
         log.info("Consegna a %s: %d annunci, %d inviati", masked(chat), len(pending), len(delivered))
+        if chat:
+            report.delivered_to[chat] += len(delivered)
         if chat and failed:  # Telegram non ha risposto: si riprova al prossimo giro
             db.enqueue(chat, [found_ids[k] for k in failed])
         sent_any |= delivered

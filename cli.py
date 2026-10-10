@@ -25,7 +25,7 @@ from pokebot import config
 from pokebot.db import Database
 from pokebot.matcher import Matcher
 from pokebot.notifier import TelegramNotifier
-from pokebot.search import run_search
+from pokebot.search import notifications_suppressed, run_search
 from pokebot.telegram_bot import TelegramCommands
 
 
@@ -165,8 +165,10 @@ def _actions(args, db: Database, index) -> int:
         if args.fase == "comandi":
             return 0
     want_search = bool(db.get_kv("search_requested"))
+    requested_by = str(db.get_kv("search_requested_by") or "") if want_search else ""  # chi ha scritto /cerca
     if want_search:
         db.set_kv("search_requested", False)
+        db.set_kv("search_requested_by", "")
     from pokebot import cardmarket
     try:  # prezzi Cardmarket (TCGdex): ogni carta una volta al giorno, prima le mancanti
         line = cardmarket.refresh(db, index, wanted_first=db.wanted_of_members())
@@ -201,13 +203,34 @@ def _actions(args, db: Database, index) -> int:
         print("Ricerca completa non ancora dovuta (vedi /intervallo): solo comandi Telegram e inseguimenti.")
         db.prune()
         return 0
-    rep = run_search(index, db)
+    rep = run_search(index, db, requested_by=requested_by or None)
     db.set_kv("last_search_ts", time.time())
     db.prune()
     print(f"Query: {rep.queries} · annunci: {rep.listings} (nuovi {rep.new_listings}) · match: {rep.matches} · notifiche: {rep.notified}")
     for k, v in rep.errors.items():
         print(f"  errore {k}: {v}")
+    if requested_by and commands.enabled:
+        try:  # chi ha scritto /cerca sa com'è andata: senza, in pausa o di notte vedrebbe il silenzio
+            commands.client.send(requested_by, search_summary(rep, requested_by, notifications_suppressed(db.settings_for(requested_by))))
+        except Exception as exc:  # noqa: BLE001
+            print(f"esito /cerca: {exc}")
     return 0
+
+
+def search_summary(rep, chat: str, suppressed: bool = False) -> str:
+    """La riga di esito per chi ha scritto /cerca."""
+    if not rep.wanted_count:
+        return "🔎 Ricerca fatta: nessuna carta mancante selezionata, quindi niente da cercare (vedi /mancanti)."
+    n = rep.delivered_to.get(chat, 0)
+    fonti = " · ".join(f"{k} {v}" for k, v in sorted(rep.per_source.items())) or "nessuna fonte ha risposto"
+    mine = f"per te {n} annunci, qui sopra" if n else "per te niente di nuovo: le carte che ti mancano non sono comparse"
+    text = f"🔎 Ricerca fatta: {rep.listings} annunci letti ({fonti}), {rep.new_listings} mai visti prima; {mine}."
+    if suppressed and n:
+        text += "\nSei in pausa o in modalità notte: te li ho mandati lo stesso perché li hai chiesti tu; " \
+                "quelli dei giri automatici restano in coda fino al risveglio."
+    if rep.errors:
+        text += "\n⚠️ Non hanno risposto (del tutto o in parte): " + ", ".join(sorted(rep.errors)) + "."
+    return text
 
 
 def _search_due(db: Database) -> bool:
