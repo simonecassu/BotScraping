@@ -1,0 +1,31 @@
+# Banco di prova di «Valuta carta» su scan veri di carte (vedi scripts/scanner_test.py): parte a mano, oppure quando
+# cambiano la pagina o lo script. Il risultato è nel log: una riga per carta e foto, con cornice vera e trovata.
+name: Prova scanner
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - deploy/app/scan.html
+      - scripts/scanner_test.py
+      - .github/workflows/scanner-test.yml
+
+permissions:
+  contents: read
+
+jobs:
+  prova:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Browser e librerie
+        run: |
+          pip install pillow playwright
+          python -m playwright install --with-deps chromium
+      - name: Analisi delle carte
+        run: python scripts/scanner_test.py --out /tmp/scanner-test
