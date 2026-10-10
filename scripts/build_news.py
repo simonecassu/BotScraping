@@ -120,7 +120,25 @@ def parse_date(s: str) -> datetime | None:
     m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", s)
     if m:
         return datetime(int(m[3]), int(m[2]), int(m[1]), tzinfo=timezone.utc)
+    m = re.search(r"\b(\d{1,2})\s+([A-Za-z]{3})\s+(\d{2})\b", s)  # «03 Oct 26» (Limitless)
+    if m and MESI.get(m[2].lower()):
+        return datetime(2000 + int(m[3]), MESI[m[2].lower()], int(m[1]), tzinfo=timezone.utc)
     return None
+
+
+def parse_range(s: str) -> tuple[datetime, datetime] | None:
+    """«October 9-11, 2026», «October 31 - November 2, 2026», «October 9, 2026» (rk9)."""
+    m = re.search(r"([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:\s*[-–]\s*(?:([A-Za-z]{3,9})\.?\s+)?(\d{1,2}))?,?\s+(\d{4})", s)
+    if not m:
+        return None
+    m1 = MESI.get(m[1].lower()[:3])
+    m2 = MESI.get((m[3] or m[1]).lower()[:3])
+    if not m1 or not m2:
+        return None
+    y = int(m[5])
+    start = datetime(y, m1, int(m[2]), tzinfo=timezone.utc)
+    end = datetime(y, m2, int(m[4] or m[2]), tzinfo=timezone.utc)
+    return start, end
 
 
 def save_image(url: str, out: Path, name: str) -> str | None:
@@ -299,6 +317,8 @@ def limitless_standings(t: dict) -> list[dict]:
         arche = text_of(deck[2]).strip() if deck and deck[2] else (deck[1].replace("-", " ").title() if deck and deck[1] else "")
         top.append({"place": place, "player": player.strip()[:40], "country": country, "a": arche or "–", "price": None, "missing": None,
                     "list": None, "cards": [], "list_url": LIMITLESS + lst[1] if lst else None})
+    if not top or not any(d.get("list_url") for d in top[:8]):
+        diag("limitless classifica", page, r"/decks/|/tournaments/\d+/")
     return top
 
 
@@ -321,6 +341,8 @@ def limitless_decklist(url: str) -> tuple[dict, list]:
         if m:
             groups[cur].append([int(m[1]), m[2].strip(), f"{m[3]} {m[4]}"])
             cards.append([int(m[1]), f"{m[3]} {m[4]}"])
+    if not cards:
+        diag("limitless lista", page, r"decks|cards")
     return groups, cards
 
 
@@ -417,21 +439,21 @@ def rk9_events(prev: dict) -> list[dict]:
     evs = []
     today = datetime.now(timezone.utc)
     for tr, cells in rows_of(page):
-        m = re.search(r'href="/(?:tournament|events?|pairings)/([A-Za-z0-9]+)"', tr)
+        ids = re.findall(r'href="/tournament/([A-Za-z0-9]+-[A-Za-z0-9]+)"', tr)
+        m = ids or re.findall(r'href="/event/([A-Za-z0-9-]+)"', tr)
         name = next((c for c in cells if re.search(r"regional|international|world|championship|special", c, flags=re.I)), None)
         if not m or not name or not re.search(r"TCG|Trading Card|Pok[eé]mon", " ".join(cells), flags=re.I):
             continue
-        dates = [parse_date(x) for x in re.findall(r"[A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2}", " ".join(cells))]
-        dates = [d for d in dates if d]
-        if not dates:
+        rng = parse_range(" ".join(cells))
+        if not rng:
             continue
-        start, end = min(dates), max(dates)
+        start, end = rng
         if end < today - timedelta(days=2) or start > today + timedelta(days=400):
             continue
         loc = next((c for c in cells if c and c != name and not parse_date(c) and re.search(r"[A-Za-z]", c) and len(c) < 60), "")
         kind = "Mondiale" if re.search(r"world", name, flags=re.I) else "Internazionale" if re.search(r"international", name, flags=re.I) else "Regionale"
         city, _, country = loc.partition(",")
-        evs.append({"id": m[1], "name": name.strip(), "kind": kind, "city": city.strip(), "country": country.strip(),
+        evs.append({"id": m[0], "ids": ids, "name": re.sub(r"\s+", " ", name.strip()), "kind": kind, "city": city.strip(), "country": country.strip(),
                     "start": iso(start.replace(hour=8)), "end": iso(end.replace(hour=20)), "home": bool(re.search(r"ital", loc, flags=re.I))})
     log(f"eventi rk9: {len(evs)} in calendario")
     if not evs:
@@ -441,23 +463,31 @@ def rk9_events(prev: dict) -> list[dict]:
 
 def rk9_live(ev: dict) -> dict | None:
     """Classifica in diretta di un evento in corso: prime 8 posizioni della tabella standings (masters TCG)."""
-    for url in (f"{RK9}/standings/{ev['id']}?pod=2", f"{RK9}/standings/{ev['id']}"):
-        try:
-            page = fetch(url)
-        except Exception:  # noqa: BLE001
-            continue
-        rows = []
-        for tr, cells in rows_of(page):
-            if cells and re.fullmatch(r"\d{1,4}", cells[0]) and len(cells) >= 3:
-                rec = next((c for c in cells if re.fullmatch(r"\d+-\d+(-\d+)?", c)), "")
-                player = next((c for c in cells[1:] if re.search(r"[A-Za-z]{2}", c) and c != rec), "")
-                country = (re.search(r'\b([A-Z]{2})\b', " ".join(cells[1:4])) or [None, ""])[1]
-                rows.append({"pos": int(cells[0]), "player": player[:40], "country": country, "a": "", "rec": rec})
-            if len(rows) >= 8:
-                break
-        if rows:
-            rnd = re.search(r"[Rr]ound\s+(\d+)", page)
-            return {"round": int(rnd[1]) if rnd else 0, "of": 0, "day": 1, "updated": now_iso(), "standings": rows}
+    tried = []
+    for tid in (ev.get("ids") or [ev["id"]]):
+        for url in (f"{RK9}/standings/{tid}", f"{RK9}/pairings/{tid}?pod=2&rnd=99"):
+            try:
+                page = fetch(url)
+            except Exception as exc:  # noqa: BLE001
+                tried.append(f"{url} ({str(exc)[:40]})")
+                continue
+            tried.append(url)
+            if not re.search(r"TCG|Trading Card|Masters", page, flags=re.I):
+                continue
+            rows = []
+            for tr, cells in rows_of(page):
+                if cells and re.fullmatch(r"\d{1,4}", cells[0]) and len(cells) >= 3:
+                    rec = next((c for c in cells if re.fullmatch(r"\d+-\d+(-\d+)?", c)), "")
+                    player = next((c for c in cells[1:] if re.search(r"[A-Za-z]{2}", c) and c != rec), "")
+                    country = (re.search(r'\b([A-Z]{2})\b', " ".join(cells[1:4])) or [None, ""])[1]
+                    rows.append({"pos": int(cells[0]), "player": player[:40], "country": country, "a": "", "rec": rec})
+                if len(rows) >= 8:
+                    break
+            if rows:
+                rnd = re.search(r"[Rr]ound\s+(\d+)", page)
+                return {"round": int(rnd[1]) if rnd else 0, "of": 0, "day": 1, "updated": now_iso(), "standings": rows}
+            diag("rk9 diretta", page, r"standings|pairings|pod")
+    log(f"  diretta {ev['name']}: niente classifica; provati {tried}")
     return None
 
 
