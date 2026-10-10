@@ -306,7 +306,7 @@ def main() -> int:
             note.append(f"err max {max(errs):.2f} mm")
         print(f"{r['id']:<14} {r['rarity'][:24]:<24} {t['kind']:<22} {r['variant']:<6} {qe:>9.1f}  {truth_s:<26} {found:<40} {' · '.join(note)}")
         if qe > 5:  # angoli sbagliati: cosa aveva trovato ogni passo (per capire dove sbaglia)
-            print(f"{'':<14} angoli veri {[tuple(round(v) for v in c) for c in r['corners']]} · trovati {[tuple(c) for c in r['quad']]}\n{'':<14} passi: {r.get('auto', '')[:300]}")
+            print(f"{'':<14} angoli veri {[tuple(round(v) for v in c) for c in r['corners']]} · trovati {[tuple(c) for c in r['quad']]}\n{'':<14} passi: {r.get('auto', '')[:700]}")
         row = ("ok", qe, errs, sum(1 for k in 'LRTB' if f[k] is None and t[k] is not None))
         stats.setdefault(t["kind"], []).append(row)
         stats_var.setdefault(f"{t['kind']} su {r['variant']}", []).append(row)

@@ -663,11 +663,13 @@ function autoQuad(canvas){
 
 function growOutward(canvas, quad){
   // Bordo argento, bianco o nero quasi dello stesso colore dello sfondo: il taglio si vede poco e il rettangolo trovato può
-  // essere la cornice stampata, su uno o più lati. Due indizi. 1) La carta vera ha gli angoli arrotondati (raggio ~3 mm):
-  // a mezzo millimetro dentro l'angolo, lungo la diagonale, c'è lo sfondo come fuori; se almeno 3 angoli sono così il
-  // rettangolo è al taglio e non si tocca. 2) Altrimenti su ogni lato si segue il colore medio lungo il lato da 0,6 a
-  // 6,5 mm verso l'esterno: il taglio è il salto netto più esterno (l'ombra della carta sfuma piano e non conta); si
-  // spostano solo i lati con un salto, e il risultato vale solo se le proporzioni si avvicinano a 63:88.
+  // essere la cornice stampata, su uno o più lati. Su ogni lato si segue il colore medio lungo il lato da 0,6 a 6,5 mm
+  // verso l'esterno: il taglio è il salto netto più esterno (l'ombra della carta sfuma piano e non conta). Poi si
+  // confrontano il rettangolo com'è, quello con i soli lati dove c'è un salto e quello con tutti i lati spostati come la
+  // mediana: vince chi ha più angoli arrotondati veri. La carta ha gli angoli arrotondati (raggio ~3 mm): a mezzo
+  // millimetro dentro l'angolo, lungo la diagonale, c'è lo sfondo, uguale a quello appena fuori dai due lati (stessa
+  // ombra), mentre 2,5 mm dentro c'è la carta. Un angolo della cornice ha colore di carta dentro; un angolo finito fuori
+  // dalla carta ha sfondo anche a 2,5 mm. A parità vince il rettangolo con le proporzioni più vicine a 63:88.
   const S = toColor(canvas, 1400); const { ch, w, h } = S; const sc = w / canvas.width; const q = quad.map(p => [p[0] * sc, p[1] * sc]);
   const cx = (q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4, cy = (q[0][1] + q[1][1] + q[2][1] + q[3][1]) / 4;
   const ppm = Math.min(Math.hypot(q[1][0] - q[0][0], q[1][1] - q[0][1]), Math.hypot(q[2][0] - q[1][0], q[2][1] - q[1][1])) / 63;
@@ -676,42 +678,52 @@ function growOutward(canvas, quad){
       const xi = Math.max(0, Math.min(w - 1, Math.round(x + dx))), yi = Math.max(0, Math.min(h - 1, Math.round(y + dy))); const i = yi * w + xi;
       acc[0] += ch[0][i]; acc[1] += ch[1][i]; acc[2] += ch[2][i]; } return acc.map(v => v / 5); };
   const dist = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
-  let rounded = 0;
-  for (const p of q){ const dx = cx - p[0], dy = cy - p[1], L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
-    const near = col(p[0] + ux * 0.5 * ppm, p[1] + uy * 0.5 * ppm), outside = col(p[0] - ux * 1.5 * ppm, p[1] - uy * 1.5 * ppm);
-    if (dist(near, outside) < 15) rounded++; }
-  growOutward.last = { rounded, ppm: +ppm.toFixed(2) };
+  const normalOf = (Q, s) => { const A = Q[s], B = Q[(s + 1) % 4]; const vx = B[0] - A[0], vy = B[1] - A[1], L = Math.hypot(vx, vy) || 1; let nx = -vy / L, ny = vx / L;
+    const gx = (Q[0][0] + Q[1][0] + Q[2][0] + Q[3][0]) / 4, gy = (Q[0][1] + Q[1][1] + Q[2][1] + Q[3][1]) / 4;
+    if ((A[0] + vx / 2 - gx) * nx + (A[1] + vy / 2 - gy) * ny < 0){ nx = -nx; ny = -ny; } return { A, vx, vy, L, nx, ny }; };
+  const roundedScore = Q => { let n = 0; const gx = (Q[0][0] + Q[1][0] + Q[2][0] + Q[3][0]) / 4, gy = (Q[0][1] + Q[1][1] + Q[2][1] + Q[3][1]) / 4;
+    for (let i = 0; i < 4; i++){ const p = Q[i]; const dx = gx - p[0], dy = gy - p[1], L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
+      const near = col(p[0] + ux * 0.5 * ppm, p[1] + uy * 0.5 * ppm), inner = col(p[0] + ux * 2.5 * ppm, p[1] + uy * 2.5 * ppm);
+      const refs = []; // sfondo appena fuori (0,6 mm) da ciascuno dei due lati, a 3 mm dall'angolo: stessa ombra dell'angolo
+      for (const s of [i, (i + 3) % 4]){ const { A, vx, vy, L: Ls, nx, ny } = normalOf(Q, s); const dir = s === i ? 1 : -1; const B = s === i ? A : Q[(s + 1) % 4];
+        refs.push(col(B[0] + dir * vx / Ls * 3 * ppm + nx * 0.6 * ppm, B[1] + dir * vy / Ls * 3 * ppm + ny * 0.6 * ppm)); }
+      if (Math.max(dist(near, refs[0]), dist(near, refs[1])) < 15 && Math.max(dist(inner, refs[0]), dist(inner, refs[1])) > 20) n++; }
+    return n; };
+  const rounded = roundedScore(q); growOutward.last = { rounded, ppm: +ppm.toFixed(2) };
   if (rounded >= 3) return null;
-  const normal = s => { const A = q[s], B = q[(s + 1) % 4]; const vx = B[0] - A[0], vy = B[1] - A[1], L = Math.hypot(vx, vy) || 1; let nx = -vy / L, ny = vx / L;
-    if ((A[0] + vx / 2 - cx) * nx + (A[1] + vy / 2 - cy) * ny < 0){ nx = -nx; ny = -ny; } return { A, vx, vy, nx, ny }; };
   const d0 = Math.max(4, Math.round(0.6 * ppm)), d1 = Math.round(6.5 * ppm); // si parte oltre la riga scura della cornice (~0,4 mm)
-  const shifts = [];
-  for (let s = 0; s < 4; s++){ const { A, vx, vy, nx, ny } = normal(s);
+  const shifts = [], cands = [];
+  for (let s = 0; s < 4; s++){ const { A, vx, vy, nx, ny } = normalOf(q, s);
     const prof = []; // colore medio lungo il lato (24 punti tra il 15% e l'85%, lontano dagli angoli) a ogni distanza d
     for (let d = d0 - 4; d <= d1 + 4; d++){ const acc = [0, 0, 0]; for (let k = 0; k < 24; k++){ const t = 0.15 + 0.7 * k / 23; const c = col(A[0] + vx * t + nx * d, A[1] + vy * t + ny * d); acc[0] += c[0]; acc[1] += c[1]; acc[2] += c[2]; } prof.push([acc[0] / 24, acc[1] / 24, acc[2] / 24]); }
     const P = d => prof[d - d0 + 4];
     const g = (d, k) => { const a = P(d + k), b = P(d - k); return Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2])); };
-    let gmax = 0; for (let d = d0; d <= d1; d++) gmax = Math.max(gmax, g(d, 1));
+    let gmax = 0; const peaks = []; for (let d = d0; d <= d1; d++){ const v = g(d, 1); gmax = Math.max(gmax, v); if (v >= 6 && v >= g(d - 1, 1) && v >= g(d + 1, 1)) peaks.push([d, +v.toFixed(0), +(v / (g(d, 3) || 1)).toFixed(2)]); }
+    cands.push(peaks.sort((a, b) => b[1] - a[1]).slice(0, 4));
     let found = null;
     for (let d = d1; d >= d0 && found === null; d--){ const v = g(d, 1);
       // salto netto: massimo locale, forte, e in 2 px c'è quasi tutto il cambiamento di 6 px (un'ombra sfumata no)
-      if (v < 9 || v < 0.25 * gmax || v < g(d - 1, 1) || v < g(d + 1, 1) || v < 0.45 * g(d, 3)) continue;
+      if (v < 7 || v < 0.25 * gmax || v < g(d - 1, 1) || v < g(d + 1, 1) || v < 0.45 * g(d, 3)) continue;
       const a = g(d - 1, 1), c = g(d + 1, 1), den = a - 2 * v + c; found = den < 0 ? d + 0.5 * (a - c) / den : d; }
     shifts.push(found !== null && found >= 0.8 * ppm && found <= 5.5 * ppm ? +found.toFixed(1) : null); }
-  growOutward.last.shifts = shifts;
+  growOutward.last.shifts = shifts; growOutward.last.cands = cands;
   const good = shifts.filter(x => x != null); if (!good.length) return null;
   const ratioOf = Q => { const wa = (Math.hypot(Q[1][0] - Q[0][0], Q[1][1] - Q[0][1]) + Math.hypot(Q[2][0] - Q[3][0], Q[2][1] - Q[3][1])) / 2;
     const ha = (Math.hypot(Q[2][0] - Q[1][0], Q[2][1] - Q[1][1]) + Math.hypot(Q[3][0] - Q[0][0], Q[3][1] - Q[0][1])) / 2; return Math.min(wa, ha) / Math.max(wa, ha); };
   const apply = sh => { const out = q.map(p => p.slice());
-    for (let s = 0; s < 4; s++){ if (!sh[s]) continue; const { nx, ny } = normal(s); for (const i of [s, (s + 1) % 4]){ out[i][0] += nx * sh[s]; out[i][1] += ny * sh[s]; } }
+    for (let s = 0; s < 4; s++){ if (!sh[s]) continue; const { nx, ny } = normalOf(q, s); for (const i of [s, (s + 1) % 4]){ out[i][0] += nx * sh[s]; out[i][1] += ny * sh[s]; } }
     return out; };
-  const options = [shifts];
-  // 3 lati con lo stesso spostamento: era la cornice su tutti e 4 i lati, il quarto va come gli altri (vale se migliora le proporzioni)
-  if (good.length === 3){ const med = good.slice().sort((a, b) => a - b)[1]; if (good.every(v => Math.abs(v - med) <= Math.max(3, 0.2 * med))) options.push(shifts.map(v => v == null ? med : v)); }
-  const target = 63 / 88; let best = null, bestErr = Math.abs(ratioOf(q) - target);
-  for (const sh of options){ const out = apply(sh), err = Math.abs(ratioOf(out) - target); if (err <= 0.045 && err < bestErr){ best = out; bestErr = err; growOutward.last.applied = sh; } }
-  growOutward.last.ratio = +ratioOf(best || q).toFixed(3);
-  return best ? best.map(p => [p[0] / sc, p[1] / sc]) : null; }
+  const options = [{ name: 'parziale', sh: shifts }];
+  // lati trovati con lo stesso spostamento: forse era la cornice su tutti e 4 i lati, e gli altri vanno come la mediana
+  if (good.length >= 2){ const srt = good.slice().sort((a, b) => a - b), med = srt[srt.length >> 1];
+    if (good.every(v => Math.abs(v - med) <= Math.max(4, 0.5 * med)) && good.length < 4) options.push({ name: 'tutti', sh: shifts.map(v => v == null ? med : v) }); }
+  const target = 63 / 88;
+  const scored = options.map(o => { const out = apply(o.sh); return { ...o, out, score: roundedScore(out), err: Math.abs(ratioOf(out) - target) }; })
+    .filter(o => o.err <= 0.045).sort((a, b) => (b.score - a.score) || (a.err - b.err));
+  growOutward.last.scores = scored.map(o => [o.name, o.score, +o.err.toFixed(3)]);
+  const best = scored[0]; if (!best || best.score < rounded || (best.score === rounded && best.err >= Math.abs(ratioOf(q) - target))) return null;
+  growOutward.last.applied = best.sh; growOutward.last.ratio = +ratioOf(best.out).toFixed(3);
+  return best.out.map(p => [p[0] / sc, p[1] / sc]); }
 
 /* ---------- rilevamento carta (ripiego per colore) ---------- */
 function detectQuad(canvas){
