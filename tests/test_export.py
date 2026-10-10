@@ -30,7 +30,8 @@ def test_each_person_sees_only_own_listings(index, monkeypatch):
     # nessun dato degli altri: né chi è collegato, né i loro annunci, né il dettaglio del piano
     for st in (one, two):
         assert not {"owner_chat_id", "chat_ids", "me", "queued", "query_stats"} & set(st)
-        assert set(st["plan"]) == {"tier", "label", "price", "onboarding", "invoice", "max_active", "max_collections"}
+        assert set(st["plan"]) == {"tier", "label", "price", "onboarding", "invoice", "max_active", "max_collections",
+                                   "paid", "lifetime", "renew_off", "until", "refundable"}
     assert "me55-131" in one["wanted"] and "me55-131" not in two["wanted"]
     assert [r["key"] for r in one["found"]] == ["k1"] and "sv8-7" not in one["prices"]
 

@@ -256,3 +256,35 @@ def test_expired_subscription_goes_back_to_light_limits(index, monkeypatch):
     assert plans.check_trials(db, client, now + 2 * 86400) == ["…2: abbonamento scaduto, passato a Light"]
     assert plans.active_count(db, "2") == 3 and "scaduto" in client.sent[-1][1]
     assert plans.check_trials(db, client, now + 3 * 86400) == []
+
+
+def test_user_manages_own_subscription(index, monkeypatch):
+    db, client, tc = setup(index, monkeypatch)
+    db.add_chat_id("2")
+    calls = []
+    client.cancel_subscription = lambda uid, charge, canceled=True: (calls.append((uid, charge, canceled)) or (True, ""))
+    assert "Abbonati" in str(tc.handler.handle("/abbonati", "2").buttons)  # non ancora abbonato: il pulsante per pagare
+    tc.handle_payload({"chat_id": 2, "text": "/pagamento", "payment": {
+        "currency": "XTR", "total_amount": 250, "invoice_payload": "pro:2", "telegram_payment_charge_id": "ch7",
+        "subscription_expiration_date": time.time() + 86400 * 30}})
+    r = tc.handler.handle("/abbonati", "2")
+    assert "si rinnova da solo" in r.text and "/abbonati stop" in str(r.buttons) and "/abbonati rimborso" in str(r.buttons)
+    r = tc.handler.handle("/abbonati stop", "2")
+    assert calls == [("2", "ch7", True)] and "Rinnovo fermato" in r.text and r.sends[0][0] == "1"  # il proprietario lo sa
+    assert plans.get(db, "2")["renew_off"] is True and plans.tier(db, "2") == "pro"
+    r = tc.handler.handle("/abbonati", "2")
+    assert "rinnovo fermato" in r.text and "/abbonati riattiva" in str(r.buttons)
+    r = tc.handler.handle("/abbonati riattiva", "2")
+    assert calls[-1] == ("2", "ch7", False) and "riattivato" in r.text and plans.get(db, "2")["renew_off"] is False
+    r = tc.handler.handle("/abbonati rimborso", "2")  # nei primi giorni: al proprietario arriva il pulsante per rimborsare
+    assert "Richiesta inviata" in r.text and r.sends[0][0] == "1" and "/rimborsa 2" in str(r.sends[0][2])
+    p = plans.get(db, "2")
+    p["payments"][-1]["ts"] = time.time() - 10 * 86400  # pagato 10 giorni fa: niente rimborso, solo il rinnovo
+    db.set_kv("plan:2", p)
+    r = tc.handler.handle("/abbonati rimborso", "2")
+    assert "primi 3 giorni" in r.text and r.sends is None and "/abbonati stop" in str(r.buttons)
+    assert "/abbonati rimborso" not in str(tc.handler.handle("/abbonati", "2").buttons)
+    plans.set_pro(db, "2", lifetime=True)  # regalato: nulla da gestire
+    r = tc.handler.handle("/abbonati", "2")
+    assert "per sempre" in r.text and not r.buttons
+    assert tc.handler.handle("/abbonati stop", "2").buttons is None

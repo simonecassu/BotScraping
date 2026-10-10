@@ -193,11 +193,18 @@ def _shopping(groups: dict[str, list], wanted: set[str], shared: Shared) -> dict
 
 def _plan_info(db: Database, chat_id: str) -> dict:
     full = plans.is_full(db, chat_id)
+    p = plans.get(db, chat_id)
+    pays = [x for x in (p.get("payments") or []) if x.get("charge") and not x.get("refunded")]
+    last_ts = float(pays[-1].get("ts") or 0) if pays else 0.0
     return {"tier": plans.tier(db, chat_id), "label": plans.describe(db, chat_id), "price": plans.PRICE_STARS,
             "onboarding": plans.onboarding(db, chat_id), "invoice": plans.cached_invoice(db, chat_id),
             # limiti della versione Light (None = nessun limite)
             "max_active": None if full else plans.LIGHT_MAX_ACTIVE,
-            "max_collections": None if full else plans.LIGHT_MAX_COLLECTIONS}
+            "max_collections": None if full else plans.LIGHT_MAX_COLLECTIONS,
+            # abbonamento pagato: la Mini App mostra i pulsanti per fermare/riattivare il rinnovo e chiedere il rimborso
+            "paid": bool(pays), "lifetime": bool(p.get("lifetime")), "renew_off": bool(p.get("renew_off")),
+            "until": float(p.get("pro_until") or 0),
+            "refundable": bool(pays) and (time.time() - last_ts) / 86400 <= plans.REFUND_DAYS}
 
 
 def build_summary(index: CardIndex, db: Database) -> dict:

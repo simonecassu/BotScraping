@@ -114,6 +114,7 @@ def record_payment(db: Database, chat: str, payment: dict, now: float | None = N
     p["pro_until"] = max(until, float(p.get("pro_until") or 0))
     p["ended"] = True
     p["pro_ended"] = False
+    p["renew_off"] = False  # un pagamento (anche un rinnovo) vuol dire che il rinnovo è attivo
     pays = list(p.get("payments") or [])
     pays.append({"ts": now, "stars": int(payment.get("total_amount") or 0),
                  "charge": str(payment.get("telegram_payment_charge_id") or "")[:80],

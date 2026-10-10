@@ -57,7 +57,7 @@ HELP = """<b>Comandi</b>
 /prezzo 100 – prezzo massimo · /lingua ita | tutte · /soglia 50 – % minima di carte mancanti nei lotti
 /max 5 – annunci per carta in ogni messaggio · /immagini on | off · /esporta – file Excel
 /segnala testo – un problema o un'idea per migliorare Pokébot (una al giorno)
-/abbonati – il tuo piano e l'abbonamento · /voto 1-5 · /recensione testo
+/abbonati – il tuo piano; da abbonato: ferma o riattiva il rinnovo, chiedi il rimborso · /voto 1-5 · /recensione testo
 Puoi scrivere più comandi in un solo messaggio, uno per riga."""
 
 OWNER_HELP = """
@@ -176,10 +176,10 @@ class TelegramClient:
         resp = requests.post(f"{self.base}/setMyCommands", json=body, timeout=config.HTTP_TIMEOUT)
         return resp.status_code == 200 and bool(resp.json().get("ok"))
 
-    def cancel_subscription(self, user_id: str, charge_id: str) -> tuple[bool, str]:
-        """Ferma il rinnovo di un abbonamento in Stars (resta valido fino alla scadenza già pagata)."""
+    def cancel_subscription(self, user_id: str, charge_id: str, canceled: bool = True) -> tuple[bool, str]:
+        """Ferma il rinnovo di un abbonamento in Stars (resta valido fino alla scadenza già pagata); canceled=False lo riattiva."""
         resp = requests.post(f"{self.base}/editUserStarSubscription", json={"user_id": int(user_id), "telegram_payment_charge_id": charge_id,
-                                                                             "is_canceled": True}, timeout=config.HTTP_TIMEOUT)
+                                                                             "is_canceled": canceled}, timeout=config.HTTP_TIMEOUT)
         data = resp.json()
         return bool(data.get("ok")), str(data.get("description", ""))
 
@@ -488,7 +488,7 @@ class CommandHandler:
         if cmd == "/canale":
             return self._channel(chat_id, args)
         if cmd in ("/abbonati", "/abbonamento", "/premium", "/pro"):
-            return self._subscribe()
+            return self._subscribe(args)
         if cmd == "/piano":
             return self._plan(chat_id, args)
         if cmd == "/voto":
@@ -862,13 +862,19 @@ class CommandHandler:
         return Reply(f"🗑 {html.escape(str(entry.get('name') or args.strip()))} tolto dalla lista d'attesa (non riceve nulla).")
 
     # ---- piani: prova, Light, abbonamento ---------------------------------------
-    def _subscribe(self) -> Reply:
+    def _subscribe(self, args: str = "") -> Reply:
+        """/abbonati – piano e pulsante per pagare; da abbonato: stato del rinnovo, `stop` / `riattiva` il rinnovo,
+        `rimborso` chiede al proprietario il rimborso intero (solo nei primi REFUND_DAYS giorni)."""
         t = plans.tier(self.db, self.chat)
         head = plans.describe(self.db, self.chat)
         if t == "owner":
             return Reply(head)
+        p = plans.get(self.db, self.chat)
+        pays = [x for x in (p.get("payments") or []) if x.get("charge") and not x.get("refunded")]
+        if t == "pro" and pays and not p.get("lifetime"):
+            return self._manage_subscription(args.split()[0].lower() if args.split() else "", p, pays[-1], head)
         if t == "pro":
-            return Reply(head + "\nL'abbonamento si gestisce (e si disdice) dalle impostazioni di Telegram, alla voce Stars.")
+            return Reply(head)  # per sempre, o acceso dal proprietario: nulla da gestire
         link = plans.invoice_link(self.db, TelegramClient(), self.chat)
         text = (f"{head}\n\n⭐ <b>Pokébot completo · {plans.PRICE_STARS} Stars al mese</b>\n"
                 "• avvisi nel momento in cui esce l'annuncio, non una volta al giorno\n"
@@ -879,6 +885,45 @@ class CommandHandler:
         if not link:
             return Reply(text + "\n\n⚠️ Il pagamento non è disponibile in questo momento, riprova tra poco.")
         return Reply(text, buttons=[[(f"⭐ Abbonati · {plans.PRICE_STARS} Stars", link)]])
+
+    def _manage_subscription(self, what: str, p: dict, last: dict, head: str) -> Reply:
+        """L'abbonato gestisce il suo abbonamento in Stars (anche dalla Mini App): rinnovo e richiesta di rimborso."""
+        until = plans._date(p.get("pro_until"))
+        owner = self.db.owner_chat_id()
+        who = html.escape(self.db.user_name(self.chat))
+        days = (time.time() - float(last.get("ts") or 0)) / 86400
+        if what in ("stop", "ferma", "disdici", "annulla", "riattiva", "rinnova"):
+            resume = what in ("riattiva", "rinnova")
+            try:
+                ok, err = TelegramClient().cancel_subscription(self.chat, last["charge"], canceled=not resume)
+            except (requests.RequestException, ValueError) as exc:
+                ok, err = False, str(exc)
+            if not ok:
+                return Reply(f"⚠️ Non riesco a {'riattivare' if resume else 'fermare'} il rinnovo: {html.escape(err or 'errore Telegram')}. "
+                             "Puoi farlo dalle impostazioni di Telegram, alla voce Stars.")
+            p["renew_off"] = not resume
+            plans.save(self.db, self.chat, p)
+            note = [(owner, f"{'▶️' if resume else '⏹'} {who} ha {'riattivato' if resume else 'fermato'} il rinnovo (completo fino al {until}).", None)] \
+                if owner and owner != self.chat else None
+            return Reply(f"▶️ Rinnovo riattivato: l'abbonamento continua anche dopo il {until}." if resume
+                         else f"⏹ Rinnovo fermato: hai tutto fino al {until}, poi passi alla versione Light. /abbonati riattiva se ci ripensi.",
+                         sends=note)
+        if what in ("rimborso", "rimborsa"):
+            if days > plans.REFUND_DAYS:
+                return Reply(f"Il rimborso intero vale solo nei primi {plans.REFUND_DAYS} giorni dal pagamento (Telegram non fa rimborsi parziali). "
+                             f"Puoi fermare il rinnovo: resti completo fino al {until}.", buttons=[[("⏹ Ferma il rinnovo", "/abbonati stop")]])
+            if not owner or owner == self.chat:
+                return Reply("Nessuno a cui chiedere il rimborso.")
+            return Reply("💸 Richiesta inviata: il proprietario può rimborsarti con un tocco, la conferma ti arriva qui.",
+                         sends=[(owner, f"💸 {who} (<code>{self.chat}</code>) chiede il rimborso dell'ultimo pagamento: {last.get('stars', 0)} ⭐ "
+                                        f"il {plans._date(last.get('ts'))}.", [[("↩️ Rimborsa", f"/rimborsa {self.chat}")]])])
+        renew = "rinnovo fermato: alla scadenza passi a Light" if p.get("renew_off") else "si rinnova da solo ogni 30 giorni"
+        buttons = [[("▶️ Riattiva il rinnovo", "/abbonati riattiva") if p.get("renew_off") else ("⏹ Ferma il rinnovo", "/abbonati stop")]]
+        if days <= plans.REFUND_DAYS:
+            buttons.append([("💸 Chiedi il rimborso", "/abbonati rimborso")])
+        return Reply(f"{head} · {renew}\nUltimo pagamento: {last.get('stars', 0)} ⭐ il {plans._date(last.get('ts'))}. "
+                     f"Rimborso intero solo nei primi {plans.REFUND_DAYS} giorni. L'abbonamento si vede anche nelle impostazioni di Telegram, "
+                     "alla voce Stars.", buttons=buttons)
 
     def _plan(self, chat_id: str, args: str) -> Reply:
         """/piano – il tuo piano · (proprietario) /piano ID [sempre|light|pro 30|prova 5]."""
@@ -928,6 +973,8 @@ class CommandHandler:
                 ok, err = False, str(exc)
             if not ok:
                 return Reply(f"⚠️ Non riesco a fermare il rinnovo: {html.escape(err or 'errore Telegram')}")
+            p["renew_off"] = True
+            plans.save(self.db, target, p)
             return Reply(f"⏹ Rinnovo fermato per {who}: resta completo fino al {plans._date(p.get('pro_until'))}, poi passa a Light.",
                          sends=[(target, f"⏹ Il tuo abbonamento non si rinnoverà: hai tutto fino al {plans._date(p.get('pro_until'))}, "
                                          "poi passi alla versione Light.", None)])

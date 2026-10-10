@@ -63,8 +63,9 @@ a{color:var(--link);text-decoration:none}
 .tiles{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px}
 .tile{background:var(--sec);border:3px solid #0a1328;box-shadow:0 4px 0 #0a1328;border-radius:18px;padding:18px 14px;min-height:124px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer}
 .tile .ic{font-size:30px}.tile b{font-size:17px;font-weight:900;display:block;margin-top:8px}.tile small{color:var(--hint);font-weight:700;font-size:12px}
-.planbar{display:flex;align-items:center;gap:10px;justify-content:space-between;background:var(--sec);border:2px solid var(--yel);border-radius:14px;padding:10px 12px;margin-top:14px;font-weight:800;font-size:13px}
+.planbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:space-between;background:var(--sec);border:2px solid var(--yel);border-radius:14px;padding:10px 12px;margin-top:14px;font-weight:800;font-size:13px}
 .planbar .btn{flex:none}
+.planbar .acts{display:flex;gap:8px;flex-wrap:wrap}
 .fcode{background:var(--sec);border:3px solid var(--yel);box-shadow:0 4px 0 var(--yel2);border-radius:18px;padding:16px;text-align:center;margin:6px 0 10px}
 .fcode small{display:block;color:var(--hint);font-weight:800;font-size:12px}.fcode b{display:block;font-size:38px;font-weight:900;letter-spacing:6px;color:var(--yel);margin:4px 0 12px}
 .friend{background:var(--sec);border:2px solid var(--line);border-radius:14px;padding:12px;margin-bottom:9px}
@@ -117,7 +118,7 @@ textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
       <div class="tile wide" data-go="reports"><span class="ic">💬</span><div><b>Segnalazioni</b><small id="t-rep">un problema o un'idea</small></div><span class="new hidden" id="rep-new"></span></div>
     </div>
     <div class="planbar hidden" id="onbar"><span>🔕 Prima segna in <b>Collezioni</b> le carte che hai, poi accendi le notifiche.</span><button class="btn" id="on-go">🔔 Attiva</button></div>
-    <div class="planbar hidden" id="planbar"><span id="plan-lbl"></span><button class="btn" id="plan-go">⭐ Abbonati</button></div>
+    <div class="planbar hidden" id="planbar"><span id="plan-lbl"></span><span class="acts"><button class="btn" id="plan-go">⭐ Abbonati</button><button class="btn sec hidden" id="plan-renew"></button><button class="btn sec hidden" id="plan-refund">💸 Chiedi il rimborso</button></span></div>
     <p class="hint" id="home-hint" style="margin-top:14px"></p>
   </section>
 
@@ -222,8 +223,20 @@ textarea{width:100%;min-height:130px;resize:vertical;line-height:1.35}
 <div class="toast" id="toast"></div>
 
 <script>
-const tg = window.Telegram && window.Telegram.WebApp;
+let tg = window.Telegram && window.Telegram.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
+else {  // lo script servito dal ponte non è arrivato: si prova quello di telegram.org (i dati firmati si leggono comunque dall'indirizzo)
+  const s = document.createElement("script"); s.src = "https://telegram.org/js/telegram-web-app.js";
+  s.onload = () => { tg = window.Telegram && window.Telegram.WebApp; if (tg) { tg.ready(); tg.expand(); } };
+  document.head.appendChild(s);
+}
+// i dati firmati da Telegram: dallo script ufficiale o, se quello non li ha visti, direttamente dall'indirizzo
+// (#tgWebAppData=…): l'app funziona anche se lo script manca o se Telegram consegna l'indirizzo un attimo dopo
+function initData() {
+  if (tg && tg.initData) return tg.initData;
+  try { return new URLSearchParams(location.hash.slice(1)).get("tgWebAppData") || ""; } catch (e) { return ""; }
+}
+const inTelegram = () => !!window.Telegram || /Telegram/i.test(navigator.userAgent);
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const eur = (v) => v == null ? "–" : v.toLocaleString("it-IT", { style: "currency", currency: "EUR" });
@@ -252,9 +265,10 @@ function toast(msg, ms = 2200) { const t = $("#toast"); t.textContent = msg; t.c
 function openLink(u) { if (!/^https?:\/\//i.test(u || "")) return; if (tg && tg.openLink) tg.openLink(u); else window.open(u, "_blank", "noopener"); }
 
 async function sendCmd(text) {
-  if (!tg || !tg.initData) { toast("Apri la pagina da Telegram per inviare comandi"); return false; }
+  const data = initData();
+  if (!data) { toast("Apri la pagina da Telegram per inviare comandi"); return false; }
   try {
-    const r = await fetch("/api/cmd", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: tg.initData, text }) });
+    const r = await fetch("/api/cmd", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: data, text }) });
     const d = await r.json();
     if (!d.ok) { toast("⚠️ " + (d.error || "il bot non risponde adesso: riprova tra un minuto")); return false; }
     setTimeout(() => awaitRefresh(), 0);
@@ -281,21 +295,29 @@ async function awaitRefresh(what, quiet = false, maxMs = 150000) {
   })();
 }
 
+function noDataHint() {
+  // Telegram non ha passato i dati firmati (capita alla prima apertura): si riprova da qui, senza chiudere l'app
+  const why = inTelegram() ? "Telegram non mi ha ancora passato i tuoi dati" : "apri la Mini App da Telegram (pulsante App) per vedere la tua collezione";
+  return `<span class="err">${why}.</span><br><button class="btn" style="margin-top:8px" onclick="location.reload()">🔄 Riprova</button>
+    <small class="hint" style="display:block;margin-top:8px">diagnostica · script Telegram: ${tg ? "sì" : "no"} · dati nell'indirizzo: ${/tgWebAppData/.test(location.hash) ? "sì" : "no"} · ${esc(navigator.userAgent.replace(/^Mozilla\/5\.0 /, "").slice(0, 80))}</small>`;
+}
+
 async function load(wake = false) {
   try {
-    const r = tg && tg.initData
-      ? await fetch("/api/state?t=" + Date.now(), { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: tg.initData, wake }) })
-      : await fetch("/api/state?t=" + Date.now(), { cache: "no-store" });
+    const data = initData();
+    if (!data) throw new Error("nodata");
+    const r = await fetch("/api/state?t=" + Date.now(), { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: data, wake }) });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.error || "il bot non risponde adesso: riprova tra un minuto");
-    if (d.per_user) throw new Error("apri la Mini App da Telegram (pulsante App) per vedere la tua collezione");
     if (state && d.generated_at === state.generated_at) return;  // niente di nuovo: le scelte appena fatte restano come sono
     state = d;
   } catch (e) {
-    $("#upd").textContent = "stato non disponibile";
+    const nodata = e.message === "nodata";
+    $("#upd").textContent = nodata ? "senza dati di Telegram" : "stato non disponibile";
     if (!state) {  // primo caricamento: il bot sta salvando? si riprova da soli prima di mostrare l'errore
       loadRetries = (loadRetries || 0) + 1;
-      if (loadRetries <= 4 && !/apri la Mini App|non sei/.test(e.message || "")) {
+      if (nodata) $("#home-hint").innerHTML = noDataHint();
+      else if (loadRetries <= 4 && !/non sei/.test(e.message || "")) {
         $("#home-hint").innerHTML = '<span class="hint">⏳ Il bot sta salvando: riprovo tra qualche secondo…</span>';
         setTimeout(load, 4000);
       } else $("#home-hint").innerHTML = `<span class="err">${esc(e.message || e)}</span>`;
@@ -323,10 +345,23 @@ function renderPlan() {
   const p = state.plan || {}, bar = $("#planbar");
   $("#onbar").classList.toggle("hidden", !p.onboarding);
   bar.classList.toggle("hidden", !p.tier || p.tier === "owner");
-  $("#plan-lbl").textContent = p.label || "";
+  const paid = p.tier === "pro" && !!p.paid && !p.lifetime;  // abbonamento pagato in Stars: si gestisce da qui
+  $("#plan-lbl").innerHTML = esc(p.label || "") + (paid ? `<small class="hint" style="display:block;font-weight:600">${p.renew_off ? "rinnovo fermato: alla scadenza passi a Light" : "si rinnova da solo ogni 30 giorni"}</small>` : "");
   $("#plan-go").classList.toggle("hidden", p.tier === "pro");
   $("#plan-go").textContent = p.tier === "light" ? `⭐ Completo · ${p.price || 250} Stars/mese` : "⭐ Abbonati";
+  $("#plan-renew").classList.toggle("hidden", !paid);
+  $("#plan-renew").textContent = p.renew_off ? "▶️ Riattiva il rinnovo" : "⏹ Ferma il rinnovo";
+  $("#plan-refund").classList.toggle("hidden", !(paid && p.refundable));
 }
+$("#plan-renew").onclick = async () => {
+  const off = !!((state.plan || {}).renew_off);
+  if (!off && !confirm("Fermare il rinnovo? Resti completo fino alla scadenza già pagata, poi passi alla versione Light.")) return;
+  if (await sendCmd(off ? "/abbonati riattiva" : "/abbonati stop")) toast(off ? "Rinnovo riattivato: conferma in chat" : "Rinnovo fermato: conferma in chat");
+};
+$("#plan-refund").onclick = async () => {
+  if (!confirm("Chiedere il rimborso intero dell'ultimo pagamento? L'abbonamento finisce subito e torni alla versione Light.")) return;
+  if (await sendCmd("/abbonati rimborso")) toast("Richiesta inviata: la conferma arriva in chat");
+};
 $("#on-go").onclick = async () => {
   if (await sendCmd("/riprendi")) { state.plan.onboarding = false; renderPlan(); toast("🔔 Notifiche accese: ti scrivo appena spunta una tua carta"); }
 };
@@ -1045,7 +1080,15 @@ function showTab(name, push = true) {
 $("#back").onclick = () => { let prev = stack.pop() || "home"; if (prev === "check") prev = "coll"; showTab(prev, false); if (prev === "home") stack.length = 0; };
 if (tg && tg.BackButton) { tg.BackButton.onClick(() => $("#back").click()); new MutationObserver(() => $("#back").classList.contains("hidden") ? tg.BackButton.hide() : tg.BackButton.show()).observe($("#back"), { attributes: true }); }
 // all'apertura: si mostra subito quello che c'è, il bot viene svegliato e appena ripubblica l'App si aggiorna da sola
-load(true).then(loadCatalog).then(() => { renderCollections(); if (state) awaitRefresh("controllo novità", true, 45000); });  // all'apertura il bot rifà un giro: se ha novità arrivano da sole
+async function start() {
+  // dentro Telegram i dati firmati possono arrivare un attimo dopo la pagina: si aspetta fino a 8 secondi prima di dirlo
+  const t0 = Date.now();
+  while (!initData() && inTelegram() && Date.now() - t0 < 8000) await new Promise((r) => setTimeout(r, 250));
+  await load(true); await loadCatalog(); renderCollections();
+  if (state) awaitRefresh("controllo novità", true, 45000);  // all'apertura il bot rifà un giro: se ha novità arrivano da sole
+}
+window.addEventListener("hashchange", () => { if (!state && initData()) load(true).then(renderCollections); });
+start();
 setInterval(load, 90000);
 </script>
 </body>

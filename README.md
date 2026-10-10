@@ -20,6 +20,8 @@ Gira gratis su **GitHub Actions** e risponde subito grazie a un piccolo **ponte 
 
 Abbonamento: 250 Stars ogni 30 giorni (`/abbonati`). Rimborso intero entro 3 giorni dal pagamento
 (`/rimborsa ID`, solo il proprietario: Telegram non permette rimborsi parziali); dopo si ferma solo il rinnovo.
+Chi è abbonato, da `/abbonati` o dalla Mini App, ferma o riattiva il rinnovo e nei primi 3 giorni chiede il rimborso:
+al proprietario arriva un pulsante per farlo con un tocco.
 
 `/aiuto` nel bot elenca tutti i comandi; il proprietario vede anche i suoi (`/attesa`, `/approva`, `/utenti`,
 `/piano`, `/espelli`, `/rimborsa`, `/canale`, `/fonti`, `/intervallo`…). Nessun comando del proprietario
