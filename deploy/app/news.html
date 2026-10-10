@@ -1,0 +1,438 @@
+<title>Novità Pescacarte</title>
+<script src="/app/telegram-web-app.js"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800;900&display=swap">
+<style>
+/* Layout: una colonna da telefono come il resto della Mini App; in alto ciò che sta succedendo adesso, sotto quattro schede */
+:root{
+  --bg:#0b1630; --sec:#152648; --card:#1b3160; --deep:#0a1328; --txt:#f4f6fb; --hint:#9fb0d0; --line:rgba(255,255,255,.1);
+  --red:#e3350d; --red2:#b5240a; --yel:#ffb703; --yel2:#c98f00; --blue:#3b7dd8; --navy:#0f1f3d;
+  --ok:#4cd964; --warn:#ffa41b; --bad:#ff5a5f; --link:#7fc4ff;
+  --font:"Nunito",-apple-system,system-ui,"Segoe UI",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg)}
+body{margin:0;color:var(--txt);font:700 15px/1.4 var(--font);
+  background:radial-gradient(circle at 85% -10%, rgba(255,203,5,.16), transparent 38%),radial-gradient(circle at -10% 110%, rgba(227,53,13,.2), transparent 42%),var(--bg);min-height:100%}
+h2,h3{margin:0;text-wrap:balance}
+header{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:linear-gradient(180deg,var(--red) 0,var(--red) 52%,#111 52%,#111 56%,var(--navy) 56%);padding:10px 16px 0;box-shadow:0 4px 16px rgba(0,0,0,.4)}
+.title{display:flex;align-items:center;gap:10px;font-weight:900;font-size:19px;color:#fff;text-shadow:0 2px 0 rgba(0,0,0,.35);padding-bottom:12px}
+.title small{color:#ffe9a8;font-weight:700;font-size:12px;margin-left:auto;white-space:nowrap}
+.back{border:0;background:rgba(255,255,255,.18);color:#fff;width:34px;height:34px;border-radius:50%;font:900 22px/1 var(--font);flex:none;padding:0 0 3px;cursor:pointer}
+.tabs{display:flex;gap:6px;padding:0 0 10px;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:1 0 auto;border:2px solid transparent;background:var(--sec);color:var(--hint);font:900 13px var(--font);padding:7px 12px;border-radius:999px;cursor:pointer;white-space:nowrap}
+.tab[aria-selected="true"]{background:var(--yel);color:#1a1a1a;border-color:#fff3b0}
+.tab .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--red);margin-left:5px;vertical-align:middle}
+main{padding-block:12px 40px;padding-inline:16px;max-width:620px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+button:focus-visible,.tab:focus-visible,summary:focus-visible{outline:2px solid var(--yel);outline-offset:2px}
+.demo{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--deep);border:2px dashed #2f4f86;border-radius:14px;padding:9px 12px;font-size:12px;color:var(--hint)}
+.demo b{color:var(--txt)}
+.seg{display:inline-flex;background:var(--sec);border-radius:999px;padding:2px;margin-left:auto}
+.seg button{border:0;background:none;color:var(--hint);font:900 12px var(--font);padding:5px 11px;border-radius:999px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--red);color:#fff}
+.h{font-size:13px;color:var(--yel);font-weight:900;text-transform:uppercase;letter-spacing:.06em}
+.hint{color:var(--hint);font-size:13px;font-weight:700}
+.box{background:var(--sec);border:3px solid var(--deep);box-shadow:0 4px 0 var(--deep);border-radius:18px;padding:14px;min-width:0}
+.box.red{border-color:var(--red);box-shadow:0 4px 0 var(--red2)}
+.box.yel{border-color:var(--yel);box-shadow:0 4px 0 var(--yel2)}
+.stack{display:flex;flex-direction:column;gap:12px}
+.pill{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:900;padding:3px 9px;border-radius:999px;background:var(--deep);color:var(--hint);border:1px solid #2a3a60;white-space:nowrap}
+.pill.live{background:var(--red);color:#fff;border-color:#ff8a70}
+.pill.live::before{content:"";width:7px;height:7px;border-radius:50%;background:#fff;animation:pulse 1.4s infinite}
+.pill.jp{color:#ffd0d0;border-color:#7a2b2b}
+.pill.sp{color:#1a1a1a;background:var(--yel);border-color:#fff3b0}
+.pill.ok{color:var(--ok);border-color:#2c6b3a}
+.pill.warn{color:var(--warn);border-color:#7a5a1b}
+@keyframes pulse{50%{opacity:.25}}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{border:0;border-radius:999px;background:var(--red);color:#fff;font:900 13px var(--font);padding:9px 14px;box-shadow:0 3px 0 var(--red2);cursor:pointer;min-height:38px}
+.btn.sec{background:var(--yel);color:#1a1a1a;box-shadow:0 3px 0 var(--yel2)}
+.btn.ghost{background:var(--deep);color:var(--txt);box-shadow:0 3px 0 #050a16}
+.btn:disabled{opacity:.45;cursor:default}
+/* in evidenza */
+.now{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.now .box{display:flex;flex-direction:column;gap:6px}
+.now .big{font-size:26px;font-weight:900;color:var(--yel);font-variant-numeric:tabular-nums;line-height:1.1}
+.now .nm{font-weight:900;font-size:15px;line-height:1.2}
+@media (max-width:420px){.now{grid-template-columns:1fr}}
+/* uscite */
+.rel{display:grid;grid-template-columns:62px 1fr;gap:12px;align-items:start}
+.rel .art{width:62px;aspect-ratio:63/88;border-radius:8px;background:linear-gradient(160deg,var(--c1),var(--c2));border:2px solid var(--deep);display:flex;align-items:flex-end;justify-content:center;font:900 10px var(--font);color:#fff;padding-bottom:6px;text-shadow:0 1px 0 #0008;letter-spacing:.04em}
+.rel .t{min-width:0;display:flex;flex-direction:column;gap:5px}
+.rel .nm{font-weight:900;font-size:16px;line-height:1.2}
+.rel .meta{font-size:12px;color:var(--hint)}
+.rel ul{margin:2px 0 0;padding-left:18px;font-size:13px;color:var(--txt);font-weight:700}
+.rel ul li{margin:2px 0}
+.cd{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--yel)}
+.month{font-size:12px;color:var(--hint);font-weight:900;text-transform:uppercase;letter-spacing:.08em;margin:6px 0 -4px}
+/* mazzi */
+.meta-bars{display:flex;flex-direction:column;gap:7px;margin-top:10px}
+.mb{display:grid;grid-template-columns:minmax(0,1fr) 46px;gap:4px 8px;align-items:center;font-size:13px}
+.mb .tr{grid-column:1/-1;height:10px;border-radius:5px;background:var(--deep);overflow:hidden}
+.mb .tr i{display:block;height:100%;background:linear-gradient(90deg,var(--red),var(--yel));border-radius:5px}
+.mb .pc{text-align:right;font-variant-numeric:tabular-nums;color:var(--yel);font-weight:900}
+.deck{background:var(--sec);border:2px solid var(--line);border-radius:14px;overflow:hidden}
+.deck summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:38px 1fr auto;gap:10px;align-items:center;padding:11px 12px}
+.deck summary::-webkit-details-marker{display:none}
+.deck .pl{width:38px;height:38px;border-radius:50%;background:var(--deep);display:flex;align-items:center;justify-content:center;font-weight:900;color:var(--hint);font-size:14px}
+.deck .pl.p1{background:var(--yel);color:#1a1a1a}
+.deck .pl.p2{background:#cfd8e6;color:#1a1a1a}
+.deck .pl.p3{background:#c98552;color:#1a1a1a}
+.deck .who{min-width:0}
+.deck .who b{display:block;font-weight:900;font-size:15px;line-height:1.2}
+.deck .who small{color:var(--hint);font-size:12px}
+.deck .pr{text-align:right;font-variant-numeric:tabular-nums}
+.deck .pr b{display:block;color:var(--yel);font-weight:900}
+.deck .pr small{font-size:11px;color:var(--hint)}
+.deck[open] summary{border-bottom:1px solid var(--line)}
+.dl{padding:10px 12px 12px;display:flex;flex-direction:column;gap:10px}
+.dl h4{margin:0;font-size:12px;color:var(--hint);text-transform:uppercase;letter-spacing:.06em}
+.dl ul{list-style:none;margin:4px 0 0;padding:0;display:grid;gap:2px}
+.dl li{display:grid;grid-template-columns:24px 1fr auto;gap:8px;font-size:13px;padding:3px 0;border-bottom:1px solid var(--line)}
+.dl li .q{font-weight:900;color:var(--yel);text-align:right;font-variant-numeric:tabular-nums}
+.dl li .cd2{font-family:var(--mono);font-size:11px;color:var(--hint);align-self:center}
+.dl li.miss .n::after{content:" · ti manca";color:var(--warn);font-size:11px}
+/* eventi */
+.ev{display:grid;grid-template-columns:54px 1fr;gap:12px;align-items:start}
+.ev .date{background:var(--deep);border-radius:12px;text-align:center;padding:6px 0;font-weight:900;line-height:1.1}
+.ev .date b{display:block;font-size:20px;color:var(--yel)}
+.ev .date small{font-size:11px;color:var(--hint);text-transform:uppercase}
+.ev .t{min-width:0;display:flex;flex-direction:column;gap:4px}
+.ev .nm{font-weight:900;font-size:15px;line-height:1.2}
+.stand{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+.stand td,.stand th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left}
+.stand th{color:var(--hint);font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.stand td.r,.stand th.r{text-align:right;font-variant-numeric:tabular-nums}
+.stand td small{color:var(--hint);display:block;font-size:11px}
+.scroll{overflow-x:auto}
+/* aggiornamenti */
+.up{display:flex;flex-direction:column;gap:6px}
+.up .nm{font-weight:900;font-size:15px;line-height:1.25}
+.up p{margin:0;font-size:13px;color:#dbe4f5;max-width:62ch}
+.up .src{font-size:12px;color:var(--hint)}
+/* notifiche */
+.set{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+.set:last-of-type{border-bottom:0}
+.set label{flex:1;font-weight:800;min-width:0}
+.set small{display:block;color:var(--hint);font-size:12px;font-weight:700}
+.sw{width:52px;height:30px;border-radius:15px;background:var(--deep);position:relative;border:2px solid var(--line);flex:none;cursor:pointer;padding:0}
+.sw[aria-checked="true"]{background:var(--red);border-color:#ff8a70}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:22px;height:22px;border-radius:11px;background:#fff;transition:left .15s;box-shadow:0 1px 3px rgba(0,0,0,.4)}
+.sw[aria-checked="true"]::after{left:24px}
+.sw:disabled{opacity:.4;cursor:default}
+.lock{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between;background:var(--deep);border:2px solid var(--yel);border-radius:12px;padding:10px 12px;font-size:13px;margin-top:8px}
+.toast{position:fixed;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);background:#111c;color:#fff;padding:11px 14px;border-radius:14px;font-size:14px;font-weight:800;backdrop-filter:blur(8px);z-index:9;opacity:0;transition:opacity .2s;pointer-events:none;border:2px solid var(--yel)}
+.toast.show{opacity:1}
+a{color:var(--link);text-decoration:none}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<header>
+  <div class="title">
+    <button class="back" id="back" aria-label="Torna alla Mini App">‹</button>
+    <span>Novità</span>
+    <small id="upd">…</small>
+  </div>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tab-uscite" data-tab="uscite" aria-selected="true">Uscite</button>
+    <button class="tab" role="tab" id="tab-mazzi" data-tab="mazzi" aria-selected="false">Mazzi</button>
+    <button class="tab" role="tab" id="tab-eventi" data-tab="eventi" aria-selected="false">Eventi</button>
+    <button class="tab" role="tab" id="tab-agg" data-tab="agg" aria-selected="false">Aggiornamenti</button>
+    <button class="tab" role="tab" id="tab-notif" data-tab="notif" aria-selected="false">Notifiche</button>
+  </div>
+</header>
+
+<main>
+  <div class="demo" id="demo" hidden>
+    <span><b>Anteprima con dati di esempio.</b> Nel bot i contenuti arrivano ogni giorno da TCGdex, Limitless e dagli annunci ufficiali.</span>
+    <span class="seg" role="group" aria-label="Vedi come">
+      <button id="as-full" aria-pressed="true">Completo</button><button id="as-light" aria-pressed="false">Light</button>
+    </span>
+  </div>
+
+  <section class="now" id="now"></section>
+
+  <section id="p-uscite" class="stack"></section>
+  <section id="p-mazzi" class="stack" hidden></section>
+  <section id="p-eventi" class="stack" hidden></section>
+  <section id="p-agg" class="stack" hidden></section>
+  <section id="p-notif" class="stack" hidden></section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+'use strict';
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const tg = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData ? window.Telegram.WebApp : null;
+if (tg) { try { tg.ready(); tg.expand(); } catch (e) {} }
+
+/* ---------- dati di esempio: stessa forma di news.json, che nel bot scrive scripts/build_news.py ---------- */
+const DAY = 864e5;
+const at = (days, h = 0, m = 0) => { const d = new Date(Date.now() + days * DAY); d.setHours(h, m, 0, 0); return d.toISOString(); };
+const SAMPLE = {
+  updated: at(0, new Date().getHours(), 5),
+  releases: [
+    { id: "me05", name: "Set principale d'autunno", region: "int", kind: "set", date: at(4), status: "preordini", cards: 191,
+      highlights: ["Mega Gengar ex illustrazione speciale", "ritorno degli Allenatori con Pokémon", "15 carte Arte Illustrazione"],
+      products: ["Booster da 10 carte", "Elite Trainer Box", "Display da 36 buste"], c1: "#5b2a86", c2: "#1d0f33" },
+    { id: "m6", name: "Espansione giapponese di novembre", region: "jp", kind: "set", date: at(21), status: "annunciata", cards: 104,
+      expectedInt: "primavera 2027", highlights: ["prime carte rivelate: Mega Feraligatr ex", "nuova rarità Mega Iper"],
+      products: ["Box da 30 buste"], c1: "#b01e2e", c2: "#3a0a10" },
+    { id: "me05-ub", name: "Collezione Premium Mega Lucario", region: "int", kind: "special", date: at(27), status: "annunciata",
+      highlights: ["3 carte promo foil", "8 buste di espansioni recenti"], products: ["Collezione Premium"], c1: "#1f5fa8", c2: "#0b1d3a" },
+    { id: "me06", name: "Primo set del 2027", region: "int", kind: "set", date: at(117), status: "annunciata", cards: null,
+      highlights: ["nome e carte non ancora annunciati"], products: [], c1: "#2f6b4f", c2: "#0d2419" },
+    { id: "me55", name: "30th Celebration", region: "int", kind: "special", date: at(-12), status: "uscita", cards: 128, followed: true,
+      highlights: ["già seguita da Pescacarte: 41 carte ti mancano"], products: ["Booster", "Elite Trainer Box"], c1: "#d4a017", c2: "#5a3d00" },
+  ],
+  decks: {
+    event: "Regionale di esempio · Lipsia", date: at(-6), players: 1874, format: "Standard",
+    meta: [ { a: "Dragapult ex", s: 18.4 }, { a: "Gardevoir ex", s: 14.1 }, { a: "Charizard ex / Pidgeot ex", s: 12.7 },
+            { a: "Mega Absol ex", s: 9.3 }, { a: "Raging Bolt ex", s: 7.8 }, { a: "Altri", s: 37.7 } ],
+    top: [
+      { place: 1, player: "L. Moretti", country: "IT", a: "Dragapult ex", price: 236, missing: 9,
+        list: { "Pokémon": [[4, "Dreepy", "TWM 128", true], [4, "Drakloak", "TWM 129", true], [3, "Dragapult ex", "TWM 130", false], [2, "Duskull", "SFA 18", true], [1, "Dusknoir", "SFA 20", false], [1, "Budew", "PRE 4", true]],
+                "Allenatori": [[4, "Lillie's Determination", "MEG 119", false], [4, "Ultra Ball", "MEG 131", true], [4, "Buddy-Buddy Poffin", "TEF 144", true], [3, "Night Stretcher", "SFA 61", true], [2, "Boss's Orders", "MEG 114", false]],
+                "Energie": [[1, "Energia Lotta base", "MEE 6", true], [1, "Energia Fuoco base", "MEE 2", true]] } },
+      { place: 2, player: "A. Weber", country: "DE", a: "Gardevoir ex", price: 189, missing: 14,
+        list: { "Pokémon": [[4, "Ralts", "SVI 84", true], [2, "Kirlia", "SIT 68", true], [2, "Gardevoir ex", "SVI 86", false], [1, "Munkidori", "TWM 95", false]],
+                "Allenatori": [[4, "Arven", "OBF 186", true], [3, "Earthen Vessel", "PAR 163", true], [2, "Counter Catcher", "PAR 160", true]],
+                "Energie": [[8, "Energia Psico base", "MEE 5", true], [4, "Energia Oscurità base", "MEE 7", true]] } },
+      { place: 3, player: "J. Laurent", country: "FR", a: "Charizard ex / Pidgeot ex", price: 274, missing: 17,
+        list: { "Pokémon": [[3, "Charmander", "PAF 7", true], [2, "Charizard ex", "OBF 125", false], [2, "Pidgey", "MEW 16", true], [2, "Pidgeot ex", "OBF 164", false]],
+                "Allenatori": [[4, "Rare Candy", "MEG 125", true], [4, "Iono", "PAL 185", true], [2, "Super Rod", "PAL 188", true]],
+                "Energie": [[5, "Energia Fuoco base", "MEE 2", true]] } },
+      { place: 4, player: "M. Kowalski", country: "PL", a: "Mega Absol ex", price: 158, missing: 6, list: null },
+      { place: 5, player: "S. Rossi", country: "IT", a: "Dragapult ex", price: 231, missing: 9, list: null },
+      { place: 6, player: "P. Novak", country: "CZ", a: "Raging Bolt ex", price: 142, missing: 11, list: null },
+      { place: 7, player: "H. Jensen", country: "DK", a: "Gardevoir ex", price: 192, missing: 14, list: null },
+      { place: 8, player: "D. García", country: "ES", a: "Charizard ex / Pidgeot ex", price: 268, missing: 17, list: null },
+    ],
+  },
+  events: [
+    { id: "reg-a", name: "Regionale di esempio · Lilla", kind: "Regionale", city: "Lilla", country: "Francia", start: at(-1, 9), end: at(1, 19),
+      live: { round: 7, of: 9, day: 1, updated: at(0, 15, 40), standings: [
+        { pos: 1, player: "T. Bernard", country: "FR", a: "Mega Absol ex", rec: "7-0-0" },
+        { pos: 2, player: "G. Bianchi", country: "IT", a: "Dragapult ex", rec: "6-0-1" },
+        { pos: 3, player: "K. Müller", country: "DE", a: "Gardevoir ex", rec: "6-1-0" },
+        { pos: 4, player: "R. Silva", country: "PT", a: "Raging Bolt ex", rec: "6-1-0" },
+        { pos: 5, player: "E. Fontana", country: "IT", a: "Charizard ex / Pidgeot ex", rec: "5-1-1" } ] } },
+    { id: "ic-la", name: "Internazionale di esempio · America Latina", kind: "Internazionale", city: "San Paolo", country: "Brasile", start: at(34, 14), end: at(36, 23) },
+    { id: "reg-b", name: "Regionale di esempio · Milano", kind: "Regionale", city: "Milano", country: "Italia", start: at(48, 9), end: at(49, 19), home: true },
+    { id: "ic-eu", name: "Internazionale di esempio · Europa", kind: "Internazionale", city: "Londra", country: "Regno Unito", start: at(196, 10), end: at(198, 20) },
+    { id: "wc", name: "Campionati Mondiali 2027", kind: "Mondiale", city: "da annunciare", country: "", start: at(312, 9), end: at(314, 21) },
+  ],
+  updates: [
+    { date: at(-2), kind: "Banlist", title: "Esempio: due carte vietate nel formato Standard", body: "Dal prossimo mese due carte non sono più giocabili nel formato Standard. Chi ha un mazzo che le usa le può ancora giocare nel formato Espanso.", src: "pokemon.com/it" },
+    { date: at(-9), kind: "Rotazione", title: "Esempio: annunciata la rotazione del 2027", body: "Le carte con il marchio di regolamento H escono dallo Standard ad aprile. Nella scheda Mazzi vedi quali dei mazzi forti perdono carte.", src: "pokemon.com/it" },
+    { date: at(-15), kind: "Regole", title: "Esempio: chiarimento sul Talento di Dusknoir", body: "Il danno si mette anche se il Pokémon che usa il Talento finisce KO. Vale da subito nei tornei.", src: "Compendium delle regole" },
+    { date: at(-20), kind: "Annuncio", title: "Esempio: Pokémon Day con carta promo nei negozi", body: "Nei negozi aderenti, un torneo amichevole con carta promo per chi partecipa. L'elenco dei negozi esce a gennaio.", src: "pokemon.com/it" },
+  ],
+};
+
+/* ---------- stato ---------- */
+const S = { data: null, tab: "uscite", plan: "full", notif: { espansioni: true, tornei: false, live: false, aggiornamenti: false } };
+try { const t = localStorage.getItem("news.tab"); if (t) S.tab = t; } catch (e) {}
+
+async function load() {
+  try { const r = await fetch("/app/news.json", { cache: "no-cache" }); if (r.ok) { S.data = await r.json(); } } catch (e) {}
+  if (!S.data) { S.data = SAMPLE; $("#demo").hidden = false; }
+  if (tg) {  // piano e notifiche veri arrivano dallo stato della Mini App
+    try { const r = await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: tg.initData }) });
+      if (r.ok) { const st = await r.json(); if (st.plan) S.plan = st.plan.full ? "full" : "light"; if (st.news) Object.assign(S.notif, st.news); } } catch (e) {}
+  }
+  render();
+  setInterval(tick, 1000);
+}
+
+/* ---------- utilità ---------- */
+const MESI = ["gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"];
+const MESI_L = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
+const fmtDay = (iso) => { const d = new Date(iso); return `${d.getDate()} ${MESI[d.getMonth()]}`; };
+const fmtTime = (iso) => new Date(iso).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+function countdown(iso) {
+  let s = Math.max(0, Math.round((new Date(iso) - Date.now()) / 1000));
+  const d = Math.floor(s / 86400); s -= d * 86400; const h = Math.floor(s / 3600); s -= h * 3600; const m = Math.floor(s / 60); s -= m * 60;
+  if (d >= 2) return `${d} giorni`;
+  return `${d ? d + "g " : ""}${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+const ago = (iso) => { const m = Math.round((Date.now() - new Date(iso)) / 6e4); return m < 60 ? `${Math.max(1, m)} min fa` : m < 1440 ? `${Math.round(m / 60)} ore fa` : `${Math.round(m / 1440)} giorni fa`; };
+const isLive = (e) => Date.now() >= new Date(e.start) && Date.now() <= new Date(e.end);
+const flag = (cc) => cc && cc.length === 2 ? String.fromCodePoint(...[...cc.toUpperCase()].map((c) => 127397 + c.charCodeAt(0))) : "";
+const eur = (n) => n == null ? "–" : `${Math.round(n)} €`;
+let toastT;
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2600); }
+async function sendCmd(text) {  // come in index.html: il ponte mette il comando in coda e conferma in chat
+  if (!tg) { toast(`Nel bot invia: ${text}`); return false; }
+  try { const r = await fetch("/api/cmd", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ initData: tg.initData, text }) }); return r.ok; }
+  catch (e) { toast("Non riesco a raggiungere il bot: riprova tra poco"); return false; }
+}
+
+/* ---------- in evidenza ---------- */
+function renderNow() {
+  const D = S.data; const live = D.events.find(isLive);
+  const next = D.releases.filter((r) => new Date(r.date) > Date.now()).sort((a, b) => new Date(a.date) - new Date(b.date))[0];
+  const nextEv = D.events.filter((e) => new Date(e.start) > Date.now()).sort((a, b) => new Date(a.start) - new Date(b.start))[0];
+  let h = "";
+  if (live) h += `<div class="box red"><div class="row"><span class="pill live">In corso</span><span class="hint">turno ${live.live ? live.live.round + " di " + live.live.of : ""}</span></div>
+      <div class="nm">${esc(live.name)}</div><span class="hint">in testa: ${live.live ? esc(live.live.standings[0].player) + " · " + esc(live.live.standings[0].a) : "risultati in arrivo"}</span>
+      <button class="btn" data-go="eventi" style="align-self:flex-start">Classifica</button></div>`;
+  else if (nextEv) h += `<div class="box red"><span class="h">Prossimo torneo</span><div class="nm">${esc(nextEv.name)}</div><div class="big" data-cd="${nextEv.start}">${countdown(nextEv.start)}</div><span class="hint">${fmtDay(nextEv.start)} · ${esc(nextEv.city)}</span></div>`;
+  if (next) h += `<div class="box yel"><span class="h">Prossima uscita</span><div class="nm">${esc(next.name)}</div><div class="big" data-cd="${next.date}">${countdown(next.date)}</div>
+      <span class="hint">${fmtDay(next.date)}${next.region === "jp" ? " · in Giappone" : " · nei negozi italiani"}</span></div>`;
+  $("#now").innerHTML = h;
+}
+
+/* ---------- uscite ---------- */
+function renderUscite() {
+  const rs = S.data.releases.slice().sort((a, b) => {
+    const fa = new Date(a.date) < Date.now(), fb = new Date(b.date) < Date.now();
+    return fa !== fb ? (fa ? 1 : -1) : fa ? new Date(b.date) - new Date(a.date) : new Date(a.date) - new Date(b.date); });
+  let h = `<p class="hint" style="margin:0">Espansioni italiane e internazionali, set giapponesi in anteprima e prodotti speciali. Con «Segui» il bot inizia a cercarne le carte appena escono.</p>`;
+  let lastM = "";
+  for (const r of rs) {
+    const d = new Date(r.date), past = d < Date.now(); const m = past ? "Già uscite" : `${MESI_L[d.getMonth()]} ${d.getFullYear()}`;
+    if (m !== lastM) { h += `<div class="month">${m}</div>`; lastM = m; }
+    const tags = [r.region === "jp" ? `<span class="pill jp">Giappone</span>` : `<span class="pill">Italia</span>`, r.kind === "special" ? `<span class="pill sp">Prodotto speciale</span>` : "",
+      r.status === "preordini" ? `<span class="pill ok">Preordini aperti</span>` : r.status === "uscita" ? `<span class="pill">Uscita</span>` : `<span class="pill warn">Annunciata</span>`].join("");
+    const followed = r.followed || (S.followed && S.followed.has(r.id));
+    h += `<article class="box rel" style="--c1:${esc(r.c1 || "#2f4f86")};--c2:${esc(r.c2 || "#0a1328")}">
+      <div class="art" aria-hidden="true">${esc(r.id.toUpperCase())}</div>
+      <div class="t">
+        <div class="row">${tags}</div>
+        <div class="nm">${esc(r.name)}</div>
+        <div class="meta">${past ? "uscita il " : ""}${fmtDay(r.date)} ${d.getFullYear()}${r.cards ? ` · ${r.cards} carte` : ""}${r.expectedInt ? ` · da noi: ${esc(r.expectedInt)} (stima)` : ""}${past ? "" : ` · <span class="cd" data-cd="${r.date}">${countdown(r.date)}</span>`}</div>
+        ${r.highlights && r.highlights.length ? `<ul>${r.highlights.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
+        ${r.products && r.products.length ? `<div class="meta">Prodotti: ${r.products.map(esc).join(" · ")}</div>` : ""}
+        ${r.region === "jp" ? "" : `<div class="row" style="margin-top:4px">${followed ? `<span class="pill ok">✓ La segui</span>` : `<button class="btn sec" data-follow="${esc(r.id)}">Segui</button>`}</div>`}
+      </div></article>`;
+  }
+  $("#p-uscite").innerHTML = h;
+}
+
+/* ---------- mazzi ---------- */
+function renderMazzi() {
+  const D = S.data.decks; const max = Math.max(...D.meta.filter((x) => x.a !== "Altri").map((x) => x.s));
+  let h = `<div class="box"><span class="h">Meta del momento</span>
+    <div class="nm" style="font-weight:900;font-size:16px;margin-top:4px">${esc(D.event)}</div>
+    <span class="hint">${fmtDay(D.date)} · ${D.players.toLocaleString("it-IT")} giocatori · ${esc(D.format)}</span>
+    <div class="meta-bars">${D.meta.map((x) => `<div class="mb"><span>${esc(x.a)}</span><span class="pc">${x.s.toFixed(1).replace(".", ",")}%</span><div class="tr"><i style="width:${x.a === "Altri" ? 0 : (x.s / max * 100).toFixed(1)}%"></i></div></div>`).join("")}</div>
+    <p class="hint" style="margin:10px 0 0">Quota dei mazzi sul totale degli iscritti.</p></div>`;
+  h += `<div class="h" style="margin-top:4px">Top 8</div>`;
+  for (const t of D.top) {
+    h += `<details class="deck"${t.place === 1 ? " open" : ""}><summary>
+      <span class="pl p${t.place}">${t.place}°</span>
+      <span class="who"><b>${esc(t.a)}</b><small>${flag(t.country)} ${esc(t.player)} · ti mancano ${t.missing} carte</small></span>
+      <span class="pr"><b>${eur(t.price)}</b><small>Cardmarket</small></span></summary>`;
+    if (t.list) {
+      h += `<div class="dl">${Object.entries(t.list).map(([g, cs]) => `<div><h4>${esc(g)} · ${cs.reduce((s, c) => s + c[0], 0)}</h4><ul>${cs.map((c) =>
+        `<li class="${c[3] ? "" : "miss"}"><span class="q">${c[0]}</span><span class="n">${esc(c[1])}</span><span class="cd2">${esc(c[2])}</span></li>`).join("")}</ul></div>`).join("")}
+        <p class="hint" style="margin:0">Il prezzo è la somma dei trend Cardmarket della lista intera. Le carte che hai già segnato non contano in «ti mancano».</p>
+        <div class="row"><button class="btn sec" data-copy="${t.place}">Copia lista</button><button class="btn ghost" data-shop="${t.place}">Cerca quelle che mancano</button></div></div>`;
+    } else h += `<div class="dl"><p class="hint" style="margin:0">Lista non ancora pubblicata dall'organizzatore.</p></div>`;
+    h += `</details>`;
+  }
+  $("#p-mazzi").innerHTML = h;
+}
+
+/* ---------- eventi ---------- */
+function renderEventi() {
+  const evs = S.data.events.filter((e) => new Date(e.end) > Date.now()).sort((a, b) => new Date(a.start) - new Date(b.start));
+  let h = `<p class="hint" style="margin:0">Regionali, Internazionali e Mondiali, con orari in ora italiana. Durante un torneo la classifica si aggiorna da sola.</p>`;
+  for (const e of evs) {
+    const live = isLive(e), d = new Date(e.start);
+    h += `<article class="box ev${live ? " red" : ""}">
+      <div class="date"><b>${d.getDate()}</b><small>${MESI[d.getMonth()]}</small></div>
+      <div class="t">
+        <div class="row">${live ? `<span class="pill live">In corso</span>` : ""}<span class="pill">${esc(e.kind)}</span>${e.home ? `<span class="pill sp">In Italia</span>` : ""}</div>
+        <div class="nm">${esc(e.name)}</div>
+        <span class="hint">${esc(e.city)}${e.country ? ", " + esc(e.country) : ""} · ${fmtDay(e.start)}–${fmtDay(e.end)}</span>
+        ${live ? "" : `<span class="hint">inizia tra <span class="cd" data-cd="${e.start}">${countdown(e.start)}</span> · alle ${fmtTime(e.start)} ora italiana</span>`}
+        ${live && e.live ? `<div class="scroll"><table class="stand"><thead><tr><th>#</th><th>Giocatore</th><th class="r">V-S-P</th></tr></thead><tbody>
+          ${e.live.standings.map((s) => `<tr><td>${s.pos}</td><td>${flag(s.country)} ${esc(s.player)}<small>${esc(s.a)}</small></td><td class="r">${esc(s.rec)}</td></tr>`).join("")}</tbody></table></div>
+          <span class="hint">Giorno ${e.live.day}, turno ${e.live.round} di ${e.live.of} · aggiornata ${ago(e.live.updated)}</span>` : ""}
+      </div></article>`;
+  }
+  $("#p-eventi").innerHTML = h;
+}
+
+/* ---------- aggiornamenti ---------- */
+function renderAgg() {
+  $("#p-agg").innerHTML = S.data.updates.slice().sort((a, b) => new Date(b.date) - new Date(a.date)).map((u) => `<article class="box up">
+      <div class="row"><span class="pill${u.kind === "Banlist" ? " warn" : u.kind === "Annuncio" ? " sp" : ""}">${esc(u.kind)}</span><span class="hint">${fmtDay(u.date)}</span></div>
+      <div class="nm">${esc(u.title)}</div><p>${esc(u.body)}</p><span class="src">Fonte: ${esc(u.src)}</span></article>`).join("");
+}
+
+/* ---------- notifiche ---------- */
+const CATS = [
+  ["espansioni", "Uscite", "nuove espansioni annunciate, preordini e giorno di uscita"],
+  ["tornei", "Mazzi dei tornei", "la top 8 appena finisce un grande torneo"],
+  ["live", "Tornei in diretta", "inizio del torneo e vincitore"],
+  ["aggiornamenti", "Aggiornamenti e annunci", "banlist, rotazioni, regole e annunci ufficiali"],
+];
+function renderNotif() {
+  const full = S.plan === "full";
+  let h = `<div class="box"><span class="h">Avvisi in chat</span><p class="hint" style="margin:6px 0 4px">Scegli cosa vuoi ricevere. Gli avvisi arrivano nella chat del bot.</p>
+    ${CATS.map(([k, t, d]) => `<div class="set"><label for="sw-${k}">${t}<small>${d}</small></label>
+      <button class="sw" role="switch" id="sw-${k}" data-cat="${k}" aria-checked="${full && S.notif[k]}"${full ? "" : " disabled"}></button></div>`).join("")}
+    ${full ? "" : `<div class="lock"><span>Gli avvisi delle novità sono inclusi in Completo e nella prova. Con Light trovi tutto in questa pagina.</span><button class="btn" id="go-sub">Abbonati</button></div>`}
+  </div>`;
+  $("#p-notif").innerHTML = h;
+}
+
+/* ---------- montaggio ---------- */
+function render() {
+  const D = S.data;
+  $("#upd").textContent = `aggiornato ${ago(D.updated)}`;
+  $("#tab-eventi").innerHTML = "Eventi" + (D.events.some(isLive) ? '<span class="dot" aria-label="torneo in corso"></span>' : "");
+  renderNow(); renderUscite(); renderMazzi(); renderEventi(); renderAgg(); renderNotif(); showTab(S.tab);
+}
+function showTab(t) {
+  if (!document.getElementById("p-" + t)) t = "uscite";
+  S.tab = t; try { localStorage.setItem("news.tab", t); } catch (e) {}
+  document.querySelectorAll(".tab").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
+  document.querySelectorAll("main > section.stack").forEach((s) => { s.hidden = s.id !== "p-" + t; });
+  $("#now").hidden = t === "notif";
+}
+function tick() { document.querySelectorAll("[data-cd]").forEach((el) => { el.textContent = countdown(el.dataset.cd); }); }
+
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.tab) return showTab(b.dataset.tab);
+  if (b.dataset.go) return showTab(b.dataset.go);
+  if (b.dataset.follow) {
+    const id = b.dataset.follow;
+    if (await sendCmd(`/collezione ${id}`)) toast("Fatto: la conferma arriva in chat");
+    (S.followed = S.followed || new Set()).add(id); renderUscite(); return;
+  }
+  if (b.dataset.cat) {
+    const k = b.dataset.cat, on = b.getAttribute("aria-checked") !== "true";
+    b.setAttribute("aria-checked", String(on)); S.notif[k] = on;
+    if (await sendCmd(`/novita ${k} ${on ? "si" : "no"}`)) toast(on ? "Avvisi accesi" : "Avvisi spenti"); return;
+  }
+  if (b.dataset.copy) {
+    const t = S.data.decks.top.find((x) => String(x.place) === b.dataset.copy); if (!t || !t.list) return;
+    const txt = Object.entries(t.list).map(([g, cs]) => `${g}: ${cs.reduce((s, c) => s + c[0], 0)}\n` + cs.map((c) => `${c[0]} ${c[1]} ${c[2]}`).join("\n")).join("\n\n");
+    try { await navigator.clipboard.writeText(txt); toast("Lista copiata: incollala in Pokémon TCG Live"); } catch (err) { toast("Copia non riuscita su questo dispositivo"); }
+    return;
+  }
+  if (b.dataset.shop) {
+    const t = S.data.decks.top.find((x) => String(x.place) === b.dataset.shop);
+    if (await sendCmd(`/insegui mazzo ${t.place}`)) toast(`Il bot cerca le ${t.missing} carte che ti mancano`); return;
+  }
+  if (b.id === "go-sub") { if (await sendCmd("/abbonati")) toast("Ti ho mandato il pulsante per abbonarti in chat"); return; }
+  if (b.id === "as-full" || b.id === "as-light") {
+    S.plan = b.id === "as-full" ? "full" : "light";
+    $("#as-full").setAttribute("aria-pressed", String(S.plan === "full")); $("#as-light").setAttribute("aria-pressed", String(S.plan === "light"));
+    renderNotif(); return;
+  }
+  if (b.id === "back") { if (tg) location.href = "/app"; else toast("Nel bot torna alla Mini App"); }
+});
+
+load();
+})();
+</script>
