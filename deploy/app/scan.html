@@ -690,7 +690,7 @@ function growOutward(canvas, quad){
     const band = off => { const pts = []; for (const s of [3, 4, 5, 6]){ pts.push([p[0] + ta[0] * s * ppm + na.nx * off * ppm, p[1] + ta[1] * s * ppm + na.ny * off * ppm]); pts.push([p[0] + tb[0] * s * ppm + nb.nx * off * ppm, p[1] + tb[1] * s * ppm + nb.ny * off * ppm]); } return pts; };
     const outs = band(0.5); const C = mean(cut), B = mean(band(-0.5)), O = mean(outs); const co = l1(C, O), cb = l1(C, B);
     let sp = 0; for (const [x, y] of outs) sp = Math.max(sp, l1(col(x, y), O)); // quanto varia lo sfondo da solo (solo per la diagnostica)
-    const s = co < 30 && cb > 22 ? 1 : cb < 12 && co > 30 ? -1 : 0;
+    const s = co < 20 && cb > 22 ? 1 : cb < 12 && co > 20 ? -1 : 0;
     return { co: Math.round(co), cb: Math.round(cb), sp: Math.round(sp), s }; }; // (canali: luminanza e due colori opposti) −1 solo se la zona del taglio somiglia al bordo e non allo sfondo; bordo nero su panno in ombra: incerto, 0
   const c0 = q.map((p, i) => cornerAt(p, i)); const s0 = c0.reduce((a, c) => a + c.s, 0);
   growOutward.last = { corners: s0, c: c0.map(c => [c.co, c.cb, c.sp]), ppm: +ppm.toFixed(2) };
