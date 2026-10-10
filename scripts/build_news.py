@@ -311,11 +311,11 @@ def limitless_standings(t: dict) -> list[dict]:
         place = int(cells[0])
         if place > 32:
             continue
-        deck = (re.search(r'href="/decks/([^"/?]+)[^"]*"[^>]*>(.*?)</a>', tr, flags=re.S) or [None, "", ""])
-        country = (re.search(r'(?:flag|country)[^>]*?(?:alt|title|data-[a-z]+)="([A-Za-z]{2})"', tr) or [None, ""])[1].upper()
-        lst = re.search(r'href="(/tournaments/\d+/decks?/[^"]+|/decks/list/[^"]+)"', tr)
-        player = next((c for c in cells[1:] if re.search(r"[A-Za-z]", c) and not re.fullmatch(r"\d+-\d+(-\d+)?", c)), "")
-        arche = text_of(deck[2]).strip() if deck and deck[2] else (deck[1].replace("-", " ").title() if deck and deck[1] else "")
+        attr = lambda k: html.unescape((re.search(r'data-%s="([^"]*)"' % k, tr) or [None, ""])[1])  # noqa: E731
+        country = (attr("country") or (re.search(r'class="flag"[^>]*alt="([A-Za-z]{2})"', tr) or [None, ""])[1]).upper()
+        lst = re.search(r'href="(/decks/list/[^"]+|/tournaments/\d+/decks?/[^"]+)"', tr)
+        player = attr("name") or next((c for c in cells[1:] if re.search(r"[A-Za-z]", c) and not re.fullmatch(r"\d+-\d+(-\d+)?", c)), "")
+        arche = attr("deck") or (re.search(r'data-tooltip="([^"]+)"', tr) or [None, ""])[1]
         top.append({"place": place, "player": player.strip()[:40], "country": country, "a": arche or "–", "price": None, "missing": None,
                     "list": None, "cards": [], "list_url": LIMITLESS + lst[1] if lst else None})
     if not top or not any(d.get("list_url") for d in top[:8]) or all(d["a"] == "–" for d in top[:8]):
@@ -408,6 +408,11 @@ def price_cards(top: list[dict], prev: dict, by_code: dict, to_tcgdex: dict) -> 
         d["cards"] = resolved
         d["price"] = round(total) if total else None
         d["price_note"] = f"{missing_price} carte senza prezzo" if missing_price else ""
+        if d is top[0]:
+            no_set = [code for _q, code, tid in resolved if not tid]
+            no_tx = [code for _q, code, tid in resolved if tid and not to_tcgdex.get(tid.rsplit("-", 1)[0])]
+            no_price = [f"{code}→{tid}→{to_tcgdex.get(tid.rsplit('-', 1)[0])}" for _q, code, tid in resolved if tid and to_tcgdex.get(tid.rsplit("-", 1)[0]) and cache.get(tid, {}).get("p") is None]
+            log(f"  prezzi 1°: senza set nel catalogo {no_set} · set senza TCGdex {no_tx} · senza prezzo {no_price[:8]}")
     return cache
 
 
