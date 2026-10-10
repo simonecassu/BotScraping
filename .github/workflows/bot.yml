@@ -4,7 +4,7 @@
 #   Il cron qui sotto è solo una riserva oraria; "Run workflow" forza una ricerca immediata.
 # - Lo stato (database e dati per la Mini App) è salvato cifrato nel branch "bot-state" (il repository è pubblico):
 #   la chiave è ricavata da TELEGRAM_BOT_TOKEN, quindi cambiando token lo stato salvato non si legge più (vedi README).
-name: PokéBot
+name: Pescacarte
 
 on:
   schedule:
