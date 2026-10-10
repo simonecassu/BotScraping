@@ -93,7 +93,7 @@ Tutto si fa dal browser, anche da iPhone. Secret del repository in
 | `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET` | facoltativi: per cercare anche su eBay |
 
 1. Actions → **Ponte Telegram** → *Run workflow*: pubblica il ponte e collega il webhook (alla fine: "Ponte attivo").
-2. Actions → **PokéBot** → *Run workflow*: primo giro.
+2. Actions → **Pescacarte** → *Run workflow*: primo giro.
 3. Scrivi `/start` al bot: il primo che lo fa diventa il proprietario.
 
 GitHub sospende i workflow pianificati dopo 60 giorni senza attività sul repository: arriva un'email e si riattiva con un tap.

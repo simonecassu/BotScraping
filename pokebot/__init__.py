@@ -1,1 +1,1 @@
-"""PokéBot - bot di scraping per completare le collezioni Pokémon TCG (30th Celebration e qualsiasi altra)."""
+"""Pescacarte - bot che cerca sui mercatini le carte mancanti alle collezioni Pokémon TCG (30th Celebration e qualsiasi altra)."""

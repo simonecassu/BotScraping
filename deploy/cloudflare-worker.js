@@ -1,5 +1,5 @@
 // Ponte Telegram → GitHub Actions (Cloudflare Worker, piano gratuito), pubblicato da .github/workflows/ponte.yml.
-// - Ogni messaggio al bot diventa un file cifrato nel branch "bot-queue" e sveglia subito il workflow "PokéBot".
+// - Ogni messaggio al bot diventa un file cifrato nel branch "bot-queue" e sveglia subito il workflow "Pescacarte".
 // - Ogni 5 minuti (timer del worker) sveglia il bot solo se c'è qualcosa da fare (vedi timerReason).
 // - Serve la Mini App su /app e il suo stato su /api/state (solo i dati di chi la apre, verificati con la firma di Telegram).
 //

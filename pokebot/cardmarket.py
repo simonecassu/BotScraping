@@ -108,7 +108,7 @@ def _num(s: str) -> str:
 
 
 def _http_get(url: str):
-    resp = requests.get(url, timeout=config.HTTP_TIMEOUT, headers={"User-Agent": "Pokebot/1.0"})
+    resp = requests.get(url, timeout=config.HTTP_TIMEOUT, headers={"User-Agent": "Pescacarte/1.0"})
     resp.raise_for_status()
     return resp.json()
 

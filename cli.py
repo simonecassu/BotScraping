@@ -33,7 +33,7 @@ QUEUE_DONE = config.DATA_DIR / "queue-done.json"
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="PokéBot")
+    p = argparse.ArgumentParser(description="Pescacarte")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("cerca", help="esegui un ciclo di ricerca")
     s.add_argument("--dry-run", action="store_true", help="non inviare notifiche")
