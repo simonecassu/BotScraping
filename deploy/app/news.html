@@ -258,10 +258,12 @@ function renderUscite() {
   const rs = (S.data.releases || []).slice().sort((a, b) => {
     const fa = new Date(a.date) < Date.now(), fb = new Date(b.date) < Date.now();
     return fa !== fb ? (fa ? 1 : -1) : fa ? new Date(b.date) - new Date(a.date) : new Date(a.date) - new Date(b.date); });
-  let h = `<p class="hint" style="margin:0">Espansioni italiane e internazionali, set giapponesi in anteprima e prodotti speciali, con le carte rivelate man mano. Con «Segui» il bot inizia a cercarne le carte appena escono.</p>`;
+  const upcoming = rs.filter((r) => new Date(r.date) >= Date.now());
+  let h = `<p class="hint" style="margin:0">Le prossime espansioni, italiane e internazionali, e i set giapponesi in anteprima, con le carte rivelate man mano; sotto, quelle uscite negli ultimi 45 giorni. Con «Segui» il bot cerca le loro carte.</p>`;
+  if (!upcoming.length) h += `<div class="box"><b>Nessuna espansione annunciata al momento.</b> <span class="hint">Appena TCGdex inserisce la prossima compare qui, con le carte rivelate man mano; con l'avviso «espansioni» acceso te lo dico anche in chat.</span></div>`;
   let lastM = "";
   for (const r of rs) {
-    const d = new Date(r.date), past = d < Date.now(); const m = past ? "Già uscite" : `${MESI_L[d.getMonth()]} ${d.getFullYear()}`;
+    const d = new Date(r.date), past = d < Date.now(); const m = past ? "Già uscite · ultimi 45 giorni" : `${MESI_L[d.getMonth()]} ${d.getFullYear()}`;
     if (m !== lastM) { h += `<div class="month">${m}</div>`; lastM = m; }
     const tags = [r.region === "jp" ? `<span class="pill jp">Giappone</span>` : `<span class="pill">Italia</span>`, r.kind === "special" ? `<span class="pill sp">Prodotto speciale</span>` : "",
       r.status === "preordini" ? `<span class="pill ok">Preordini aperti</span>` : r.status === "uscita" ? `<span class="pill">Uscita</span>` : `<span class="pill warn">Annunciata</span>`].join("");

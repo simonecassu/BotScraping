@@ -50,7 +50,7 @@ Telegram (`telegram-web-app.js`) viene scaricato a ogni deploy e servito dal pon
 telegram.org non risponde.
 Ognuno vede solo i suoi dati.
 
-**Novità** (`deploy/app/news.html`, dati in `/app/news.json`): uscite italiane e giapponesi con le carte rivelate (TCGdex),
+**Novità** (`deploy/app/news.html`, dati in `/app/news.json`): uscite italiane e giapponesi, con le carte rivelate per i set non ancora usciti (TCGdex),
 top 8 dell'ultimo grande torneo con liste, prezzo Cardmarket e carte mancanti per persona (limitlesstcg.com), calendario
 degli eventi (rk9.gg; la classifica in diretta non è ancora disponibile). Gli annunci di pokemon.com/it non si leggono: il sito
 blocca i bot (la scheda resta nascosta). Li scrive il workflow

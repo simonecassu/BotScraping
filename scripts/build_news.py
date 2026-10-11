@@ -158,7 +158,8 @@ def save_image(url: str, out: Path, name: str) -> str | None:
 
 # ---------------------------------------------------------------- uscite (TCGdex)
 def tcgdex_releases(prev: dict, out: Path, today: datetime) -> list[dict]:
-    """Set usciti da poco o in arrivo, internazionali (it, nome italiano) e giapponesi; le carte già inserite valgono come rivelate."""
+    """Set usciti da poco o in arrivo, internazionali (it, nome italiano) e giapponesi. Per i set non ancora usciti le carte già
+    inserite valgono come «rivelate»; per quelli già usciti non ha senso (sono tutte fuori) e si tiene solo la scheda del set."""
     prev_rel = {r["id"]: r for r in prev.get("releases", []) if r.get("src") == "tcgdex"}
     releases: list[dict] = []
     for lang, region in (("en", "int"), ("ja", "jp")):
@@ -185,9 +186,10 @@ def tcgdex_releases(prev: dict, out: Path, today: datetime) -> list[dict]:
             cards = d.get("cards") or []
             old = prev_rel.get(f"tcg-{s['id']}") or {}
             old_rev = {str(c["n"]): c for c in old.get("revealed", [])}
+            status = "uscita" if rd <= today else "preordini" if rd <= today + timedelta(days=45) else "annunciata"
             revealed = []
             fresh = 0
-            for c in cards:
+            for c in (cards if status != "uscita" else []):  # carte rivelate solo prima dell'uscita
                 key = str(c.get("localId") or c.get("id"))
                 if key in old_rev:
                     o = dict(old_rev[key]); o["rarity"] = str(o.get("rarity") or "–"); revealed.append(o)
@@ -210,7 +212,6 @@ def tcgdex_releases(prev: dict, out: Path, today: datetime) -> list[dict]:
                 n = int(key) if key.isdigit() else key
                 revealed.append({"n": n, "name": detail.get("name") or c.get("name") or key, "rarity": str(detail.get("rarity") or "–"),
                                  "type": typ, "when": now_iso(), "img": img})
-            status = "uscita" if rd <= today else "preordini" if rd <= today + timedelta(days=45) else "annunciata"
             total = cc.get("official") or cc.get("total") or None
             c1, c2 = COLORS.get(max((r["type"] for r in revealed), key=lambda t: sum(1 for r in revealed if r["type"] == t), default="col"), COLORS["col"])
             releases.append({"id": f"tcg-{s['id']}", "src": "tcgdex", "tcg_set": s["id"], "name": name, "region": region, "kind": "set",
@@ -529,7 +530,7 @@ def alerts(prev: dict, cur: dict) -> list[dict]:
             out.append({"id": f"st-{r['id']}-{r['status']}", "cat": "espansioni", "text": (f"🛒 Preordini aperti per <b>{html.escape(r['name'])}</b> (esce il {when})" if r["status"] == "preordini" else f"🎉 Oggi esce <b>{html.escape(r['name'])}</b>")})
         else:
             new_cards = len(r.get("revealed", [])) - len(o.get("revealed", []))
-            if new_cards >= 3:
+            if new_cards >= 3 and r["status"] != "uscita":
                 out.append({"id": f"rev-{r['id']}-{len(r['revealed'])}", "cat": "espansioni", "text": f"🃏 {new_cards} carte nuove rivelate per <b>{html.escape(r['name'])}</b>: guardale in Novità → Uscite"})
     d = cur.get("decks")
     if d and d.get("id") != (prev.get("decks") or {}).get("id") and d.get("top"):
