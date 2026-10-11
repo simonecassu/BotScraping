@@ -7,6 +7,7 @@
 <script src="/app/telegram-web-app.js"></script><!-- copia dello script ufficiale di Telegram servita dal ponte -->
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800;900&display=swap">
 <style>
+[hidden]:not([hidden=until-found i]){display:none!important}  /* vale anche sui pannelli con display:flex/grid */
 /* Pagina Novità della Mini App: dati veri da /app/news.json (scritto dal workflow «Novità», scripts/build_news.py);
    piano e interruttori della persona da /api/state. Una colonna da telefono: in alto ciò che succede adesso, poi le schede. */
 :root{
