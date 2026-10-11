@@ -196,7 +196,7 @@ summary{cursor:pointer;color:var(--ink)}
 </div>
 
 <div id="frame" class="editor" hidden>
-  <div class="crop-head"><b id="frame-title">Cornice fronte</b><span>Trascina le 4 maniglie sul filo interno della cornice stampata. <span id="frame-vals" style="font-family:var(--font-mono)"></span></span></div>
+  <div class="crop-head"><b id="frame-title">Cornice fronte</b><span>Trascina le 4 maniglie sul filo interno della cornice stampata, dove la cornice incontra il disegno. La lente ingrandisce 4× intorno alla maniglia scelta: il filo rosso è la linea della cornice, il bianco il taglio della carta, il grigio è fuori dalla carta; con le frecce la sposti di 0,1 mm. <span id="frame-vals" style="font-family:var(--font-mono)"></span></span></div>
   <div class="crop-body"><canvas id="framec"></canvas></div>
   <div class="padrow" id="frame-pad" hidden><span id="frame-pad-lbl">lato</span><button data-nudge="-1,0" aria-label="sinistra">◀</button><button data-nudge="0,-1" aria-label="su">▲</button><button data-nudge="0,1" aria-label="giù">▼</button><button data-nudge="1,0" aria-label="destra">▶</button><small>0,1 mm per tocco</small></div>
   <div class="bar"><button id="frame-cancel">Annulla</button><button class="primary" id="frame-ok">Conferma cornice</button></div>
@@ -1046,11 +1046,20 @@ function drawFrame(){ const c = $('#framec'), ctx = c.getContext('2d'), s = c.wi
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(r.clean, 0, 0, c.width, c.height);
   ctx.strokeStyle = '#ff3b30'; ctx.lineWidth = 2 * dpr; ctx.setLineDash([8 * dpr, 6 * dpr]); ctx.strokeRect(f.L * s, f.T * s, (W - f.L - f.R) * s, (H - f.T - f.B) * s); ctx.setLineDash([]);
   const hs = frameHandles();
-  for (const k in hs){ const [x, y] = hs[k]; ctx.beginPath(); ctx.arc(x * s, y * s, 16 * dpr, 0, Math.PI * 2); ctx.fillStyle = (fr.drag || fr.sel) === k ? '#30d158' : 'rgba(255,255,255,.9)'; ctx.fill(); ctx.strokeStyle = '#111'; ctx.lineWidth = 2 * dpr; ctx.stroke(); }
+  for (const k in hs){ const [x, y] = hs[k], on = (fr.drag || fr.sel) === k; // anello: sotto si vede il punto esatto
+    ctx.beginPath(); ctx.arc(x * s, y * s, 16 * dpr, 0, Math.PI * 2); ctx.fillStyle = on ? 'rgba(48,209,88,.3)' : 'rgba(255,255,255,.25)'; ctx.fill();
+    ctx.strokeStyle = on ? '#30d158' : '#fff'; ctx.lineWidth = 2.5 * dpr; ctx.stroke(); ctx.beginPath(); ctx.arc(x * s, y * s, 2.5 * dpr, 0, Math.PI * 2); ctx.fillStyle = on ? '#30d158' : '#fff'; ctx.fill(); }
   const lk = fr.drag || fr.sel;
   if (lk){ const [x, y] = hs[lk], L = 150 * dpr, Z = 4, reg = L / (Z * s); const lx = x * s < c.width / 2 ? c.width - L - 8 * dpr : 8 * dpr, ly = y * s < c.height / 2 ? c.height - L - 8 * dpr : 8 * dpr;
-    ctx.save(); ctx.beginPath(); ctx.rect(lx, ly, L, L); ctx.clip(); ctx.drawImage(r.clean, x - reg / 2, y - reg / 2, reg, reg, lx, ly, L, L); ctx.restore();
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2 * dpr; ctx.strokeRect(lx, ly, L, L); ctx.strokeStyle = '#ff3b30'; ctx.beginPath(); ctx.moveTo(lx + L/2, ly); ctx.lineTo(lx + L/2, ly + L); ctx.moveTo(lx, ly + L/2); ctx.lineTo(lx + L, ly + L/2); ctx.stroke(); }
+    const m = L / reg, ex = v => lx + (v - (x - reg / 2)) * m, ey = v => ly + (v - (y - reg / 2)) * m;  // coordinate della carta → lente
+    ctx.save(); ctx.beginPath(); ctx.rect(lx, ly, L, L); ctx.clip();
+    ctx.fillStyle = '#4b5563'; ctx.fillRect(lx, ly, L, L); ctx.drawImage(r.clean, x - reg / 2, y - reg / 2, reg, reg, lx, ly, L, L);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2 * dpr; ctx.beginPath();  // taglio della carta, se cade nella lente
+    for (const v of [0, W]) { ctx.moveTo(ex(v), ly); ctx.lineTo(ex(v), ly + L); } for (const v of [0, H]) { ctx.moveTo(lx, ey(v)); ctx.lineTo(lx + L, ey(v)); } ctx.stroke();
+    ctx.strokeStyle = '#ff3b30'; ctx.lineWidth = 2 * dpr; ctx.beginPath();  // la linea della cornice: verticale per i lati, orizzontale per alto e basso
+    if (lk === 'L' || lk === 'R'){ ctx.moveTo(lx + L/2, ly); ctx.lineTo(lx + L/2, ly + L); } else { ctx.moveTo(lx, ly + L/2); ctx.lineTo(lx + L, ly + L/2); } ctx.stroke();
+    ctx.fillStyle = '#ff3b30'; ctx.beginPath(); ctx.arc(lx + L/2, ly + L/2, 3 * dpr, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2 * dpr; ctx.strokeRect(lx, ly, L, L); }
   $('#frame-vals').textContent = `S ${(f.L/10).toFixed(1)} · D ${(f.R/10).toFixed(1)} · A ${(f.T/10).toFixed(1)} · B ${(f.B/10).toFixed(1)} mm → ${ratio(f.L, f.R)} · ${ratio(f.T, f.B)}`; }
 function framePos(e){ const r = $('#framec').getBoundingClientRect(); return [(e.clientX - r.left) / fr.scale, (e.clientY - r.top) / fr.scale]; }
 $('#framec').addEventListener('pointerdown', e => { const [x, y] = framePos(e), hs = frameHandles(); let bk = null, bd = 44 / fr.scale;
