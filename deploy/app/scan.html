@@ -105,6 +105,7 @@ summary{cursor:pointer;color:var(--ink)}
 .strip .ph.ref{border-color:var(--yel)}.strip .ph.rejected{opacity:.4}
 .strip .ph b{position:absolute;right:1px;bottom:1px;font-size:.6rem;line-height:1;padding:2px 3px;border-radius:4px;background:rgba(0,0,0,.65);color:#fff;font-family:var(--font-mono)}
 .pnote{display:block;color:var(--muted);font-size:.72rem;line-height:1.3}
+.strip .ph em{position:absolute;left:1px;top:1px;font-style:normal;font-size:.6rem;line-height:1;padding:2px 3px;border-radius:4px;background:rgba(227,53,13,.9);color:#fff;font-family:var(--font-mono)}
 .strip .ph .x{position:absolute;right:0;top:0;width:18px;height:18px;line-height:18px;text-align:center;font-size:.7rem;background:rgba(0,0,0,.65);color:#fff;border-radius:0 0 0 6px}
 .prog{position:relative;margin-top:6px;height:24px;border-radius:6px;background:var(--line2);overflow:hidden;font-size:.72rem;color:var(--ink)}
 .prog i{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--yel);opacity:.55;transition:width .25s}
@@ -149,7 +150,7 @@ summary{cursor:pointer;color:var(--ink)}
       <div class="levtxt" id="levtxt"><b>Livella</b><br>tocca “Attiva livella”</div>
       <button id="lev-btn">Attiva livella</button>
     </div>
-    \g<1> Più foto della stessa faccia (3–5, fino a 10) rendono la misura più affidabile: con «Scatta» fai più scatti di fila e poi «Fatto», con «Carica» ne scegli anche parecchie dalla galleria; nella striscia sotto ogni foto le elimini con ✕.</p>
+    \g<1> Più foto della stessa faccia (3–5, fino a 10) rendono la misura più affidabile: con «Scatta» fai più scatti di fila e poi «Fatto», con «Carica» ne scegli anche parecchie dalla galleria; nella striscia sotto ogni foto le elimini con ✕. Le foto fatte prima con il telefono non hanno la livella: la pagina stima l’inclinazione dai bordi e te la segnala.</p>
     <div class="btnrow" style="margin-top:12px">
       <button class="primary full" id="analyze" disabled>Analizza</button>
       <small class="note" id="analyze-hint" style="display:block;text-align:center;margin-top:8px">Per analizzare serve almeno la foto del fronte.</small>
@@ -319,7 +320,14 @@ function shrinkShot(sh, max){ const k = Math.min(1, max / Math.max(sh.canvas.wid
   sh.canvas = shrinkCanvas(sh.canvas, max); if (sh.quad) sh.quad = sh.quad.map(pt => [pt[0] * k, pt[1] * k]); return sh; }
 function progress(side, text, frac){ const el = $('#prog-' + side); el.hidden = text == null; if (text == null) return;
   el.querySelector('span').textContent = text; el.querySelector('i').style.width = `${Math.round((frac || 0) * 100)}%`; }
-function examine(canvas){ // nitidezza, esposizione e bordi di una foto: la voce per la striscia
+const TILT_WARN = 6;  // gradi: oltre, la foto è segnalata come inclinata (la livella della fotocamera dell'app dice «scatta» entro 5°)
+function tiltDeg(q, w, h){ // inclinazione approssimativa del telefono rispetto alla carta, dalla prospettiva del rettangolo trovato:
+  // due lati opposti di lunghezza diversa = carta inclinata; focale di una fotocamera da telefono ≈ 0,74 × lato lungo (campo ≈ 68°)
+  const L = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]); const t = L(q[0], q[1]), r = L(q[1], q[2]), b = L(q[2], q[3]), l = L(q[3], q[0]);
+  const f = 0.74 * Math.max(w, h); const deg = x => Math.asin(Math.min(1, x)) * 180 / Math.PI;
+  const sv = Math.abs(t - b) / ((t + b) / 2) * f / ((l + r) / 2), sh = Math.abs(l - r) / ((l + r) / 2) * f / ((t + b) / 2);
+  return Math.round(Math.hypot(deg(sv), deg(sh))); }
+function examine(canvas){ // nitidezza, esposizione, bordi e inclinazione di una foto: la voce per la striscia
   const gray = toGray(canvas, 640); const sh = sharpness(gray), ex = exposure(gray); const probs = [];
   if (sh < 60) probs.push(`sfocata (nitidezza ${sh.toFixed(0)}, minimo 60)`);
   if (ex.bright > 0.04) probs.push('riflessi o sovraesposizione');
@@ -327,7 +335,8 @@ function examine(canvas){ // nitidezza, esposizione e bordi di una foto: la voce
   if (probs.length) return { status:'rejected', reason: probs.join(', '), thumb: miniThumb(canvas) };
   const a = autoQuad(canvas); const st = a.stats;
   const conf = !a.quad ? 0 : (st && Math.min(...st.map(x => x.n)) >= 0.75 && Math.min(...st.map(x => x.contrast)) >= 30) ? 1 : 0.5;
-  return { status:'used', shot:{ canvas, sharp: sh, quad: a.quad ? orderQuad(a.quad) : null, conf }, thumb: miniThumb(canvas) };
+  const quad = a.quad ? orderQuad(a.quad) : null;
+  return { status:'used', shot:{ canvas, sharp: sh, quad, conf, tilt: quad ? tiltDeg(quad, canvas.width, canvas.height) : null }, thumb: miniThumb(canvas) };
 }
 async function addPhotos(side, items){ // file o canvas, in aggiunta alle foto già presenti della faccia
   if (busy[side] || !items.length) return; busy[side] = true;
@@ -357,8 +366,8 @@ async function addPhotos(side, items){ // file o canvas, in aggiunta alle foto g
   if (opened) openCrop(side);
 }
 function makeRef(side, ph){ const st = state[side], sh = ph.shot;
-  Object.assign(st, { canvas: sh.canvas, sharp: sh.sharp, quad: null, frame: null, res: null, auto: sh.quad ? { quad: sh.quad, conf: sh.conf } : null });
-  Object.assign(ph, { status:'ref', shot:null, sides:null });
+  Object.assign(st, { canvas: sh.canvas, sharp: sh.sharp, quad: null, frame: null, res: null, auto: sh.quad ? { quad: sh.quad, conf: sh.conf, tilt: sh.tilt } : null });
+  Object.assign(ph, { status:'ref', shot:null, sides:null, tilt: sh.tilt });
   const t = $('#thumb-' + side); t.innerHTML = ''; const im = new Image(); im.src = sh.canvas.toDataURL('image/jpeg', .6); t.appendChild(im);
   const q = document.createElement('span'); q.className = 'q'; q.textContent = `nitidezza ${sh.sharp.toFixed(0)} · ritaglio da confermare`; t.appendChild(q); }
 function removePhoto(side, i){ const st = state[side], ph = st && st.photos[i]; if (!ph) return;
@@ -400,10 +409,12 @@ function renderStrip(side){
   const st = state[side], el = $('#strip-' + side), note = $('#pnote-' + side); const ph = (st && st.photos) || [];
   el.hidden = note.hidden = !ph.length; if (!ph.length) return;
   el.innerHTML = ph.map((p, i) => { const badge = p.status === 'ref' ? '★' : p.status === 'used' ? (p.sides != null ? p.sides + '/4' : '✓') : '✗';
-    return `<div class="ph ${p.status}" data-i="${i}"><img src="${p.thumb}" alt=""><b>${badge}</b><span class="x" title="Elimina">✕</span></div>`; }).join('');
+    const tilt = p.status === 'ref' ? p.tilt : p.shot && p.shot.tilt; const em = tilt >= TILT_WARN ? `<em title="inclinata di circa ${tilt}°">${tilt}°</em>` : '';
+    return `<div class="ph ${p.status}" data-i="${i}"><img src="${p.thumb}" alt="">${em}<b>${badge}</b><span class="x" title="Elimina">✕</span></div>`; }).join('');
   const used = ph.filter(p => p.status !== 'rejected').length, rej = ph.filter(p => p.status === 'rejected');
   note.textContent = `${used} ${used === 1 ? 'foto usata' : 'foto usate'} su ${ph.length} (massimo ${MAX_PHOTOS}) · ★ riferimento · ✕ elimina · tocca una ✓ per farne il riferimento`
-    + (rej.length ? ` · ✗ ${rej.map(r => r.reason).join('; ')}` : '') + (ph.some(x => x.sides != null) ? ' · n/4: lati misurabili dopo l’analisi' : '');
+    + (rej.length ? ` · ✗ ${rej.map(r => r.reason).join('; ')}` : '') + (ph.some(x => x.sides != null) ? ' · n/4: lati misurabili dopo l’analisi' : '')
+    + (ph.some(x => (x.status === 'ref' ? x.tilt : x.shot && x.shot.tilt) >= TILT_WARN) ? ' · in rosso i gradi di inclinazione stimati: con la fotocamera dell’app la livella ti avvisa prima di scattare' : '');
   el.querySelectorAll('.ph').forEach(n => n.addEventListener('click', e => { const i = +n.dataset.i, p = ph[i];
     if (e.target.classList.contains('x')){ if (confirm(`Eliminare la foto ${i + 1}?`)) removePhoto(side, i); return; }
     if (p.status === 'rejected'){ showErr(`Foto ${i + 1}: scartata, ${p.reason}.`); return; }
@@ -439,8 +450,9 @@ function openCrop(side){
   crop.quad = orderQuad(q).map(p => [Math.max(0, Math.min(src.width - 1, p[0])), Math.max(0, Math.min(src.height - 1, p[1]))]);
   crop.sel = -1; $('#crop-pad').hidden = true;
   $('#crop-title').textContent = (side === 'front' ? 'Ritaglio fronte' : 'Ritaglio retro') + (state[side].quad ? ' · ritaglio confermato' : conf >= 0.75 ? ' · rilevata automaticamente' : conf > 0 ? ' · controlla i 4 angoli' : ' · carta non trovata, posiziona i cerchi');
-  const wn = $('#crop-warn'); wn.hidden = !!state[side].quad || conf >= 0.75;
-  wn.textContent = conf > 0 ? 'Il bordo della carta si distingue poco dallo sfondo: verifica che i cerchi siano sugli angoli. Per una misura affidabile fotografa su uno sfondo uniforme di colore opposto al bordo: scuro per bordi bianchi o argento, chiaro per bordi neri.' : 'Carta non trovata. Posiziona i cerchi a mano, oppure rifai la foto su uno sfondo uniforme di colore opposto al bordo (scuro per bordi bianchi o argento, chiaro per bordi neri).';
+  const tilt = au && au.tilt; const tiltMsg = tilt >= TILT_WARN ? `Foto inclinata di circa ${tilt}°: la misura è meno precisa. Con la fotocamera dell’app la livella ti avvisa prima di scattare. ` : '';
+  const wn = $('#crop-warn'); wn.hidden = (!!state[side].quad || conf >= 0.75) && !tiltMsg;
+  wn.textContent = tiltMsg + ((!!state[side].quad || conf >= 0.75) ? '' : conf > 0 ? 'Il bordo della carta si distingue poco dallo sfondo: verifica che i cerchi siano sugli angoli. Per una misura affidabile fotografa su uno sfondo uniforme di colore opposto al bordo: scuro per bordi bianchi o argento, chiaro per bordi neri.' : 'Carta non trovata. Posiziona i cerchi a mano, oppure rifai la foto su uno sfondo uniforme di colore opposto al bordo (scuro per bordi bianchi o argento, chiaro per bordi neri).');
   $('#crop').hidden = false;
   try{
     const c = $('#cropc'); const body = $('#crop .crop-body').getBoundingClientRect();
