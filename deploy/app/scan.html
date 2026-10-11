@@ -100,11 +100,16 @@ details{margin-top:12px;color:var(--muted);font-size:.85rem}
 summary{cursor:pointer;color:var(--ink)}
 .err{color:var(--bad);font-size:.85rem;margin-top:8px}
 .strip{display:flex;gap:6px;overflow-x:auto;padding:2px 0}
-.strip .ph{position:relative;flex:none;width:36px;height:50px;border-radius:5px;overflow:hidden;border:2px solid var(--line2);cursor:pointer}
+.strip .ph{position:relative;flex:none;width:44px;height:60px;border-radius:5px;overflow:hidden;border:2px solid var(--line2);cursor:pointer}
 .strip .ph img{width:100%;height:100%;object-fit:cover;display:block}
 .strip .ph.ref{border-color:var(--yel)}.strip .ph.rejected{opacity:.4}
 .strip .ph b{position:absolute;right:1px;bottom:1px;font-size:.6rem;line-height:1;padding:2px 3px;border-radius:4px;background:rgba(0,0,0,.65);color:#fff;font-family:var(--font-mono)}
 .pnote{display:block;color:var(--muted);font-size:.72rem;line-height:1.3}
+.strip .ph .x{position:absolute;right:0;top:0;width:18px;height:18px;line-height:18px;text-align:center;font-size:.7rem;background:rgba(0,0,0,.65);color:#fff;border-radius:0 0 0 6px}
+.prog{position:relative;margin-top:6px;height:24px;border-radius:6px;background:var(--line2);overflow:hidden;font-size:.72rem;color:var(--ink)}
+.prog i{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--yel);opacity:.55;transition:width .25s}
+.prog span{position:relative;display:block;line-height:24px;padding:0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#cam .overlay.flash{animation:camflash .25s ease-out}@keyframes camflash{from{background:rgba(255,255,255,.75)}to{background:transparent}}
 .padrow{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;padding:6px 16px 0;font-size:.78rem;color:var(--muted)}
 .padrow button{min-width:46px;padding:8px 0}.padrow span{font-family:var(--font-mono);color:var(--ink)}
 @media (prefers-reduced-motion:reduce){*{transition:none !important}}
@@ -126,6 +131,7 @@ summary{cursor:pointer;color:var(--ink)}
           <button class="snap" data-side="front">📷 Scatta</button>
           <label><button type="button" class="pick" data-side="front">Carica</button><input type="file" accept="image/*" id="file-front" multiple hidden><input type="file" accept="image/*" capture="environment" id="snap-front" hidden></label>
         </div>
+        <div class="prog" id="prog-front" hidden><i></i><span></span></div>
         <div class="strip" id="strip-front" hidden></div><small class="pnote" id="pnote-front" hidden></small>
       </div>
       <div class="shot" data-side="back">
@@ -134,6 +140,7 @@ summary{cursor:pointer;color:var(--ink)}
           <button class="snap" data-side="back">📷 Scatta</button>
           <label><button type="button" class="pick" data-side="back">Carica</button><input type="file" accept="image/*" id="file-back" multiple hidden><input type="file" accept="image/*" capture="environment" id="snap-back" hidden></label>
         </div>
+        <div class="prog" id="prog-back" hidden><i></i><span></span></div>
         <div class="strip" id="strip-back" hidden></div><small class="pnote" id="pnote-back" hidden></small>
       </div>
     </div>
@@ -142,7 +149,7 @@ summary{cursor:pointer;color:var(--ink)}
       <div class="levtxt" id="levtxt"><b>Livella</b><br>tocca “Attiva livella”</div>
       <button id="lev-btn">Attiva livella</button>
     </div>
-    <p class="note">Fotografa <b>una carta alla volta</b>, meglio senza bustina, su uno sfondo uniforme di colore <b>opposto al bordo</b>: scuro (panno o cartoncino nero) per i bordi bianchi o argento, chiaro per i bordi neri; con i bordi gialli va bene tutto. Con “Carica” puoi selezionare <b>più foto della stessa faccia</b> (10–20 scatti, muovendo un po’ il telefono): la carta viene trovata in ognuna e la centratura è la mediana di tutte, così le foto dove un bordo prende un riflesso non pesano.</p>
+    \g<1> Più foto della stessa faccia (3–5, fino a 10) rendono la misura più affidabile: con «Scatta» fai più scatti di fila e poi «Fatto», con «Carica» ne scegli anche parecchie dalla galleria; nella striscia sotto ogni foto le elimini con ✕.</p>
     <div class="btnrow" style="margin-top:12px">
       <button class="primary full" id="analyze" disabled>Analizza</button>
       <small class="note" id="analyze-hint" style="display:block;text-align:center;margin-top:8px">Per analizzare serve almeno la foto del fronte.</small>
@@ -203,7 +210,7 @@ summary{cursor:pointer;color:var(--ink)}
   <div class="bar">
     <button id="cam-cancel">Annulla</button>
     <button class="shutter" id="shutter" aria-label="Scatta"></button>
-    <span style="width:70px"></span>
+    <span style="min-width:70px;text-align:right"><button id="cam-done" hidden>Fatto</button></span>
   </div>
 </div>
 
@@ -215,7 +222,7 @@ function makePad(el, onMove){ let timer = null; const stop = () => { clearInterv
   el.querySelectorAll('[data-nudge]').forEach(b => { const [dx, dy] = b.dataset.nudge.split(',').map(Number);
     b.addEventListener('pointerdown', e => { e.preventDefault(); onMove(dx, dy); stop(); timer = setInterval(() => onMove(dx, dy), 90); });
     ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => b.addEventListener(ev, stop)); }); }
-const state = { front:null, back:null, tilt:null, side:'front', stream:null }; window.__cs = state;  // per il banco di prova (scripts/scanner_test.py)
+const state = { front:null, back:null, tilt:null, side:'front', stream:null, camShots:[] }; window.__cs = state;  // per il banco di prova (scripts/scanner_test.py)
 const tg = window.Telegram && window.Telegram.WebApp;
 if (tg){ tg.ready(); tg.expand();
   if (tg.BackButton){ tg.BackButton.show(); tg.BackButton.onClick(() => { location.href = '/app'; }); } }
@@ -262,7 +269,7 @@ $('#lev-btn').addEventListener('click', enableLevel);
 
 /* ---------- fotocamera ---------- */
 async function openCam(side){
-  state.side = side; $('#hud-side').textContent = side === 'front' ? 'Fronte' : 'Retro';
+  state.side = side; state.camShots = []; $('#cam-done').hidden = true; $('#hud-side').textContent = side === 'front' ? 'Fronte' : 'Retro';
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ return snapFile(side); }
   try{
     state.stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment', width:{ideal:3840}, height:{ideal:2160} }, audio:false });
@@ -275,18 +282,26 @@ function closeCam(){
   if (state.stream){ state.stream.getTracks().forEach(t => t.stop()); state.stream = null; }
   $('#cam').hidden = true;
 }
-$('#cam-cancel').addEventListener('click', closeCam);
-$('#shutter').addEventListener('click', () => {
+$('#cam-cancel').addEventListener('click', () => { if (state.camShots.length && !confirm(`Scartare ${state.camShots.length} scatti?`)) return; state.camShots = []; closeCam(); });
+$('#shutter').addEventListener('click', () => { // la fotocamera resta aperta: si scatta più volte, poi «Fatto»
   const v = $('#video'); if (!v.videoWidth) return;
-  const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
-  c.getContext('2d').drawImage(v, 0, 0);
-  closeCam();
-  acceptImage(state.side, c);
+  const room = MAX_PHOTOS - (((state[state.side] || {}).photos || []).length + state.camShots.length);
+  if (room <= 0){ $('#hud-side').textContent = `massimo ${MAX_PHOTOS} foto per faccia`; return; }
+  const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight; c.getContext('2d').drawImage(v, 0, 0);
+  state.camShots.push(shrinkCanvas(c, 2400));
+  const n = state.camShots.length; $('#hud-side').textContent = `${state.side === 'front' ? 'Fronte' : 'Retro'} · ${n} ${n === 1 ? 'scatto' : 'scatti'}`;
+  const d = $('#cam-done'); d.hidden = false; d.textContent = `Fatto (${n})`;
+  const o = $('#cam .overlay'); o.classList.remove('flash'); void o.offsetWidth; o.classList.add('flash');
 });
-function pickFile(side){ $('#file-' + side).click(); }
+$('#cam-done').addEventListener('click', () => { const shots = state.camShots; state.camShots = []; closeCam(); addPhotos(state.side, shots); });
+function pickFile(side){ progress(side, 'Scegli le foto: poi la lettura richiede qualche secondo per foto…', 0); $('#file-' + side).click(); }
 function snapFile(side){ $('#snap-' + side).click(); }
-['front','back'].forEach(side => $('#snap-' + side).addEventListener('change', async e => {
-  const f = (e.target.files || [])[0]; e.target.value = ''; if (!f) return; const c = await loadFile(f); if (c) acceptImage(side, c); }));
+window.addEventListener('focus', () => { for (const sd of ['front', 'back']) if (!busy[sd]) progress(sd, null); });  // galleria chiusa senza scegliere
+['front','back'].forEach(side => {
+  $('#snap-' + side).addEventListener('change', e => { const f = (e.target.files || [])[0]; e.target.value = ''; if (f) addPhotos(side, [f]); });
+  $('#file-' + side).addEventListener('change', e => { const files = Array.from(e.target.files || []); e.target.value = ''; if (files.length) addPhotos(side, files); else progress(side, null); });
+  $('#file-' + side).addEventListener('cancel', () => progress(side, null));
+});
 document.querySelectorAll('.snap').forEach(b => b.addEventListener('click', () => openCam(b.dataset.side)));
 document.querySelectorAll('.pick').forEach(b => b.addEventListener('click', () => pickFile(b.dataset.side)));
 function loadFile(f){ return new Promise(res => { const img = new Image(); img.onload = () => {
@@ -294,31 +309,66 @@ function loadFile(f){ return new Promise(res => { const img = new Image(); img.o
     c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(img.src); res(c); };
   img.onerror = () => res(null); img.src = URL.createObjectURL(f); }); }
-['front','back'].forEach(side => $('#file-' + side).addEventListener('change', async e => {
-  const files = Array.from(e.target.files || []); e.target.value = ''; if (!files.length) return;
-  if (files.length === 1){ const c = await loadFile(files[0]); if (c) acceptImage(side, c); return; }
-  // più scatti della stessa faccia: ognuno viene controllato e ritagliato da solo; il migliore fa da riferimento
-  const err = $('#err'); err.hidden = false; err.textContent = `Carico ${files.length} foto…`;
-  const shots = [], rejected = [], photos = [];
-  for (let i = 0; i < files.length; i++){
-    err.textContent = `Foto ${i + 1} di ${files.length}…`; await new Promise(r => setTimeout(r, 0));
-    const c = await loadFile(files[i]); if (!c){ rejected.push('file non leggibile'); photos.push({ status: 'rejected', reason: 'file non leggibile', thumb: '' }); continue; }
-    const gray = toGray(c, 640); const sh = sharpness(gray), ex = exposure(gray);
-    if (sh < 60 || ex.bright > 0.04 || ex.dark > 0.9){ const why = sh < 60 ? 'sfocata' : ex.bright > 0.04 ? 'riflessi' : 'scura'; rejected.push(why); photos.push({ status: 'rejected', reason: why, thumb: miniThumb(c) }); continue; }
-    const a = autoQuad(c); if (!a.quad){ rejected.push('carta non trovata'); photos.push({ status: 'rejected', reason: 'carta non trovata', thumb: miniThumb(c) }); continue; }
-    const st = a.stats; const conf = (st && Math.min(...st.map(x => x.n)) >= 0.75 && Math.min(...st.map(x => x.contrast)) >= 30) ? 1 : 0.5;
-    const shot = { canvas: c, sharp: sh, quad: orderQuad(a.quad), conf }; shots.push(shot); photos.push({ status: 'used', shot, thumb: miniThumb(c) });
+
+/* ---------- foto di una faccia: si aggiungono, si eliminano, una fa da riferimento ---------- */
+const MAX_PHOTOS = 10;  // per faccia: ogni foto usata resta in memoria (gli scatti in più ridotti a 1800 px)
+const busy = { front:false, back:false };
+function shrinkCanvas(c, max){ const k = Math.min(1, max / Math.max(c.width, c.height)); if (k === 1) return c;
+  const o = document.createElement('canvas'); o.width = Math.round(c.width * k); o.height = Math.round(c.height * k); o.getContext('2d').drawImage(c, 0, 0, o.width, o.height); return o; }
+function shrinkShot(sh, max){ const k = Math.min(1, max / Math.max(sh.canvas.width, sh.canvas.height)); if (k === 1) return sh;
+  sh.canvas = shrinkCanvas(sh.canvas, max); if (sh.quad) sh.quad = sh.quad.map(pt => [pt[0] * k, pt[1] * k]); return sh; }
+function progress(side, text, frac){ const el = $('#prog-' + side); el.hidden = text == null; if (text == null) return;
+  el.querySelector('span').textContent = text; el.querySelector('i').style.width = `${Math.round((frac || 0) * 100)}%`; }
+function examine(canvas){ // nitidezza, esposizione e bordi di una foto: la voce per la striscia
+  const gray = toGray(canvas, 640); const sh = sharpness(gray), ex = exposure(gray); const probs = [];
+  if (sh < 60) probs.push(`sfocata (nitidezza ${sh.toFixed(0)}, minimo 60)`);
+  if (ex.bright > 0.04) probs.push('riflessi o sovraesposizione');
+  if (ex.dark > 0.9) probs.push('troppo scura');
+  if (probs.length) return { status:'rejected', reason: probs.join(', '), thumb: miniThumb(canvas) };
+  const a = autoQuad(canvas); const st = a.stats;
+  const conf = !a.quad ? 0 : (st && Math.min(...st.map(x => x.n)) >= 0.75 && Math.min(...st.map(x => x.contrast)) >= 30) ? 1 : 0.5;
+  return { status:'used', shot:{ canvas, sharp: sh, quad: a.quad ? orderQuad(a.quad) : null, conf }, thumb: miniThumb(canvas) };
+}
+async function addPhotos(side, items){ // file o canvas, in aggiunta alle foto già presenti della faccia
+  if (busy[side] || !items.length) return; busy[side] = true;
+  const st = state[side] || { canvas:null, sharp:0, quad:null, shots:[], photos:[] }; st.photos = st.photos || []; st.shots = st.shots || [];
+  const list = items.slice(0, Math.max(0, MAX_PHOTOS - st.photos.length));
+  if (!list.length){ progress(side, null); showErr(`Al massimo ${MAX_PHOTOS} foto per faccia: elimina qualche foto dalla striscia con ✕.`); busy[side] = false; return; }
+  $('#err').hidden = true; const fresh = [];
+  for (let i = 0; i < list.length; i++){
+    progress(side, `Foto ${i + 1} di ${list.length}: lettura, nitidezza, ricerca dei bordi…`, i / list.length); await new Promise(r => setTimeout(r, 30));
+    const c = list[i] instanceof Blob ? await loadFile(list[i]) : list[i];
+    const ph = c ? examine(c) : { status:'rejected', reason:'file non leggibile', thumb:'' };
+    fresh.push(ph); if (st.canvas){ st.photos.push(ph); renderStrip(side); }
   }
-  if (!shots.length){ err.textContent = `Nessuna foto utilizzabile (${rejected.join(', ')}).`; return; }
-  shots.sort((p, q) => (q.conf - p.conf) || (q.sharp - p.sharp));
-  const best = shots[0]; const bp = photos.find(x => x.shot === best); bp.status = 'ref'; bp.shot = null;
-  state[side] = { canvas: best.canvas, sharp: best.sharp, quad: null, shots: shots.slice(1), photos };
-  err.hidden = rejected.length === 0; err.textContent = rejected.length ? `${rejected.length} foto scartate (${rejected.join(', ')}); ${shots.length} usate.` : '';
-  const t = $('#thumb-' + side); t.innerHTML = '';
-  const im = new Image(); im.src = best.canvas.toDataURL('image/jpeg', .6); t.appendChild(im);
-  const q = document.createElement('span'); q.className = 'q'; q.textContent = `${shots.length} foto · tocca per il ritaglio`; t.appendChild(q);
-  renderStrip(side); openCrop(side);
-}));
+  progress(side, null);
+  let opened = false;
+  if (!st.canvas){ // ancora senza riferimento: il migliore (bordi trovati, poi nitidezza) fa da riferimento, gli altri si accodano
+    const cands = fresh.filter(x => x.status === 'used').sort((a, b) => (b.shot.conf - a.shot.conf) || (b.shot.sharp - a.shot.sharp));
+    if (!cands.length){ busy[side] = false; showErr(`${side === 'front' ? 'Fronte' : 'Retro'}: ${fresh.length === 1 ? 'foto rifiutata' : 'nessuna foto utilizzabile'}, ${fresh.map(x => x.reason).join('; ')}. Rifai lo scatto.`); return; }
+    state[side] = st; st.photos.push(...fresh); makeRef(side, cands[0]); opened = true;
+  }
+  for (const ph of fresh){ if (ph.status !== 'used' || !ph.shot) continue;
+    if (!ph.shot.quad){ Object.assign(ph, { status:'rejected', reason:'carta non trovata', shot:null }); continue; }
+    st.shots.push(shrinkShot(ph.shot, 1800)); }
+  const rej = fresh.filter(x => x.status === 'rejected');
+  if (rej.length) showErr(`${rej.length === 1 ? 'Una foto scartata' : rej.length + ' foto scartate'}: ${rej.map(x => x.reason).join('; ')}.`);
+  st.res = null; $('#results').hidden = true; renderStrip(side); updateAnalyze(); busy[side] = false;
+  if (opened) openCrop(side);
+}
+function makeRef(side, ph){ const st = state[side], sh = ph.shot;
+  Object.assign(st, { canvas: sh.canvas, sharp: sh.sharp, quad: null, frame: null, res: null, auto: sh.quad ? { quad: sh.quad, conf: sh.conf } : null });
+  Object.assign(ph, { status:'ref', shot:null, sides:null });
+  const t = $('#thumb-' + side); t.innerHTML = ''; const im = new Image(); im.src = sh.canvas.toDataURL('image/jpeg', .6); t.appendChild(im);
+  const q = document.createElement('span'); q.className = 'q'; q.textContent = `nitidezza ${sh.sharp.toFixed(0)} · ritaglio da confermare`; t.appendChild(q); }
+function removePhoto(side, i){ const st = state[side], ph = st && st.photos[i]; if (!ph) return;
+  st.photos.splice(i, 1); if (ph.shot) st.shots = st.shots.filter(x => x !== ph.shot);
+  st.res = null; $('#results').hidden = true;
+  if (ph.status === 'ref'){ // al suo posto la migliore tra le altre foto usate; senza, la faccia torna vuota
+    const next = st.photos.filter(x => x.status === 'used' && x.shot).sort((a, b) => (b.shot.conf - a.shot.conf) || (b.shot.sharp - a.shot.sharp))[0];
+    if (next){ st.shots = st.shots.filter(x => x !== next.shot); makeRef(side, next); renderStrip(side); updateAnalyze(); openCrop(side); return; }
+    state[side] = null; const t = $('#thumb-' + side); t.innerHTML = ''; t.textContent = side === 'front' ? 'Fronte' : 'Retro'; }
+  renderStrip(side); updateAnalyze(); }
 
 /* ---------- controllo qualità scatto ---------- */
 function toGray(canvas, maxW){
@@ -344,17 +394,18 @@ function exposure(gray){
   return { dark: dark / g.length, bright: bright / g.length };
 }
 /* ---------- le foto di una faccia: usate, scartate (perché), e qual è il riferimento ---------- */
-function miniThumb(canvas){ const c = document.createElement('canvas'); c.width = 36; c.height = 50; const k = Math.max(36 / canvas.width, 50 / canvas.height);
+function miniThumb(canvas){ const c = document.createElement('canvas'); c.width = 44; c.height = 60; const k = Math.max(44 / canvas.width, 60 / canvas.height);
   const w = canvas.width * k, h = canvas.height * k; c.getContext('2d').drawImage(canvas, (36 - w) / 2, (50 - h) / 2, w, h); return c.toDataURL('image/jpeg', .5); }
 function renderStrip(side){
   const st = state[side], el = $('#strip-' + side), note = $('#pnote-' + side); const ph = (st && st.photos) || [];
-  el.hidden = note.hidden = ph.length < 2; if (ph.length < 2) return;
+  el.hidden = note.hidden = !ph.length; if (!ph.length) return;
   el.innerHTML = ph.map((p, i) => { const badge = p.status === 'ref' ? '★' : p.status === 'used' ? (p.sides != null ? p.sides + '/4' : '✓') : '✗';
-    return `<div class="ph ${p.status}" data-i="${i}"><img src="${p.thumb}" alt=""><b>${badge}</b></div>`; }).join('');
+    return `<div class="ph ${p.status}" data-i="${i}"><img src="${p.thumb}" alt=""><b>${badge}</b><span class="x" title="Elimina">✕</span></div>`; }).join('');
   const used = ph.filter(p => p.status !== 'rejected').length, rej = ph.filter(p => p.status === 'rejected');
-  note.textContent = `${used} usate su ${ph.length} · ★ riferimento (ritaglio confermato da te, angoli e bordi)` + (rej.length ? ` · ✗ ${rej.map(r => r.reason).join(', ')}` : '')
-    + ' · dopo l’analisi: lati validi per foto · tocca una foto usata per farne il riferimento';
-  el.querySelectorAll('.ph').forEach(n => n.addEventListener('click', () => { const i = +n.dataset.i, p = ph[i];
+  note.textContent = `${used} ${used === 1 ? 'foto usata' : 'foto usate'} su ${ph.length} (massimo ${MAX_PHOTOS}) · ★ riferimento · ✕ elimina · tocca una ✓ per farne il riferimento`
+    + (rej.length ? ` · ✗ ${rej.map(r => r.reason).join('; ')}` : '') + (ph.some(x => x.sides != null) ? ' · n/4: lati misurabili dopo l’analisi' : '');
+  el.querySelectorAll('.ph').forEach(n => n.addEventListener('click', e => { const i = +n.dataset.i, p = ph[i];
+    if (e.target.classList.contains('x')){ if (confirm(`Eliminare la foto ${i + 1}?`)) removePhoto(side, i); return; }
     if (p.status === 'rejected'){ showErr(`Foto ${i + 1}: scartata, ${p.reason}.`); return; }
     if (p.status === 'ref'){ openCrop(side); return; }
     if (!confirm(`Usare la foto ${i + 1} come riferimento? Dovrai confermare il suo ritaglio.`)) return;
@@ -363,32 +414,13 @@ function renderStrip(side){
 function setReference(side, p){
   const st = state[side], s = p.shot; st.shots = (st.shots || []).filter(x => x !== s);
   // il vecchio riferimento torna tra gli scatti, con il ritaglio confermato se c'era
-  let oldQuad = st.quad; if (!oldQuad){ const a = autoQuad(st.canvas); oldQuad = a.quad ? orderQuad(a.quad) : null; }
+  let oldQuad = st.quad || (st.auto && st.auto.quad); if (!oldQuad){ const a = autoQuad(st.canvas); oldQuad = a.quad ? orderQuad(a.quad) : null; }
   const oldPhoto = st.photos.find(x => x.status === 'ref');
-  if (oldQuad){ const sh = { canvas: st.canvas, sharp: st.sharp, quad: oldQuad, conf: 1 }; st.shots.push(sh); Object.assign(oldPhoto, { status: 'used', shot: sh, sides: null }); }
+  if (oldQuad){ const sh = shrinkShot({ canvas: st.canvas, sharp: st.sharp, quad: oldQuad, conf: 1 }, 1800); st.shots.push(sh); Object.assign(oldPhoto, { status: 'used', shot: sh, sides: null }); }
   else Object.assign(oldPhoto, { status: 'rejected', reason: 'carta non trovata', shot: null, sides: null });
-  Object.assign(p, { status: 'ref', shot: null, sides: null });
-  Object.assign(st, { canvas: s.canvas, sharp: s.sharp, quad: null, frame: null, res: null });
-  const t = $('#thumb-' + side); t.innerHTML = ''; const im = new Image(); im.src = s.canvas.toDataURL('image/jpeg', .6); t.appendChild(im);
-  const q = document.createElement('span'); q.className = 'q'; q.textContent = `${st.shots.length + 1} foto · tocca per il ritaglio`; t.appendChild(q);
-  updateAnalyze(); $('#results').hidden = true; renderStrip(side); openCrop(side);
+  makeRef(side, p); updateAnalyze(); $('#results').hidden = true; renderStrip(side); openCrop(side);
 }
-function acceptImage(side, canvas){
-  const gray = toGray(canvas, 640);
-  const sh = sharpness(gray), ex = exposure(gray);
-  const probs = [];
-  if (sh < 60) probs.push(`sfocata (nitidezza ${sh.toFixed(0)}, minimo 60)`);
-  if (ex.bright > 0.04) probs.push('riflessi o sovraesposizione');
-  if (ex.dark > 0.9) probs.push('troppo scura');
-  const err = $('#err'); err.hidden = probs.length === 0;
-  err.textContent = probs.length ? `${side === 'front' ? 'Fronte' : 'Retro'}: foto rifiutata, ${probs.join(', ')}. Rifai lo scatto.` : '';
-  if (probs.length) return;
-  state[side] = { canvas, sharp: sh, quad:null }; renderStrip(side);
-  const t = $('#thumb-' + side); t.innerHTML = '';
-  const im = new Image(); im.src = canvas.toDataURL('image/jpeg', .6); t.appendChild(im);
-  const q = document.createElement('span'); q.className = 'q'; q.textContent = `nitidezza ${sh.toFixed(0)} · ritaglio da confermare`; t.appendChild(q);
-  updateAnalyze(); openCrop(side);
-}
+function acceptImage(side, canvas){ addPhotos(side, [canvas]); }  // una foto sola (banco di prova)
 function updateAnalyze(){ // si analizza solo con il fronte e il suo ritaglio confermato: il motivo sta scritto sotto il pulsante
   const f = state.front, ok = !!(f && f.quad); $('#analyze').disabled = !ok; const h = $('#analyze-hint'); h.hidden = ok;
   h.textContent = !f ? 'Per analizzare serve almeno la foto del fronte.' : 'Conferma il ritaglio del fronte: tocca la sua foto e poi «Conferma».'; }
@@ -400,7 +432,8 @@ function orderQuad(q){ const cx = q.reduce((s,p) => s + p[0], 0) / 4, cy = q.red
   return q.slice().sort((a, b) => Math.atan2(a[1]-cy, a[0]-cx) - Math.atan2(b[1]-cy, b[0]-cx)); }
 function openCrop(side){
   const src = state[side].canvas; crop.side = side; let conf = 1;
-  let q = state[side].quad; if (!q){ const a = autoQuad(src); q = a.quad; const st = a.stats;
+  let q = state[side].quad; const au = state[side].auto;
+  if (!q && au){ q = au.quad; conf = au.conf; } else if (!q){ const a = autoQuad(src); q = a.quad; const st = a.stats;
     conf = !q ? 0 : (st && Math.min(...st.map(x => x.n)) >= 0.75 && Math.min(...st.map(x => x.contrast)) >= 30) ? 1 : 0.5; }
   if (!q){ const h = src.height * 0.7, w = h * 63 / 88, x0 = (src.width - w) / 2, y0 = (src.height - h) / 2; q = [[x0,y0],[x0+w,y0],[x0+w,y0+h],[x0,y0+h]]; conf = 0; }
   crop.quad = orderQuad(q).map(p => [Math.max(0, Math.min(src.width - 1, p[0])), Math.max(0, Math.min(src.height - 1, p[1]))]);
@@ -452,7 +485,7 @@ $('#cropc').addEventListener('pointerup', endDrag); $('#cropc').addEventListener
 makePad($('#crop-pad'), (dx, dy) => { if (crop.sel < 0) return; const src = state[crop.side].canvas, p = crop.quad[crop.sel];
   crop.quad[crop.sel] = [Math.max(0, Math.min(src.width - 1, p[0] + dx)), Math.max(0, Math.min(src.height - 1, p[1] + dy))]; drawCrop(); });
 $('#crop-cancel').addEventListener('click', () => { $('#crop').hidden = true; updateAnalyze(); });
-$('#crop-redo').addEventListener('click', () => { state[crop.side].quad = null; openCrop(crop.side); });
+$('#crop-redo').addEventListener('click', () => { state[crop.side].quad = null; state[crop.side].auto = null; openCrop(crop.side); });
 function uprightQuad(q){ // lato lungo verticale: se la carta è di traverso, ruota l'ordine degli angoli
   const wa = (Math.hypot(q[1][0]-q[0][0], q[1][1]-q[0][1]) + Math.hypot(q[2][0]-q[3][0], q[2][1]-q[3][1])) / 2;
   const ha = (Math.hypot(q[2][0]-q[1][0], q[2][1]-q[1][1]) + Math.hypot(q[3][0]-q[0][0], q[3][1]-q[0][1])) / 2;
